@@ -30,6 +30,8 @@ test("admin header owns worker and auto reply controls", () => {
   assert.match(html, /data-action="auto-reply-toggle"/);
   assert.doesNotMatch(javascript, /data-action="workers-paused"/);
   assert.doesNotMatch(javascript, /id="case-auto-send"/);
+  assert.doesNotMatch(javascript, /发送控制/);
+  assert.doesNotMatch(javascript, /data-action="outbound-mode"/);
 });
 
 test("case workspace groups named sessions and reloads on runtime revision changes", () => {

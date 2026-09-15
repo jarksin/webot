@@ -652,14 +652,6 @@ function assistantMarkup() {
       <div class="form-grid">
         ${field("Worker 并发", "case-worker-concurrency", caseManagement.workerConcurrency || 2, { type: "number" })}
       </div>
-    </div>
-    <div class="section settings-card">
-      <h2 style="margin-bottom:16px">发送控制</h2>
-      <div class="field"><label>发送模式</label><div class="segmented">
-        <button data-action="outbound-mode" data-mode="dry-run" class="${settings.outboundMode !== "live" ? "active" : ""}">演练</button>
-        <button data-action="outbound-mode" data-mode="live" class="${settings.outboundMode === "live" ? "active" : ""}">正式</button>
-      </div></div>
-      ${toggle("网关写操作确认", "pad-write-confirm", settings.pad.requireWriteConfirmation, "请求附带确认标记与唯一请求 ID")}
     </div>`;
 }
 
@@ -842,7 +834,6 @@ function readAssistantForm() {
       document.querySelector("#case-worker-concurrency").value,
     ),
   };
-  settings.pad.requireWriteConfirmation = document.querySelector("#pad-write-confirm").checked;
 }
 
 function readKnowledgeForm() {
@@ -1042,11 +1033,6 @@ document.addEventListener("click", async (event) => {
     } else if (action === "delete-source") {
       settings.pad.sources.splice(selectedSource, 1);
       selectedSource = Math.max(0, selectedSource - 1);
-      dirty = true;
-      saveState.textContent = "未保存";
-      render();
-    } else if (action === "outbound-mode") {
-      settings.outboundMode = event.target.closest("[data-mode]").dataset.mode;
       dirty = true;
       saveState.textContent = "未保存";
       render();
