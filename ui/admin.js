@@ -2,6 +2,8 @@ import {
   Activity,
   BookOpen,
   Cloud,
+  ContactRound,
+  Copy,
   Eye,
   FileText,
   Inbox,
@@ -9,6 +11,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Save,
   Send,
   Settings,
@@ -22,6 +25,8 @@ const iconSet = {
   Activity,
   BookOpen,
   Cloud,
+  ContactRound,
+  Copy,
   Eye,
   FileText,
   Inbox,
@@ -29,6 +34,7 @@ const iconSet = {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Save,
   Send,
   Settings,
@@ -39,6 +45,7 @@ const iconSet = {
 
 const views = {
   cases: ["CASES", "微信 Case"],
+  directory: ["DIRECTORY", "微信 ID 目录"],
   knowledge: ["KNOWLEDGE", "知识库"],
   settings: ["CONFIG", "设置"],
 };
@@ -78,6 +85,10 @@ let knowledgeDocuments = [];
 let selectedKnowledge = null;
 let knowledgeDirty = false;
 let knowledgeMode = "source";
+let directoryEntries = [];
+let directoryQuery = "";
+let directoryType = "";
+let directorySource = "";
 
 const content = document.querySelector("#content");
 const notice = document.querySelector("#notice");
@@ -594,6 +605,8 @@ function accountEditor(source) {
         ${field("允许私聊 wxid", "source-senders", listText(source.allowedSenderIds), { textarea: true })}
         ${field("允许私聊昵称", "source-nicknames", listText(source.privateNicknameAllowlist), { textarea: true })}
         ${field("监听群聊 ID", "source-groups", listText(source.allowedChatIds), { textarea: true })}
+        ${field("屏蔽用户 wxid", "source-blocked-senders", listText(source.blockedSenderIds), { textarea: true })}
+        ${field("屏蔽群聊 ID", "source-blocked-groups", listText(source.blockedChatIds), { textarea: true })}
         ${field("群触发词", "source-triggers", listText(source.triggerKeywords), { textarea: true })}
         ${field("机器人名称", "source-bot-names", listText(source.botNames), { textarea: true })}
         ${field("关联自有账号", "source-peers", listText(source.selfChatPeers), { textarea: true })}
@@ -601,6 +614,66 @@ function accountEditor(source) {
       ${toggle("允许账号自聊", "source-allow-self", source.allowSelf, "处理发送给同一账号的消息")}
       ${toggle("接收关联账号入站", "source-accept-peers", source.acceptSelfChatPeerMessages, "仅处理关联账号发来的入站副本")}
     </div>`;
+}
+
+function directoryTypeLabel(value) {
+  return {
+    group: "群聊",
+    user: "用户",
+    official: "公众号",
+  }[value] || value;
+}
+
+function renderDirectory() {
+  const sources = settings.pad.sources || [];
+  content.innerHTML = `
+    <div class="directory-page">
+      <div class="directory-toolbar">
+        <select id="directory-source" aria-label="接入账号">
+          <option value="">全部账号</option>
+          ${sources.map((source) => `<option value="${escapeHtml(source.id)}" ${directorySource === source.id ? "selected" : ""}>${escapeHtml(source.displayName || source.id)}</option>`).join("")}
+        </select>
+        <select id="directory-type" aria-label="类型">
+          <option value="">全部类型</option>
+          <option value="group" ${directoryType === "group" ? "selected" : ""}>群聊</option>
+          <option value="user" ${directoryType === "user" ? "selected" : ""}>用户</option>
+          <option value="official" ${directoryType === "official" ? "selected" : ""}>公众号</option>
+        </select>
+        <div class="directory-search">
+          <input class="input" id="directory-query" value="${escapeHtml(directoryQuery)}" placeholder="名称或 wxid">
+          <button class="button primary icon-only" data-action="directory-search" title="查询"><i data-lucide="search"></i></button>
+        </div>
+        <button class="button secondary" data-action="sync-directory"><i data-lucide="refresh-cw"></i><span>同步通讯录</span></button>
+      </div>
+      <div class="table-wrap directory-table">
+        <table>
+          <thead><tr><th>类型</th><th>名称</th><th>wxid / 群 ID</th><th>账号</th><th>来源</th><th>最近发现</th><th></th></tr></thead>
+          <tbody>
+            ${directoryEntries.map((entry) => `
+              <tr>
+                <td>${escapeHtml(directoryTypeLabel(entry.entity_type))}</td>
+                <td><strong>${escapeHtml(entry.display_name || "未获取名称")}</strong></td>
+                <td><code>${escapeHtml(entry.entity_id)}</code></td>
+                <td>${escapeHtml(sources.find((source) => source.id === entry.source_id)?.displayName || entry.source_id)}</td>
+                <td>${entry.origin === "contacts" ? "通讯录" : "消息"}</td>
+                <td>${time(entry.last_seen || entry.updated_at)}</td>
+                <td><button class="button secondary icon-only compact-button" data-action="copy-directory-id" data-directory-id="${escapeHtml(entry.entity_id)}" title="复制 ID"><i data-lucide="copy"></i></button></td>
+              </tr>
+            `).join("") || `<tr><td colspan="7"><div class="empty compact"><div>没有匹配的 ID</div></div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+async function loadDirectory() {
+  const parameters = new URLSearchParams({ limit: "300" });
+  if (directorySource) parameters.set("sourceId", directorySource);
+  if (directoryType) parameters.set("type", directoryType);
+  if (directoryQuery) parameters.set("query", directoryQuery);
+  directoryEntries = (
+    await api(`/api/admin/directory?${parameters}`)
+  ).entries || [];
 }
 
 function assistantMarkup() {
@@ -760,6 +833,7 @@ function renderHeaderControls() {
 function render() {
   const [eyebrow, title] = views[activeView];
   document.body.classList.toggle("view-cases", activeView === "cases");
+  document.body.classList.toggle("view-directory", activeView === "directory");
   document.body.classList.toggle("view-knowledge", activeView === "knowledge");
   document.body.classList.toggle("view-settings", activeView === "settings");
   content.classList.toggle("case-content", activeView === "cases");
@@ -775,6 +849,7 @@ function render() {
   if (!settings || !status) {
     content.innerHTML = `<div class="empty"><div><i data-lucide="refresh-cw"></i><div>正在读取运行状态</div></div></div>`;
   } else if (activeView === "cases") renderCases();
+  else if (activeView === "directory") renderDirectory();
   else if (activeView === "knowledge") renderKnowledge();
   else if (activeView === "settings") renderSettings();
   renderRuntimeIdentity();
@@ -800,8 +875,10 @@ function readAccountForm() {
     enabled: document.querySelector("#source-enabled").checked,
     ignoreAllowlist: document.querySelector("#source-ignore-allowlist").checked,
     allowedSenderIds: parseList(document.querySelector("#source-senders").value),
+    blockedSenderIds: parseList(document.querySelector("#source-blocked-senders").value),
     privateNicknameAllowlist: parseList(document.querySelector("#source-nicknames").value),
     allowedChatIds: parseList(document.querySelector("#source-groups").value),
+    blockedChatIds: parseList(document.querySelector("#source-blocked-groups").value),
     triggerKeywords: parseList(document.querySelector("#source-triggers").value),
     botNames: parseList(document.querySelector("#source-bot-names").value),
     selfChatPeers: parseList(document.querySelector("#source-peers").value),
@@ -873,12 +950,13 @@ function readCurrentForm() {
 }
 
 async function load() {
-  const [settingsBody, statusBody, casesBody, agentBody, knowledgeBody] = await Promise.all([
+  const [settingsBody, statusBody, casesBody, agentBody, knowledgeBody, directoryBody] = await Promise.all([
     api("/api/admin/settings"),
     api("/api/admin/status"),
     api(`/api/admin/cases?limit=${casePageSize}&offset=${casePage * casePageSize}`),
     api("/api/admin/agent"),
     api("/api/admin/kb/documents"),
+    api("/api/admin/directory?limit=300"),
   ]);
   settings = settingsBody.settings;
   status = statusBody;
@@ -889,6 +967,7 @@ async function load() {
   agentDocument = agentBody.document;
   agentDirty = false;
   knowledgeDocuments = knowledgeBody.documents || [];
+  directoryEntries = directoryBody.entries || [];
   if (selectedKnowledge?.file) {
     const match = knowledgeDocuments.find(
       (document) => document.file === selectedKnowledge.file,
@@ -971,6 +1050,20 @@ document.addEventListener("change", async (event) => {
   }
 });
 
+document.addEventListener("keydown", async (event) => {
+  if (event.key !== "Enter" || event.target.id !== "directory-query") return;
+  event.preventDefault();
+  try {
+    directorySource = document.querySelector("#directory-source").value;
+    directoryType = document.querySelector("#directory-type").value;
+    directoryQuery = event.target.value.trim();
+    await loadDirectory();
+    render();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
+
 document.addEventListener("toggle", (event) => {
   const key = event.target.dataset?.settingsFold;
   if (!key) return;
@@ -990,6 +1083,7 @@ document.addEventListener("click", async (event) => {
     readCurrentForm();
     activeView = nav.dataset.view;
     history.replaceState(null, "", `#${activeView}`);
+    if (activeView === "directory") await loadDirectory();
     render();
     return;
   }
@@ -1036,7 +1130,9 @@ document.addEventListener("click", async (event) => {
         acceptSelfChatPeerMessages: false,
         ignoreAllowlist: false,
         allowedChatIds: [],
+        blockedChatIds: [],
         allowedSenderIds: [],
+        blockedSenderIds: [],
         privateNicknameAllowlist: [],
         triggerKeywords: ["webot"],
         botNames: ["Webot"],
@@ -1060,6 +1156,26 @@ document.addEventListener("click", async (event) => {
       });
       showNotice(result.source.ready ? "连接检测通过" : `连接未就绪：${result.source.lastError || result.source.state}`);
       await load();
+    } else if (action === "directory-search") {
+      directorySource = document.querySelector("#directory-source").value;
+      directoryType = document.querySelector("#directory-type").value;
+      directoryQuery = document.querySelector("#directory-query").value.trim();
+      await loadDirectory();
+      render();
+    } else if (action === "sync-directory") {
+      directorySource = document.querySelector("#directory-source").value;
+      const result = await api("/api/admin/directory/sync", {
+        method: "POST",
+        body: JSON.stringify({ sourceId: directorySource }),
+      });
+      await loadDirectory();
+      showNotice(`通讯录同步完成：${result.imported} 条`);
+      render();
+    } else if (action === "copy-directory-id") {
+      await navigator.clipboard.writeText(
+        event.target.closest("[data-directory-id]").dataset.directoryId,
+      );
+      showNotice("ID 已复制");
     } else if (action === "sync-kb") {
       readKnowledgeForm();
       if (dirty) throw new Error("请先保存配置");

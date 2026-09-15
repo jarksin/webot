@@ -80,6 +80,12 @@ export function acceptedMessage(message, config) {
     return { accepted: false, reason: "blocked" };
   }
   if (source?.strictPolicy) {
+    if (hasCaseInsensitive(source.blockedChatIds, message.chatId)) {
+      return { accepted: false, reason: "chat-blocked" };
+    }
+    if (hasCaseInsensitive(source.blockedSenderIds, message.senderId)) {
+      return { accepted: false, reason: "sender-blocked" };
+    }
     if (message.selfConversation && hasAiReplyPrefix(message.text)) {
       return { accepted: false, reason: "assistant-echo" };
     }

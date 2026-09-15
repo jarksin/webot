@@ -128,6 +128,7 @@ test("normalizes mentions from the current WeChatPad message context", () => {
     direction: "incoming",
     is_group: true,
     conversation_id: "52420747220@chatroom",
+    chat_name: "测试群",
     sender_id: "owner_wxid",
     recipient_id: "52420747220@chatroom",
     content: "在吗",
@@ -143,6 +144,7 @@ test("normalizes mentions from the current WeChatPad message context", () => {
 
   assert.equal(message.chatType, "group");
   assert.equal(message.chatId, "52420747220@chatroom");
+  assert.equal(message.chatName, "测试群");
   assert.deepEqual(message.mentions, ["wxid_small"]);
 });
 

@@ -25,6 +25,8 @@ test("loads source-scoped Pad policies and credentials", () => {
         accept_self_chat_peer_messages: true,
         ignore_allowlist: true,
         group_chat_ids: ["one@chatroom", "two@chatroom"],
+        blocked_chat_ids: ["blocked@chatroom"],
+        blocked_sender_ids: ["wxid_blocked"],
         private_nickname_allowlist: ["家人"]
       }
     ]
@@ -47,6 +49,14 @@ test("loads source-scoped Pad policies and credentials", () => {
     "one@chatroom",
     "two@chatroom",
   ]);
+  assert.deepEqual(
+    [...config.pad.sources[1].blockedChatIds],
+    ["blocked@chatroom"],
+  );
+  assert.deepEqual(
+    [...config.pad.sources[1].blockedSenderIds],
+    ["wxid_blocked"],
+  );
   assert.deepEqual(
     [...config.pad.sources[1].privateNicknameAllowlist],
     ["家人"],

@@ -3,7 +3,7 @@
 ## Message Flow
 
 ```text
-gateway WebSocket -> normalize -> policy -> SQLite message
+gateway WebSocket -> normalize -> identity directory -> policy -> SQLite message
                                       |
                          owner named-session routing
                                       |
@@ -43,6 +43,9 @@ Adapters convert protocol-specific events into this internal shape:
 Raw envelopes are not sent to the assistant backend. Normalized messages,
 Cases, worker sessions, progress events, drafts, and send results are persisted
 in `webot.sqlite`. Bounded assistant history remains in the session directory.
+The indexed identity directory records observed user and group IDs before
+trigger filtering. An explicit read-only gateway sync can enrich those entries
+with contact remarks, nicknames, aliases, and group names.
 
 Source deployments run Codex from the Webot repository so engineering tasks see
 the same code, Git state, and repository instructions as the service itself.
@@ -54,7 +57,9 @@ source repository.
 
 - `WEBOT_CHANNELS` selects which connectors start.
 - `WEBOT_OUTBOUND_MODE` gates all sends; only `live` performs network writes.
-- Optional chat and sender allowlists narrow accepted traffic.
+- Per-account chat and sender allowlists narrow accepted traffic. Per-account
+  sender and group blacklists always take precedence, including when allowlist
+  checks are bypassed.
 - A Case never runs two workers concurrently; new inbound during a run schedules
   one follow-up pass over the latest persisted context.
 - Every accepted message updates a stable account-scoped Case. Owner-created

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { CaseManager } from "./case-manager.js";
 import { CaseStore } from "./case-store.js";
+import { directoryEntriesFromContacts } from "./contact-directory.js";
 import { loadConfig } from "./config.js";
 import { KnowledgeBaseCloud } from "./kb-cloud.js";
 import { probeOptSource } from "./opt-status.js";
@@ -21,7 +22,12 @@ import {
 import { WEBOT_VERSION } from "./version.js";
 
 export class WebotApplication {
-  constructor({ env = process.env, settingsStore, logger = console }) {
+  constructor({
+    env = process.env,
+    settingsStore,
+    logger = console,
+    fetchImpl = globalThis.fetch,
+  }) {
     this.env = env;
     this.settingsStore = settingsStore;
     this.logger = logger;
@@ -39,6 +45,7 @@ export class WebotApplication {
     this.connectorsStarted = false;
     this.startedAt = Date.now();
     this.sourceActivator = createSourceActivator({ env });
+    this.fetch = fetchImpl;
   }
 
   async initialize() {
@@ -134,6 +141,7 @@ export class WebotApplication {
         key,
         Number(this.padIngressCounts.get(key) || 0) + 1,
       );
+      this.caseStore.observeIdentity(message);
       const classification = await this.padSenderClassifier.classify(message);
       if (classification.blocked) {
         return { accepted: false, reason: classification.reason };
@@ -185,6 +193,56 @@ export class WebotApplication {
 
   caseDetail(caseId, options) {
     return this.caseStore.detail(caseId, options);
+  }
+
+  directory(options) {
+    return this.caseStore.directory(options);
+  }
+
+  async syncDirectory(sourceId) {
+    const sources = this.config.pad.sources.filter(
+      (source) => !sourceId || source.id === sourceId,
+    );
+    if (!sources.length) throw new Error("gateway source not found");
+    const results = [];
+    for (const source of sources) {
+      if (!source.accessToken) {
+        throw new Error(`missing Access Code for ${source.id}`);
+      }
+      const response = await this.fetch(
+        `${source.apiUrl.replace(/\/$/, "")}/v1/contacts/list`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Access-Token": source.accessToken,
+          },
+          body: "{}",
+          signal: AbortSignal.timeout(15_000),
+        },
+      );
+      const body = await response.json();
+      if (
+        !response.ok ||
+        body?.Success === false ||
+        body?.success === false ||
+        (body?.Code != null && Number(body.Code) !== 0)
+      ) {
+        throw new Error(`contact list returned HTTP ${response.status}`);
+      }
+      const syncedAt = Date.now();
+      const entries = directoryEntriesFromContacts(body, source.id).map(
+        (entry) => ({ ...entry, lastSeen: syncedAt }),
+      );
+      results.push({
+        sourceId: source.id,
+        imported: this.caseStore.importDirectory(entries),
+      });
+    }
+    return {
+      sources: results,
+      imported: results.reduce((total, item) => total + item.imported, 0),
+    };
   }
 
   runCase(caseId) {

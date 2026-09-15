@@ -227,6 +227,16 @@ function normalizePadMessage(message, sourceValue) {
       (isGroup ? message.conversation_id : undefined) ??
       (from.endsWith("@chatroom") ? from : ""),
   );
+  const chatName = scalar(
+    message.ChatRoomNickName ??
+      message.chat_room_nickname ??
+      message.ChatRoomDisplayName ??
+      message.chat_room_display_name ??
+      message.ChatName ??
+      message.chat_name ??
+      message.room_name ??
+      message.conversation_name,
+  );
   const rawContent = scalar(
     message.Content ?? message.content ?? message.text ?? message.Text,
   );
@@ -294,6 +304,7 @@ function normalizePadMessage(message, sourceValue) {
     ),
     chatType: room ? "group" : "private",
     chatId: room || peerId,
+    chatName,
     conversationId,
     senderId,
     senderName,

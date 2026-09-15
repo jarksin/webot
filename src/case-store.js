@@ -92,6 +92,26 @@ export class CaseStore {
         );
       CREATE INDEX IF NOT EXISTS group_context_expiry
         ON group_context_messages(timestamp);
+      CREATE TABLE IF NOT EXISTS identity_directory (
+        source_id TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        display_name TEXT NOT NULL DEFAULT '',
+        search_names TEXT NOT NULL DEFAULT '',
+        origin TEXT NOT NULL DEFAULT 'message',
+        message_count INTEGER NOT NULL DEFAULT 0,
+        last_seen INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(source_id, entity_id)
+      );
+      CREATE INDEX IF NOT EXISTS identity_directory_name
+        ON identity_directory(
+          source_id, entity_type, display_name COLLATE NOCASE, entity_id
+        );
+      CREATE INDEX IF NOT EXISTS identity_directory_id
+        ON identity_directory(source_id, entity_id COLLATE NOCASE);
+      CREATE INDEX IF NOT EXISTS identity_directory_recent
+        ON identity_directory(source_id, last_seen DESC);
       CREATE TABLE IF NOT EXISTS cases (
         case_id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL,
@@ -257,6 +277,169 @@ export class CaseStore {
     `);
     this.groupContextWrites = 0;
     this.groupContextCounts = new Map();
+  }
+
+  upsertIdentity(entry, options = {}) {
+    const sourceId = String(entry.sourceId || "default").trim();
+    const entityType = String(entry.entityType || "").trim();
+    const entityId = String(entry.entityId || "").trim();
+    if (!sourceId || !entityType || !entityId) return false;
+    const timestamp = Number(entry.lastSeen || 0);
+    const searchNames = [
+      ...new Set(
+        (entry.searchNames || [])
+          .map((item) => String(item || "").trim())
+          .filter(Boolean),
+      ),
+    ].join("\n");
+    this.db.prepare(`
+      INSERT INTO identity_directory(
+        source_id, entity_type, entity_id, display_name, search_names,
+        origin, message_count, last_seen, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source_id, entity_id) DO UPDATE SET
+        entity_type=CASE
+          WHEN excluded.origin='contacts' THEN excluded.entity_type
+          WHEN identity_directory.origin='contacts'
+            THEN identity_directory.entity_type
+          ELSE excluded.entity_type
+        END,
+        display_name=CASE
+          WHEN excluded.origin='contacts' AND excluded.display_name!=''
+            THEN excluded.display_name
+          WHEN identity_directory.origin='contacts'
+            THEN identity_directory.display_name
+          WHEN excluded.display_name!='' THEN excluded.display_name
+          ELSE identity_directory.display_name
+        END,
+        search_names=CASE
+          WHEN excluded.origin='contacts' AND excluded.search_names!=''
+            THEN excluded.search_names
+          WHEN identity_directory.origin='contacts'
+            THEN identity_directory.search_names
+          WHEN excluded.search_names!='' THEN excluded.search_names
+          ELSE identity_directory.search_names
+        END,
+        origin=CASE
+          WHEN excluded.origin='contacts' THEN excluded.origin
+          ELSE identity_directory.origin
+        END,
+        message_count=identity_directory.message_count + excluded.message_count,
+        last_seen=MAX(identity_directory.last_seen, excluded.last_seen),
+        updated_at=excluded.updated_at
+    `).run(
+      sourceId,
+      entityType,
+      entityId,
+      String(entry.displayName || "").trim(),
+      searchNames,
+      String(entry.origin || "message"),
+      options.incrementMessage ? 1 : 0,
+      timestamp,
+      now(),
+    );
+    return true;
+  }
+
+  observeIdentity(message) {
+    const sourceId = String(message?.sourceId || "default");
+    const timestamp = Number(message?.timestamp || now());
+    let changed = false;
+    if (message?.chatType === "group" && message.chatId) {
+      changed = this.upsertIdentity({
+        sourceId,
+        entityType: "group",
+        entityId: message.chatId,
+        displayName: message.chatName,
+        searchNames: [message.chatName],
+        lastSeen: timestamp,
+      }, { incrementMessage: true }) || changed;
+    }
+    if (message?.senderId && message.senderId !== message.chatId) {
+      changed = this.upsertIdentity({
+        sourceId,
+        entityType: "user",
+        entityId: message.senderId,
+        displayName: message.senderName,
+        searchNames: [message.senderName],
+        lastSeen: timestamp,
+      }, { incrementMessage: true }) || changed;
+    } else if (message?.chatType === "private" && message.senderId) {
+      changed = this.upsertIdentity({
+        sourceId,
+        entityType: "user",
+        entityId: message.senderId,
+        displayName: message.senderName,
+        searchNames: [message.senderName],
+        lastSeen: timestamp,
+      }, { incrementMessage: true }) || changed;
+    }
+    return changed;
+  }
+
+  importDirectory(entries) {
+    let imported = 0;
+    this.db.exec("BEGIN");
+    try {
+      for (const entry of entries || []) {
+        if (this.upsertIdentity(entry)) imported += 1;
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return imported;
+  }
+
+  directory(options = {}) {
+    const sourceId = String(options.sourceId || "").trim();
+    const entityType = String(options.entityType || "").trim();
+    const query = String(options.query || "").trim();
+    const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 500);
+    const clauses = [];
+    const parameters = [];
+    if (sourceId) {
+      clauses.push("source_id=?");
+      parameters.push(sourceId);
+    }
+    if (entityType) {
+      clauses.push("entity_type=?");
+      parameters.push(entityType);
+    }
+    if (query) {
+      const escaped = query.replace(/[\\%_]/g, "\\$&");
+      clauses.push(`(
+        entity_id=? COLLATE NOCASE OR
+        display_name=? COLLATE NOCASE OR
+        entity_id LIKE ? ESCAPE '\\' COLLATE NOCASE OR
+        display_name LIKE ? ESCAPE '\\' COLLATE NOCASE OR
+        search_names LIKE ? ESCAPE '\\' COLLATE NOCASE
+      )`);
+      parameters.push(
+        query,
+        query,
+        `${escaped}%`,
+        `${escaped}%`,
+        `%${escaped}%`,
+      );
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    return this.db.prepare(`
+      SELECT source_id, entity_type, entity_id, display_name, search_names,
+        origin, message_count, last_seen, updated_at
+      FROM identity_directory
+      ${where}
+      ORDER BY
+        CASE WHEN entity_id=? COLLATE NOCASE THEN 0
+             WHEN display_name=? COLLATE NOCASE THEN 1
+             ELSE 2 END,
+        last_seen DESC, display_name COLLATE NOCASE, entity_id
+      LIMIT ?
+    `).all(...parameters, query, query, limit).map((entry) => ({
+      ...entry,
+      searchNames: String(entry.search_names || "").split("\n").filter(Boolean),
+    }));
   }
 
   close() {

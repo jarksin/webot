@@ -15,12 +15,25 @@ const css = fs.readFileSync(
   "utf8",
 );
 
-test("admin navigation keeps cases, knowledge, and settings only", () => {
+test("admin navigation exposes cases, ID directory, knowledge, and settings", () => {
   assert.match(html, /data-view="cases"/);
+  assert.match(html, /data-view="directory"/);
   assert.match(html, /data-view="knowledge"/);
   assert.match(html, /data-view="settings"/);
   assert.doesNotMatch(html, /data-view="overview"/);
   assert.doesNotMatch(html, /data-view="release"/);
+});
+
+test("account settings expose source blacklists and a searchable ID directory", () => {
+  assert.match(javascript, /屏蔽用户 wxid/);
+  assert.match(javascript, /屏蔽群聊 ID/);
+  assert.match(javascript, /source-blocked-senders/);
+  assert.match(javascript, /source-blocked-groups/);
+  assert.match(javascript, /function renderDirectory\(\)/);
+  assert.match(javascript, /名称或 wxid/);
+  assert.match(javascript, /data-action="sync-directory"/);
+  assert.match(javascript, /data-action="copy-directory-id"/);
+  assert.match(css, /\.directory-toolbar/);
 });
 
 test("admin header owns worker and auto reply controls", () => {

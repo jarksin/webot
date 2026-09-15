@@ -193,7 +193,9 @@ test("allowlist bypass accepts all private chats and triggered groups", () => {
     acceptSelfChatPeerMessages: false,
     ignoreAllowlist: true,
     allowedChatIds: new Set(),
+    blockedChatIds: new Set(["blocked@chatroom"]),
     allowedSenderIds: new Set(),
+    blockedSenderIds: new Set(["wxid_blocked"]),
     privateNicknameAllowlist: new Set(),
     triggerKeywords: new Set(["小水瓜"]),
     botNames: new Set(["小水瓜"]),
@@ -224,6 +226,20 @@ test("allowlist bypass accepts all private chats and triggered groups", () => {
 
   assert.equal(acceptedMessage(privateMessage, sourceConfig).accepted, true);
   assert.equal(acceptedMessage(groupMessage, sourceConfig).text, "ping");
+  assert.equal(
+    acceptedMessage(
+      { ...privateMessage, senderId: "WXID_BLOCKED" },
+      sourceConfig,
+    ).reason,
+    "sender-blocked",
+  );
+  assert.equal(
+    acceptedMessage(
+      { ...groupMessage, chatId: "BLOCKED@CHATROOM" },
+      sourceConfig,
+    ).reason,
+    "chat-blocked",
+  );
   assert.deepEqual(
     acceptedMessage(
       { ...groupMessage, text: "群聊上下文" },

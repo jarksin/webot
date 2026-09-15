@@ -98,6 +98,20 @@ test("serves local AGENTS and knowledge editor APIs", async () => {
         hasMore: false,
       };
     },
+    directory(options) {
+      return [{
+        source_id: options.sourceId || "small",
+        entity_type: options.entityType || "group",
+        entity_id: "123@chatroom",
+        display_name: "项目群",
+      }];
+    },
+    syncDirectory(sourceId) {
+      return {
+        imported: 1,
+        sources: [{ sourceId: sourceId || "small", imported: 1 }],
+      };
+    },
     caseManager: { status() { return {}; } },
     startConnectors() {},
     stopConnectors() {},
@@ -178,6 +192,15 @@ test("serves local AGENTS and knowledge editor APIs", async () => {
     ).deleted.file,
     "owner/profile.md",
   );
+  const directory = await fetch(
+    `${base}/api/admin/directory?sourceId=small&type=group&query=项目`,
+  ).then((response) => response.json());
+  assert.equal(directory.entries[0].entity_id, "123@chatroom");
+  const synced = await fetch(`${base}/api/admin/directory/sync`, {
+    method: "POST",
+    body: JSON.stringify({ sourceId: "small" }),
+  }).then((response) => response.json());
+  assert.equal(synced.imported, 1);
 
   await app.stop();
 });

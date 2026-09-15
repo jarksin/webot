@@ -147,6 +147,72 @@ test("persists a WeChat case, worker session, draft, and send result", async () 
   caseStore.close();
 });
 
+test("indexes observed and synced identities for bounded lookup", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-directory-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  caseStore.observeIdentity({
+    ...groupMessage("directory-group", "hello"),
+    chatId: "project@chatroom",
+    chatName: "项目讨论群",
+    senderId: "wxid_member",
+    senderName: "群成员甲",
+  });
+  caseStore.importDirectory([
+    {
+      sourceId: "small",
+      entityType: "user",
+      entityId: "wxid_friend",
+      displayName: "好友备注",
+      searchNames: ["好友备注", "好友昵称"],
+      origin: "contacts",
+    },
+    {
+      sourceId: "small",
+      entityType: "official",
+      entityId: "service-account",
+      displayName: "服务号备注",
+      searchNames: ["服务号备注"],
+      origin: "contacts",
+    },
+  ]);
+  caseStore.observeIdentity({
+    transport: "pad",
+    sourceId: "small",
+    timestamp: Date.now(),
+    chatType: "private",
+    chatId: "service-account",
+    senderId: "service-account",
+    senderName: "临时名称",
+  });
+
+  assert.deepEqual(
+    caseStore.directory({ sourceId: "small", query: "项目" })
+      .map((entry) => entry.entity_id),
+    ["project@chatroom"],
+  );
+  assert.deepEqual(
+    caseStore.directory({ sourceId: "small", query: "好友昵称" })
+      .map((entry) => entry.entity_id),
+    ["wxid_friend"],
+  );
+  assert.equal(
+    caseStore.directory({ sourceId: "small", entityType: "user" }).length,
+    2,
+  );
+  assert.deepEqual(
+    caseStore.directory({ sourceId: "small", query: "服务号备注" })
+      .map((entry) => [entry.entity_type, entry.display_name]),
+    [["official", "服务号备注"]],
+  );
+  const indexes = caseStore.db
+    .prepare("SELECT name FROM sqlite_master WHERE type='index'")
+    .all()
+    .map((row) => row.name);
+  assert.ok(indexes.includes("identity_directory_name"));
+  assert.ok(indexes.includes("identity_directory_id"));
+  caseStore.close();
+});
+
 test("stores allowed untriggered group messages and injects indexed context", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-context-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));

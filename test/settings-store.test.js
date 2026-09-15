@@ -96,6 +96,8 @@ test("serialized opt settings omit callback compatibility fields", () => {
         apiUrl: "http://127.0.0.1:18102/api",
         accessToken: "secret",
         ignoreAllowlist: true,
+        blockedChatIds: ["blocked@chatroom"],
+        blockedSenderIds: ["wxid_blocked"],
         ingressMode: "callback",
         callbackUrl: "http://legacy.invalid/webhooks/pad",
         manageCallback: true,
@@ -110,6 +112,8 @@ test("serialized opt settings omit callback compatibility fields", () => {
   );
   assert.equal(source.wsUrl, "ws://127.0.0.1:18102/ws/wxid_small");
   assert.equal(source.ignoreAllowlist, true);
+  assert.deepEqual(source.blockedChatIds, ["blocked@chatroom"]);
+  assert.deepEqual(source.blockedSenderIds, ["wxid_blocked"]);
   assert.equal("ingressMode" in source, false);
   assert.equal("callbackUrl" in source, false);
   assert.equal("manageCallback" in source, false);

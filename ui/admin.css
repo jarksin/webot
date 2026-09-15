@@ -305,6 +305,18 @@ textarea { min-height: 86px; resize: vertical; line-height: 1.5; }
 .knowledge-preview p { margin: 7px 0; white-space: pre-wrap; }
 .knowledge-preview .preview-list { padding-left: 14px; }
 .knowledge-preview pre { padding: 12px; overflow: auto; color: #e8edf3; border-radius: var(--radius); background: #182433; }
+.directory-page { max-width: 1240px; margin: 0 auto; }
+.directory-toolbar {
+  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: minmax(140px, 190px) minmax(120px, 150px) minmax(260px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.directory-search { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.directory-table table { min-width: 900px; }
+.directory-table td code { font-size: 10px; }
+.directory-table td strong { font-size: 11px; }
 .empty { min-height: 160px; padding: 22px; color: var(--muted); border: 1px dashed var(--line-strong); border-radius: var(--radius); display: grid; place-items: center; text-align: center; }
 .empty svg { width: 26px; height: 26px; margin-bottom: 9px; }
 .empty.compact { min-height: 110px; border: 0; }
@@ -385,6 +397,8 @@ body.case-resizing { cursor: col-resize; user-select: none; }
   .account-list { display: flex; overflow-x: auto; }
   .account-item { min-width: 190px; border-right: 1px solid var(--line); border-bottom: 0; }
   .knowledge-studio { grid-template-columns: 220px minmax(0, 1fr); }
+  .directory-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .directory-search { grid-column: 1 / -1; }
 }
 
 @media (max-width: 680px) {
@@ -423,6 +437,8 @@ body.case-resizing { cursor: col-resize; user-select: none; }
   .knowledge-toolbar .segmented { grid-column: 1 / -1; grid-row: 2; }
   .knowledge-editor-shell { padding: 9px; }
   .knowledge-editor-shell .document-editor, .knowledge-preview { min-height: 360px; }
+  .directory-toolbar { grid-template-columns: 1fr; }
+  .directory-search { grid-column: auto; }
   .view-cases main { height: calc(100vh - 94px); }
   .case-workspace { grid-template-columns: 1fr; grid-template-rows: minmax(205px, 38%) minmax(0, 62%); }
   .case-resizer { display: none; }

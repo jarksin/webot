@@ -238,6 +238,32 @@ export function createServer({
         }
         if (
           request.method === "GET" &&
+          url.pathname === "/api/admin/directory"
+        ) {
+          respond(response, 200, {
+            ok: true,
+            entries: application.directory({
+              sourceId: url.searchParams.get("sourceId"),
+              entityType: url.searchParams.get("type"),
+              query: url.searchParams.get("query"),
+              limit: url.searchParams.get("limit"),
+            }),
+          });
+          return;
+        }
+        if (
+          request.method === "POST" &&
+          url.pathname === "/api/admin/directory/sync"
+        ) {
+          const body = JSON.parse((await readBody(request)).toString("utf8"));
+          respond(response, 200, {
+            ok: true,
+            ...(await application.syncDirectory(String(body.sourceId || ""))),
+          });
+          return;
+        }
+        if (
+          request.method === "GET" &&
           url.pathname === "/api/admin/cases"
         ) {
           const page = application.listCases({
