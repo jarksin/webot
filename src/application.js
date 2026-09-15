@@ -4,6 +4,7 @@ import { CaseStore } from "./case-store.js";
 import { loadConfig } from "./config.js";
 import { KnowledgeBaseCloud } from "./kb-cloud.js";
 import { probeOptSource } from "./opt-status.js";
+import { PadSenderClassifier } from "./pad-sender-classifier.js";
 import { createProvider } from "./providers.js";
 import { codexRuntimeStatus } from "./codex-provider.js";
 import { WebotRuntime } from "./runtime.js";
@@ -30,6 +31,7 @@ export class WebotApplication {
     this.padClients = [];
     this.padStatuses = new Map();
     this.padIngressCounts = new Map();
+    this.padSenderClassifier = null;
     this.padTimer = null;
     this.caseStore = null;
     this.caseManager = null;
@@ -91,6 +93,9 @@ export class WebotApplication {
       transports,
       logger: this.logger,
     });
+    this.padSenderClassifier = new PadSenderClassifier(this.config.pad, {
+      logger: this.logger,
+    });
     this.caseManager = new CaseManager({
       config: this.config,
       provider,
@@ -129,6 +134,10 @@ export class WebotApplication {
         key,
         Number(this.padIngressCounts.get(key) || 0) + 1,
       );
+      const classification = await this.padSenderClassifier.classify(message);
+      if (classification.blocked) {
+        return { accepted: false, reason: classification.reason };
+      }
     }
     return this.caseManager.receive(message);
   }

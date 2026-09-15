@@ -38,7 +38,7 @@ test("account settings expose an allowlist bypass that keeps group triggers", ()
   assert.match(javascript, /id="\$\{id\}"/);
   assert.match(javascript, /忽略白名单/);
   assert.match(javascript, /source-ignore-allowlist/);
-  assert.match(javascript, /所有群聊均可通过 @ 或触发词触发/);
+  assert.match(javascript, /系统账号、公众号和黑名单仍过滤/);
 });
 
 test("case workspace groups named sessions and reloads on runtime revision changes", () => {

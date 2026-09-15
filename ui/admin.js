@@ -589,7 +589,7 @@ function accountEditor(source) {
     </div>
     <div class="form-section">
       <h2>监听与触发规则</h2>
-      ${toggle("忽略白名单", "source-ignore-allowlist", source.ignoreAllowlist === true, "允许所有私聊；所有群聊均可通过 @ 或触发词触发，黑名单仍生效")}
+      ${toggle("忽略白名单", "source-ignore-allowlist", source.ignoreAllowlist === true, "允许所有个人私聊；所有群聊均可通过 @ 或触发词触发，系统账号、公众号和黑名单仍过滤")}
       <div class="form-grid">
         ${field("允许私聊 wxid", "source-senders", listText(source.allowedSenderIds), { textarea: true })}
         ${field("允许私聊昵称", "source-nicknames", listText(source.privateNicknameAllowlist), { textarea: true })}
