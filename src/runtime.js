@@ -88,10 +88,14 @@ export function acceptedMessage(message, config) {
         };
       }
     } else if (message.chatType === "group") {
-      if (!hasCaseInsensitive(source.allowedChatIds, message.chatId)) {
+      if (
+        !source.ignoreAllowlist &&
+        !hasCaseInsensitive(source.allowedChatIds, message.chatId)
+      ) {
         return { accepted: false, reason: "chat-not-allowed" };
       }
     } else if (
+      !source.ignoreAllowlist &&
       !hasCaseInsensitive(source.allowedSenderIds, message.senderId) &&
       !hasCaseInsensitive(source.privateNicknameAllowlist, message.senderName) &&
       !privateBotPrefix

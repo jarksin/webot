@@ -95,6 +95,7 @@ test("serialized opt settings omit callback compatibility fields", () => {
         wsUrl: "ws://127.0.0.1:18102/ws/wxid_small",
         apiUrl: "http://127.0.0.1:18102/api",
         accessToken: "secret",
+        ignoreAllowlist: true,
         ingressMode: "callback",
         callbackUrl: "http://legacy.invalid/webhooks/pad",
         manageCallback: true,
@@ -108,6 +109,7 @@ test("serialized opt settings omit callback compatibility fields", () => {
     ["owner_wxid", "wxid_small"],
   );
   assert.equal(source.wsUrl, "ws://127.0.0.1:18102/ws/wxid_small");
+  assert.equal(source.ignoreAllowlist, true);
   assert.equal("ingressMode" in source, false);
   assert.equal("callbackUrl" in source, false);
   assert.equal("manageCallback" in source, false);

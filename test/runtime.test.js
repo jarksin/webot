@@ -183,6 +183,66 @@ test("applies source-scoped self, group, and nickname policies", () => {
   }, sourceConfig).reason, "chat-not-allowed");
 });
 
+test("allowlist bypass accepts all private chats and triggered groups", () => {
+  const sourceConfig = config();
+  sourceConfig.pad.sources = [{
+    id: "small",
+    selfId: "wxid_small",
+    allowSelf: false,
+    selfChatPeers: new Set(),
+    acceptSelfChatPeerMessages: false,
+    ignoreAllowlist: true,
+    allowedChatIds: new Set(),
+    allowedSenderIds: new Set(),
+    privateNicknameAllowlist: new Set(),
+    triggerKeywords: new Set(["小水瓜"]),
+    botNames: new Set(["小水瓜"]),
+    strictPolicy: true,
+  }];
+  const privateMessage = {
+    transport: "pad",
+    sourceId: "small",
+    messageId: "1",
+    chatType: "private",
+    chatId: "wxid_stranger",
+    senderId: "wxid_stranger",
+    senderName: "陌生人",
+    selfId: "wxid_small",
+    text: "你好",
+    mentions: [],
+    selfConversation: false,
+    selfPeer: false,
+    direction: "incoming",
+  };
+  const groupMessage = {
+    ...privateMessage,
+    chatType: "group",
+    chatId: "new@chatroom",
+    senderId: "wxid_member",
+    text: "小水瓜 ping",
+  };
+
+  assert.equal(acceptedMessage(privateMessage, sourceConfig).accepted, true);
+  assert.equal(acceptedMessage(groupMessage, sourceConfig).text, "ping");
+  assert.deepEqual(
+    acceptedMessage(
+      { ...groupMessage, text: "群聊上下文" },
+      sourceConfig,
+    ),
+    {
+      accepted: false,
+      reason: "group-not-triggered",
+      retainGroupContext: true,
+    },
+  );
+
+  sourceConfig.policy.blockedSenderIds.add("wxid_stranger");
+  assert.equal(
+    acceptedMessage(privateMessage, sourceConfig).reason,
+    "blocked",
+  );
+});
+
 test("uses account-scoped bot names and trigger keywords", () => {
   const sourceConfig = config();
   sourceConfig.pad.sources = [{

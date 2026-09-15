@@ -23,6 +23,7 @@ test("loads source-scoped Pad policies and credentials", () => {
         self_wxid: "wxid_small",
         access_token_env: "SMALL_TOKEN",
         accept_self_chat_peer_messages: true,
+        ignore_allowlist: true,
         group_chat_ids: ["one@chatroom", "two@chatroom"],
         private_nickname_allowlist: ["家人"]
       }
@@ -39,7 +40,9 @@ test("loads source-scoped Pad policies and credentials", () => {
   assert.equal(config.pad.sources[0].accessToken, "main-secret");
   assert.equal(config.pad.sources[0].credentialSource, "environment");
   assert.equal(config.pad.sources[0].acceptSelfChatPeerMessages, false);
+  assert.equal(config.pad.sources[0].ignoreAllowlist, false);
   assert.equal(config.pad.sources[1].acceptSelfChatPeerMessages, true);
+  assert.equal(config.pad.sources[1].ignoreAllowlist, true);
   assert.deepEqual([...config.pad.sources[1].allowedChatIds], [
     "one@chatroom",
     "two@chatroom",

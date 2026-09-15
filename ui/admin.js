@@ -589,6 +589,7 @@ function accountEditor(source) {
     </div>
     <div class="form-section">
       <h2>监听与触发规则</h2>
+      ${toggle("忽略白名单", "source-ignore-allowlist", source.ignoreAllowlist === true, "允许所有私聊；所有群聊均可通过 @ 或触发词触发，黑名单仍生效")}
       <div class="form-grid">
         ${field("允许私聊 wxid", "source-senders", listText(source.allowedSenderIds), { textarea: true })}
         ${field("允许私聊昵称", "source-nicknames", listText(source.privateNicknameAllowlist), { textarea: true })}
@@ -797,6 +798,7 @@ function readAccountForm() {
     accessToken: document.querySelector("#source-token").value,
     accessTokenFile: document.querySelector("#source-token-file").value.trim(),
     enabled: document.querySelector("#source-enabled").checked,
+    ignoreAllowlist: document.querySelector("#source-ignore-allowlist").checked,
     allowedSenderIds: parseList(document.querySelector("#source-senders").value),
     privateNicknameAllowlist: parseList(document.querySelector("#source-nicknames").value),
     allowedChatIds: parseList(document.querySelector("#source-groups").value),
@@ -1032,6 +1034,7 @@ document.addEventListener("click", async (event) => {
         allowSelf: false,
         selfChatPeers: [],
         acceptSelfChatPeerMessages: false,
+        ignoreAllowlist: false,
         allowedChatIds: [],
         allowedSenderIds: [],
         privateNicknameAllowlist: [],

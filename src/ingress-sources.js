@@ -75,6 +75,10 @@ export function normalizeSource(value, env, defaults) {
         value.acceptSelfChatPeerMessages,
       false,
     ),
+    ignoreAllowlist: boolean(
+      value.ignore_allowlist ?? value.ignoreAllowlist,
+      false,
+    ),
     allowedChatIds: new Set(
       stringList(value.group_chat_ids ?? value.allowedChatIds),
     ),
@@ -117,6 +121,7 @@ export function loadPadSources(env, defaults, configuredSources) {
         allowSelf: defaults.allowSelf,
         selfChatPeers: new Set(),
         acceptSelfChatPeerMessages: false,
+        ignoreAllowlist: false,
         allowedChatIds: defaults.allowedChatIds,
         allowedSenderIds: defaults.allowedSenderIds,
         privateNicknameAllowlist: new Set(),

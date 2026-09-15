@@ -34,6 +34,13 @@ test("admin header owns worker and auto reply controls", () => {
   assert.doesNotMatch(javascript, /data-action="outbound-mode"/);
 });
 
+test("account settings expose an allowlist bypass that keeps group triggers", () => {
+  assert.match(javascript, /id="\$\{id\}"/);
+  assert.match(javascript, /忽略白名单/);
+  assert.match(javascript, /source-ignore-allowlist/);
+  assert.match(javascript, /所有群聊均可通过 @ 或触发词触发/);
+});
+
 test("case workspace groups named sessions and reloads on runtime revision changes", () => {
   assert.match(html, /name="webot-runtime-revision"/);
   assert.match(javascript, /caseSessionOptions/);
