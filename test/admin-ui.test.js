@@ -59,6 +59,11 @@ test("case detail uses Codex Live Progress instead of the worker session card", 
   assert.match(css, /\.codex-progress-panel/);
 });
 
+test("owner intermediate replies are described as private self conversations only", () => {
+  assert.match(javascript, /本人私聊接收中间回复/);
+  assert.match(javascript, /群聊及其他私聊不发送/);
+});
+
 test("case list width is narrower, draggable, persistent, and mobile-safe", () => {
   assert.match(javascript, /caseListDefaultWidth = 300/);
   assert.match(javascript, /data-case-resizer/);

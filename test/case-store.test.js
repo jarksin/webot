@@ -878,8 +878,8 @@ test("reuses the persisted Codex session on the next case run", async () => {
   caseStore.close();
 });
 
-test("sends natural-language intermediate items only for owner tasks", async () => {
-  async function runFor(access) {
+test("sends intermediate items only to owner self conversations", async () => {
+  async function runFor(access, incoming = message()) {
     const directory = await fs.mkdtemp(
       path.join(os.tmpdir(), `webot-intermediate-${access}-`),
     );
@@ -897,11 +897,11 @@ test("sends natural-language intermediate items only for owner tasks", async () 
         sources: [{
           id: "small",
           strictPolicy: true,
-          allowSelf: false,
+          allowSelf: true,
           selfChatPeers: new Set(["owner_wxid"]),
           acceptSelfChatPeerMessages: true,
-          allowedChatIds: new Set(),
-          allowedSenderIds: new Set(),
+          allowedChatIds: new Set(["room@chatroom"]),
+          allowedSenderIds: new Set(["owner_wxid"]),
           privateNicknameAllowlist: new Set(),
           triggerKeywords: new Set(["webot"]),
           botNames: new Set(["Webot"]),
@@ -944,7 +944,7 @@ test("sends natural-language intermediate items only for owner tasks", async () 
       requesterAccess: () => access,
       logger: { info() {}, warn() {}, error() {} },
     });
-    const received = await manager.receive(message());
+    const received = await manager.receive(incoming);
     manager.enqueue(received.caseId, true);
     await waitFor(() => manager.status().active === 0);
     const liveProgress = caseStore
@@ -957,10 +957,43 @@ test("sends natural-language intermediate items only for owner tasks", async () 
   }
 
   const owner = await runFor("owner");
+  const ownerSelf = await runFor("owner", {
+    ...message("self-message"),
+    chatId: "wxid_small",
+    conversationId: "self:wxid_small",
+    senderId: "wxid_small",
+    selfId: "wxid_small",
+    replyTarget: "wxid_small",
+    selfPeer: false,
+    exactSelfChat: true,
+  });
+  const ownerGroup = await runFor(
+    "owner",
+    groupMessage("group-message", "webot 检查配置"),
+  );
+  const ownerOrdinaryPrivate = await runFor("owner", {
+    ...message("ordinary-private"),
+    conversationId: "private:small:owner_wxid",
+    selfConversation: false,
+    selfPeer: false,
+    exactSelfChat: false,
+  });
   const publicRequester = await runFor("public");
   assert.deepEqual(owner.sent.map((item) => item.text), ["正在检查配置"]);
+  assert.deepEqual(
+    ownerSelf.sent.map((item) => item.text),
+    ["正在检查配置"],
+  );
+  assert.deepEqual(ownerGroup.sent, []);
+  assert.deepEqual(ownerOrdinaryPrivate.sent, []);
   assert.deepEqual(publicRequester.sent, []);
   assert.deepEqual(owner.liveProgress, ["正在检查配置"]);
+  assert.deepEqual(ownerSelf.liveProgress, ["正在检查配置"]);
+  assert.deepEqual(ownerGroup.liveProgress, ["正在检查配置"]);
+  assert.deepEqual(
+    ownerOrdinaryPrivate.liveProgress,
+    ["正在检查配置"],
+  );
   assert.deepEqual(publicRequester.liveProgress, ["正在检查配置"]);
 });
 

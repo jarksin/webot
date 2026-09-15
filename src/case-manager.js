@@ -5,6 +5,15 @@ import {
   runtimeOverrides,
 } from "./control-commands.js";
 
+function acceptsOwnerIntermediateItems(message) {
+  return Boolean(
+    message?.transport === "pad" &&
+      message.chatType === "private" &&
+      message.selfConversation === true &&
+      (message.selfPeer === true || message.exactSelfChat === true),
+  );
+}
+
 export class CaseManager {
   constructor({
     config,
@@ -248,6 +257,7 @@ export class CaseManager {
       );
       if (this.caseSettings().ownerIntermediateItems !== true) return;
       if (this.requesterAccess(trigger.message) !== "owner") return;
+      if (!acceptsOwnerIntermediateItems(trigger.message)) return;
       const transport = this.transports[trigger.message.transport];
       if (!transport) return;
       try {
