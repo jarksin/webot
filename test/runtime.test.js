@@ -241,6 +241,17 @@ test("allowlist bypass accepts all private chats and triggered groups", () => {
     acceptedMessage(privateMessage, sourceConfig).reason,
     "blocked",
   );
+  assert.equal(
+    acceptedMessage(
+      {
+        ...privateMessage,
+        chatId: "gh_240fbf8b33e4",
+        senderId: "gh_240fbf8b33e4",
+      },
+      sourceConfig,
+    ).reason,
+    "official-account",
+  );
 });
 
 test("uses account-scoped bot names and trigger keywords", () => {

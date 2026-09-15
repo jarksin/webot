@@ -30,6 +30,14 @@ function hasBotNamePrefix(text, botNames) {
   });
 }
 
+function isPadOfficialAccount(message) {
+  return (
+    message.transport === "pad" &&
+    message.chatType === "private" &&
+    /^gh_/i.test(String(message.senderId || "").trim())
+  );
+}
+
 function stripTrigger(text, triggers, botNames) {
   let output = text.trim();
   for (const prefix of [...triggers, ...botNames]) {
@@ -56,6 +64,9 @@ export function acceptedMessage(message, config) {
     hasBotNamePrefix(message.text, botNames);
   if (message.transport === "pad" && config.pad.sources.length && !source) {
     return { accepted: false, reason: "source-not-configured" };
+  }
+  if (isPadOfficialAccount(message)) {
+    return { accepted: false, reason: "official-account" };
   }
   if (
     !source?.strictPolicy &&
