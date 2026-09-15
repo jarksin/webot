@@ -197,9 +197,25 @@ export function loadConfig(env = process.env, settings = {}) {
         assistantSettings.codexModel,
         env.WEBOT_CODEX_MODEL || "",
       ),
+      selfCodexModel: value(
+        assistantSettings.selfCodexModel,
+        env.WEBOT_CODEX_SELF_MODEL || "",
+      ),
+      otherCodexModel: value(
+        assistantSettings.otherCodexModel,
+        env.WEBOT_CODEX_OTHER_MODEL || "",
+      ),
       reasoningEffort: value(
         assistantSettings.reasoningEffort,
         env.WEBOT_CODEX_REASONING_EFFORT || "",
+      ),
+      selfReasoningEffort: value(
+        assistantSettings.selfReasoningEffort,
+        env.WEBOT_CODEX_SELF_REASONING_EFFORT || "",
+      ),
+      otherReasoningEffort: value(
+        assistantSettings.otherReasoningEffort,
+        env.WEBOT_CODEX_OTHER_REASONING_EFFORT || "",
       ),
       serviceTier: value(
         assistantSettings.serviceTier,

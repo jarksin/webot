@@ -757,8 +757,10 @@ function assistantMarkup() {
           ${field("Codex 可执行文件", "assistant-codex-bin", assistant.codexBin || codex.binary, { full: true })}
           ${field("CODEX_HOME", "assistant-codex-home", assistant.codexHome || codex.home, { full: true })}
           ${field("工作目录", "assistant-working-directory", assistant.workingDirectory || effective.workingDirectory, { full: true })}
-          ${field("Codex 模型", "assistant-codex-model", assistant.codexModel || effective.model, { note: "留空则继承本机配置" })}
-          ${field("Reasoning Effort", "assistant-reasoning-effort", assistant.reasoningEffort || effective.reasoningEffort, { note: "low / medium / high / xhigh" })}
+          ${field("自聊默认模型", "assistant-self-codex-model", assistant.selfCodexModel || assistant.codexModel || effective.model, { note: "账号自聊及关联本人账号私聊" })}
+          ${field("自聊默认 Effort", "assistant-self-reasoning-effort", assistant.selfReasoningEffort || assistant.reasoningEffort || effective.reasoningEffort, { note: "low / medium / high / xhigh" })}
+          ${field("其他人默认模型", "assistant-other-codex-model", assistant.otherCodexModel || assistant.codexModel || effective.model, { note: "其他私聊和全部群聊" })}
+          ${field("其他人默认 Effort", "assistant-other-reasoning-effort", assistant.otherReasoningEffort || assistant.reasoningEffort || effective.reasoningEffort, { note: "low / medium / high / xhigh" })}
           ${field("Service Tier", "assistant-service-tier", assistant.serviceTier || effective.serviceTier, { note: "standard / priority / flex" })}
           ${field("LLM Base URL", "assistant-base-url", assistant.llmBaseUrl, { full: true })}
           ${field("OpenAI Compatible 模型", "assistant-model", assistant.llmModel)}
@@ -954,8 +956,10 @@ function readAssistantForm() {
     codexBin: document.querySelector("#assistant-codex-bin").value.trim(),
     codexHome: document.querySelector("#assistant-codex-home").value.trim(),
     workingDirectory: document.querySelector("#assistant-working-directory").value.trim(),
-    codexModel: document.querySelector("#assistant-codex-model").value.trim(),
-    reasoningEffort: document.querySelector("#assistant-reasoning-effort").value.trim(),
+    selfCodexModel: document.querySelector("#assistant-self-codex-model").value.trim(),
+    selfReasoningEffort: document.querySelector("#assistant-self-reasoning-effort").value.trim(),
+    otherCodexModel: document.querySelector("#assistant-other-codex-model").value.trim(),
+    otherReasoningEffort: document.querySelector("#assistant-other-reasoning-effort").value.trim(),
     serviceTier: document.querySelector("#assistant-service-tier").value.trim(),
   });
   settings.caseManagement = {

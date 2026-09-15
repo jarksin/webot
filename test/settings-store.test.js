@@ -119,6 +119,22 @@ test("serialized opt settings omit callback compatibility fields", () => {
   assert.equal("manageCallback" in source, false);
 });
 
+test("loads separate Codex defaults for self chats and other conversations", () => {
+  const config = loadConfig({
+    WEBOT_CODEX_MODEL: "legacy-model",
+    WEBOT_CODEX_REASONING_EFFORT: "low",
+    WEBOT_CODEX_SELF_MODEL: "self-model",
+    WEBOT_CODEX_SELF_REASONING_EFFORT: "high",
+    WEBOT_CODEX_OTHER_MODEL: "other-model",
+    WEBOT_CODEX_OTHER_REASONING_EFFORT: "medium",
+  });
+  assert.equal(config.assistant.codexModel, "legacy-model");
+  assert.equal(config.assistant.selfCodexModel, "self-model");
+  assert.equal(config.assistant.selfReasoningEffort, "high");
+  assert.equal(config.assistant.otherCodexModel, "other-model");
+  assert.equal(config.assistant.otherReasoningEffort, "medium");
+});
+
 test("new installations use an isolated workspace under the data directory", () => {
   const config = loadConfig({
     WEBOT_DATA_DIR: "/tmp/webot-user-data",

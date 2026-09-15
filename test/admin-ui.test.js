@@ -81,6 +81,15 @@ test("owner intermediate replies are described as private self conversations onl
   assert.match(javascript, /群聊及其他私聊不发送/);
 });
 
+test("assistant settings split Codex defaults between self chat and others", () => {
+  assert.match(javascript, /自聊默认模型/);
+  assert.match(javascript, /assistant-self-codex-model/);
+  assert.match(javascript, /assistant-self-reasoning-effort/);
+  assert.match(javascript, /其他人默认模型/);
+  assert.match(javascript, /assistant-other-codex-model/);
+  assert.match(javascript, /assistant-other-reasoning-effort/);
+});
+
 test("case list width is narrower, draggable, persistent, and mobile-safe", () => {
   assert.match(javascript, /caseListDefaultWidth = 300/);
   assert.match(javascript, /data-case-resizer/);

@@ -4,6 +4,7 @@ import {
   parseControlCommand,
   runtimeOverrides,
 } from "./control-commands.js";
+import { assistantConfigForMessage } from "./assistant-routing.js";
 
 function acceptsOwnerIntermediateItems(message) {
   return Boolean(
@@ -108,7 +109,7 @@ export class CaseManager {
         scopeCaseId: ingested.scopeCaseId,
         caseStore: this.caseStore,
         sessionStore: this.sessionStore,
-        config: this.config.assistant,
+        config: assistantConfigForMessage(this.config.assistant, clean),
         stopped,
       });
       if (result.continueText) {
@@ -127,7 +128,8 @@ export class CaseManager {
           result.model || runtimeOverrides(
             this.caseStore,
             ingested.caseId,
-          ).model || this.config.assistant.codexModel,
+          ).model ||
+            assistantConfigForMessage(this.config.assistant, clean).codexModel,
           {
             triggerMessageId: ingested.messageRow,
             inputCutoffMessageId: ingested.messageRow,
@@ -333,7 +335,10 @@ export class CaseManager {
         caseId,
         reply,
         result.model ||
-          this.config.assistant.codexModel ||
+          assistantConfigForMessage(
+            this.config.assistant,
+            currentMessage,
+          ).codexModel ||
           this.config.assistant.llmModel ||
           this.config.assistant.mode,
         {

@@ -216,6 +216,47 @@ test("applies per-session model and effort overrides to Codex runs", async () =>
   });
 });
 
+test("routes self chats and other conversations to separate defaults", async () => {
+  const selected = [];
+  const provider = createCodexProvider(
+    {
+      codexBin: process.execPath,
+      selfCodexModel: "gpt-self",
+      selfReasoningEffort: "high",
+      otherCodexModel: "gpt-other",
+      otherReasoningEffort: "medium",
+    },
+    {
+      runCodex: async (config) => {
+        selected.push([config.codexModel, config.reasoningEffort]);
+        return { text: "done" };
+      },
+    },
+  );
+  await provider.reply({
+    caseId: "self",
+    message: {
+      text: "run",
+      chatType: "private",
+      selfConversation: true,
+    },
+    history: [],
+  });
+  await provider.reply({
+    caseId: "group",
+    message: {
+      text: "run",
+      chatType: "group",
+      selfConversation: true,
+    },
+    history: [],
+  });
+  assert.deepEqual(selected, [
+    ["gpt-self", "high"],
+    ["gpt-other", "medium"],
+  ]);
+});
+
 test("reads commentary progress from a Codex session JSONL tail", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-tail-"));
   const file = path.join(directory, "session.jsonl");

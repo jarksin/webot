@@ -9,6 +9,7 @@ import {
   parseCodexSessionProgressLine,
 } from "./codex-session-progress.js";
 import { parseCodexSessionUsage } from "./codex-usage.js";
+import { assistantConfigForMessage } from "./assistant-routing.js";
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
@@ -647,11 +648,14 @@ export function createCodexProvider(config, options = {}) {
       onItem,
       runtimeOverrides = {},
     }) {
+      const routedConfig = assistantConfigForMessage(config, message);
       const effectiveConfig = {
-        ...config,
-        codexModel: nonEmpty(runtimeOverrides.model) || config.codexModel,
+        ...routedConfig,
+        codexModel:
+          nonEmpty(runtimeOverrides.model) || routedConfig.codexModel,
         reasoningEffort:
-          nonEmpty(runtimeOverrides.reasoningEffort) || config.reasoningEffort,
+          nonEmpty(runtimeOverrides.reasoningEffort) ||
+          routedConfig.reasoningEffort,
       };
       const runtime = codexRuntimeStatus(effectiveConfig);
       if (!runtime.binaryReady) {
