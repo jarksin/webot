@@ -188,6 +188,23 @@ test("applies source-scoped self, group, and nickname policies", () => {
     ).reason,
     "assistant-echo",
   );
+  const exactSelf = {
+    ...base,
+    chatId: "wxid_small",
+    senderId: "wxid_small",
+    selfConversation: true,
+    selfPeer: false,
+    exactSelfChat: true,
+    direction: "outgoing",
+  };
+  sourceConfig.pad.sources[0].allowSelf = true;
+  assert.equal(acceptedMessage(exactSelf, sourceConfig).accepted, true);
+  assert.equal(
+    acceptedMessage({ ...exactSelf, text: "【AI】机器人回复" }, sourceConfig)
+      .reason,
+    "assistant-echo",
+  );
+  sourceConfig.pad.sources[0].allowSelf = false;
   assert.equal(acceptedMessage({
     ...base,
     selfConversation: false,

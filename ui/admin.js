@@ -663,7 +663,7 @@ function accountEditor(source) {
         ${field("机器人名称", "source-bot-names", listText(source.botNames), { textarea: true })}
         ${field("关联自有账号", "source-peers", listText(source.selfChatPeers), { textarea: true })}
       </div>
-      ${toggle("允许账号自聊", "source-allow-self", source.allowSelf, "处理发送给同一账号的消息")}
+      ${toggle("允许账号自聊", "source-allow-self", source.allowSelf, "处理同账号人工消息；机器人回复使用 [AI] 标记防止回声")}
       ${toggle("接收关联账号入站", "source-accept-peers", source.acceptSelfChatPeerMessages, "仅处理关联账号发来的入站副本")}
     </div>`;
 }

@@ -84,7 +84,9 @@ source repository.
 - Pad outbound events never trigger workers outside exact same-account private
   self chat. System destinations such as `filehelper` and internal
   `lastMessage` status events are rejected before case ingestion.
-- The AI echo marker is emitted only for same-account private self replies.
+- Exact same-account private chat must be enabled per source. Its human and
+  assistant messages are both reported as outbound, so the AI echo marker is
+  emitted only for assistant replies and rejected on ingress.
 - A SQLite unique constraint suppresses repeated delivery of the same source
   event.
 
