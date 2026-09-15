@@ -3,23 +3,24 @@
 ## Message Flow
 
 ```text
-gateway WebSocket -> normalize -> identity directory -> policy -> SQLite message
-                                      |
-                         owner named-session routing
-                                      |
-                                      v
-                                    Case
-                                      |
-                                      v
-                              worker/session queue
-                                      |
-                                      v
-                                    draft
-                                      |
-                         manual send or automatic send
-                                      |
-                                      v
-                              gateway outbound
+gateway WebSocket -> normalize -> synced message archive -> policy -> Case message
+                              |                         |
+                              v                         v
+                     identity directory      owner named-session routing
+                                                        |
+                                                        v
+                                                      Case
+                                                        |
+                                                        v
+                                                worker/session queue
+                                                        |
+                                                        v
+                                                      draft
+                                                        |
+                                           manual send or automatic send
+                                                        |
+                                                        v
+                                                gateway outbound
 ```
 
 Adapters convert protocol-specific events into this internal shape:
@@ -40,12 +41,16 @@ Adapters convert protocol-specific events into this internal shape:
 }
 ```
 
-Raw envelopes are not sent to the assistant backend. Normalized messages,
-Cases, worker sessions, progress events, drafts, and send results are persisted
-in `webot.sqlite`. Bounded assistant history remains in the session directory.
-The indexed identity directory records observed user and group IDs before
-trigger filtering. An explicit read-only gateway sync can enrich those entries
-with contact remarks, nicknames, aliases, and group names.
+Raw envelopes are not sent to the assistant backend. Every normalized Pad sync
+message is persisted before sender, allowlist, blacklist, or trigger filtering.
+The archive stores text and media metadata but strips binary/base64 payloads,
+deduplicates by source and message ID, and uses indexed, bounded per-conversation
+retention. Its final policy decision is recorded separately from Case creation.
+Cases, worker sessions, progress events, drafts, and send results are also
+persisted in `webot.sqlite`. Bounded assistant history remains in the session
+directory. The indexed identity directory records observed user and group IDs
+before trigger filtering. An explicit read-only gateway sync can enrich those
+entries with contact remarks, nicknames, aliases, and group names.
 
 Source deployments run Codex from the Webot repository so engineering tasks see
 the same code, Git state, and repository instructions as the service itself.
@@ -87,8 +92,8 @@ source repository.
 - Exact same-account private chat must be enabled per source. Its human and
   assistant messages are both reported as outbound, so the AI echo marker is
   emitted only for assistant replies and rejected on ingress.
-- A SQLite unique constraint suppresses repeated delivery of the same source
-  event.
+- SQLite unique constraints suppress repeated archive and Case delivery of the
+  same source event.
 
 ## Connector Boundary
 

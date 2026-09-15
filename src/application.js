@@ -151,13 +151,30 @@ export class WebotApplication {
         key,
         Number(this.padIngressCounts.get(key) || 0) + 1,
       );
+      const contextSettings = this.caseManager.groupContextSettings();
+      this.caseStore.ingestSyncedMessage(message, {
+        retentionHours: contextSettings.retentionHours,
+        maxMessages: contextSettings.maxMessages,
+      });
       this.caseStore.observeIdentity(message);
       const classification = await this.padSenderClassifier.classify(message);
       if (classification.blocked) {
-        return { accepted: false, reason: classification.reason };
+        const result = { accepted: false, reason: classification.reason };
+        this.caseStore.markSyncedMessageResult(message, result);
+        return result;
       }
     }
-    return this.caseManager.receive(message);
+    try {
+      const result = await this.caseManager.receive(message);
+      this.caseStore.markSyncedMessageResult(message, result);
+      return result;
+    } catch (error) {
+      this.caseStore.markSyncedMessageResult(message, {
+        accepted: false,
+        reason: "processing-error",
+      });
+      throw error;
+    }
   }
 
   async probePads() {

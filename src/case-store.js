@@ -44,6 +44,48 @@ function conversationIdFor(message) {
   );
 }
 
+function withoutMediaPayloads(value, key = "") {
+  if (value == null) return value;
+  if (
+    Buffer.isBuffer(value) ||
+    value instanceof ArrayBuffer ||
+    ArrayBuffer.isView(value)
+  ) {
+    return undefined;
+  }
+  if (
+    key &&
+    /(?:base64|binary|blob|buffer|bytes|payload|local_?path|file_?path)$/i
+      .test(key)
+  ) {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => withoutMediaPayloads(item))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .map(([childKey, childValue]) => [
+          childKey,
+          withoutMediaPayloads(childValue, childKey),
+        ])
+        .filter(([, childValue]) => childValue !== undefined),
+    );
+  }
+  return value;
+}
+
+function syncedMessageSnapshot(message) {
+  const { text: _text, attachments: _attachments, ...metadata } = message || {};
+  return {
+    attachments: withoutMediaPayloads(message?.attachments || []),
+    metadata: withoutMediaPayloads(metadata),
+  };
+}
+
 function ensureColumn(db, table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
   if (columns.some((item) => item.name === column)) return false;
@@ -97,6 +139,38 @@ export class CaseStore {
         );
       CREATE INDEX IF NOT EXISTS group_context_expiry
         ON group_context_messages(timestamp);
+      CREATE TABLE IF NOT EXISTS synced_messages (
+        id INTEGER PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        direction TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        chat_type TEXT NOT NULL,
+        chat_id TEXT NOT NULL,
+        chat_name TEXT NOT NULL DEFAULT '',
+        text TEXT NOT NULL,
+        attachments_json TEXT NOT NULL DEFAULT '[]',
+        mentions_json TEXT NOT NULL DEFAULT '[]',
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        decision TEXT NOT NULL DEFAULT 'received',
+        accepted INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(source_id, message_id)
+      );
+      CREATE INDEX IF NOT EXISTS synced_messages_conversation_time
+        ON synced_messages(
+          source_id, conversation_id, timestamp DESC, id DESC
+        );
+      CREATE INDEX IF NOT EXISTS synced_messages_chat_time
+        ON synced_messages(source_id, chat_id, timestamp DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS synced_messages_sender_time
+        ON synced_messages(source_id, sender_id, timestamp DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS synced_messages_expiry
+        ON synced_messages(timestamp);
       CREATE TABLE IF NOT EXISTS identity_directory (
         source_id TEXT NOT NULL,
         entity_type TEXT NOT NULL,
@@ -174,6 +248,45 @@ export class CaseStore {
         value TEXT NOT NULL,
         updated_at INTEGER NOT NULL
       );
+    `);
+    const migratedAt = now();
+    this.db.exec(`
+      INSERT OR IGNORE INTO synced_messages(
+        source_id, conversation_id, message_id, timestamp, direction,
+        sender_id, sender_name, chat_type, chat_id, chat_name, text,
+        attachments_json, mentions_json, metadata_json, decision, accepted,
+        created_at, updated_at
+      )
+      SELECT source_id,
+        COALESCE(
+          json_extract(message_json, '$.conversationId'),
+          CASE
+            WHEN chat_type='group'
+              THEN 'group:' || source_id || ':' || chat_id
+            ELSE chat_type || ':' || source_id || ':' || chat_id
+          END
+        ),
+        message_id, timestamp, direction, sender_id, sender_name, chat_type,
+        chat_id, COALESCE(json_extract(message_json, '$.chatName'), ''), text,
+        COALESCE(json_extract(message_json, '$.attachments'), '[]'),
+        COALESCE(json_extract(message_json, '$.mentions'), '[]'),
+        '{}', 'accepted', 1, created_at, ${migratedAt}
+      FROM messages;
+
+      INSERT OR IGNORE INTO synced_messages(
+        source_id, conversation_id, message_id, timestamp, direction,
+        sender_id, sender_name, chat_type, chat_id, chat_name, text,
+        attachments_json, mentions_json, metadata_json, decision, accepted,
+        created_at, updated_at
+      )
+      SELECT source_id, conversation_id, message_id, timestamp, direction,
+        sender_id, sender_name, 'group',
+        COALESCE(json_extract(message_json, '$.chatId'), ''),
+        COALESCE(json_extract(message_json, '$.chatName'), ''), text,
+        COALESCE(json_extract(message_json, '$.attachments'), '[]'),
+        COALESCE(json_extract(message_json, '$.mentions'), '[]'),
+        '{}', 'context-stored', 0, created_at, ${migratedAt}
+      FROM group_context_messages;
     `);
     installNamedSessionSchema(this.db);
     ensureColumn(
@@ -294,6 +407,8 @@ export class CaseStore {
     `);
     this.groupContextWrites = 0;
     this.groupContextCounts = new Map();
+    this.syncedMessageWrites = 0;
+    this.syncedMessageCounts = new Map();
   }
 
   upsertIdentity(entry, options = {}) {
@@ -515,6 +630,191 @@ export class CaseStore {
 
   deleteSession(scopeCaseId, name) {
     return deleteSession(this.db, scopeCaseId, name);
+  }
+
+  ingestSyncedMessage(message, options = {}) {
+    if (message?.transport !== "pad") {
+      return { inserted: false, reason: "not-pad" };
+    }
+    const createdAt = now();
+    const sourceId = String(message.sourceId || "default");
+    const conversationId = conversationIdFor(message);
+    const snapshot = syncedMessageSnapshot(message);
+    const result = this.db.prepare(`
+      INSERT OR IGNORE INTO synced_messages(
+        source_id, conversation_id, message_id, timestamp, direction,
+        sender_id, sender_name, chat_type, chat_id, chat_name, text,
+        attachments_json, mentions_json, metadata_json, decision, accepted,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'received', NULL, ?, ?)
+    `).run(
+      sourceId,
+      conversationId,
+      String(message.messageId),
+      Number(message.timestamp || createdAt),
+      String(message.direction || "incoming"),
+      String(message.senderId || ""),
+      String(message.senderName || ""),
+      String(message.chatType || "private"),
+      String(message.chatId || ""),
+      String(message.chatName || ""),
+      String(message.text || ""),
+      JSON.stringify(snapshot.attachments),
+      JSON.stringify(message.mentions || []),
+      JSON.stringify(snapshot.metadata),
+      createdAt,
+      createdAt,
+    );
+    const existing = result.changes
+      ? null
+      : this.db.prepare(`
+          SELECT id FROM synced_messages
+          WHERE source_id=? AND message_id=?
+          LIMIT 1
+        `).get(sourceId, String(message.messageId));
+    const rowId = Number(result.lastInsertRowid || existing?.id || 0);
+    if (!result.changes) {
+      return {
+        inserted: false,
+        reason: "duplicate",
+        rowId,
+        conversationId,
+      };
+    }
+
+    this.syncedMessageWrites += 1;
+    const countKey = `${sourceId}\u0000${conversationId}`;
+    let conversationCount = this.syncedMessageCounts.get(countKey);
+    if (conversationCount == null) {
+      conversationCount = Number(
+        this.db.prepare(`
+          SELECT COUNT(*) AS count FROM synced_messages
+          WHERE source_id=? AND conversation_id=?
+        `).get(sourceId, conversationId).count || 0,
+      );
+    } else {
+      conversationCount += 1;
+    }
+    this.syncedMessageCounts.set(countKey, conversationCount);
+    const maxMessages = Math.min(
+      Math.max(Number(options.maxMessages) || 2000, 100),
+      100_000,
+    );
+    const pruneExpired =
+      this.syncedMessageWrites === 1 || this.syncedMessageWrites % 100 === 0;
+    if (pruneExpired || conversationCount > maxMessages) {
+      this.pruneSyncedMessages(sourceId, conversationId, {
+        ...options,
+        pruneExpired,
+      });
+      this.syncedMessageCounts.set(
+        countKey,
+        Number(
+          this.db.prepare(`
+            SELECT COUNT(*) AS count FROM synced_messages
+            WHERE source_id=? AND conversation_id=?
+          `).get(sourceId, conversationId).count || 0,
+        ),
+      );
+    }
+    return { inserted: true, rowId, conversationId };
+  }
+
+  markSyncedMessageResult(message, result = {}) {
+    if (message?.transport !== "pad") return false;
+    const accepted = result.accepted === true ? 1 : 0;
+    const decision = accepted
+      ? "accepted"
+      : String(result.reason || "rejected");
+    const updated = this.db.prepare(`
+      UPDATE synced_messages
+      SET decision=CASE
+            WHEN accepted=1 AND ?=0 THEN decision
+            ELSE ?
+          END,
+          accepted=CASE
+            WHEN accepted=1 THEN 1
+            ELSE ?
+          END,
+          updated_at=?
+      WHERE source_id=? AND message_id=?
+    `).run(
+      accepted,
+      decision,
+      accepted,
+      now(),
+      String(message.sourceId || "default"),
+      String(message.messageId),
+    );
+    return Boolean(updated.changes);
+  }
+
+  pruneSyncedMessages(sourceId, conversationId, options = {}) {
+    const retentionHours = Math.min(
+      Math.max(Number(options.retentionHours) || 168, 1),
+      24 * 365,
+    );
+    const maxMessages = Math.min(
+      Math.max(Number(options.maxMessages) || 2000, 100),
+      100_000,
+    );
+    if (options.pruneExpired !== false) {
+      this.db.prepare(
+        "DELETE FROM synced_messages WHERE timestamp<?",
+      ).run(now() - retentionHours * 60 * 60 * 1000);
+      this.syncedMessageCounts.clear();
+    }
+    this.db.prepare(`
+      DELETE FROM synced_messages
+      WHERE source_id=? AND conversation_id=? AND id IN (
+        SELECT id FROM synced_messages
+        WHERE source_id=? AND conversation_id=?
+        ORDER BY timestamp DESC, id DESC
+        LIMIT -1 OFFSET ?
+      )
+    `).run(
+      sourceId,
+      conversationId,
+      sourceId,
+      conversationId,
+      maxMessages,
+    );
+  }
+
+  syncedMessages(options = {}) {
+    const sourceId = String(options.sourceId || "").trim();
+    const conversationId = String(options.conversationId || "").trim();
+    const chatId = String(options.chatId || "").trim();
+    const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 1000);
+    const clauses = [];
+    const parameters = [];
+    if (sourceId) {
+      clauses.push("source_id=?");
+      parameters.push(sourceId);
+    }
+    if (conversationId) {
+      clauses.push("conversation_id=?");
+      parameters.push(conversationId);
+    }
+    if (chatId) {
+      clauses.push("chat_id=?");
+      parameters.push(chatId);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    return this.db.prepare(`
+      SELECT * FROM (
+        SELECT * FROM synced_messages
+        ${where}
+        ORDER BY timestamp DESC, id DESC
+        LIMIT ?
+      ) ORDER BY timestamp ASC, id ASC
+    `).all(...parameters, limit).map((row) => ({
+      ...row,
+      accepted: row.accepted == null ? null : Boolean(row.accepted),
+      attachments: json(row.attachments_json, []),
+      mentions: json(row.mentions_json, []),
+      metadata: json(row.metadata_json, {}),
+    }));
   }
 
   ingestGroupContext(message, options = {}) {
