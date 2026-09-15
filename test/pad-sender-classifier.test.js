@@ -53,7 +53,7 @@ test("blocks known system and gh_ accounts without a contact lookup", async () =
   assert.equal(requests, 0);
 });
 
-test("blocks internal lastMessage status events in any conversation", async () => {
+test("blocks internal Pad status events in any conversation", async () => {
   let requests = 0;
   const classifier = new PadSenderClassifier(config(), {
     fetchImpl: async () => {
@@ -62,17 +62,27 @@ test("blocks internal lastMessage status events in any conversation", async () =
     },
   });
 
-  const result = await classifier.classify({
+  const lastMessage = await classifier.classify({
     transport: "pad",
     sourceId: "small",
     chatType: "group",
     chatId: "project@chatroom",
     senderId: "wxid_small",
-    text: "<msg><op id='2'><name>lastMessage</name></op></msg>",
+    text: "<msg><op id='5'><name>lastMessage</name></op></msg>",
+  });
+  const handoff = await classifier.classify({
+    transport: "pad",
+    sourceId: "small",
+    chatType: "private",
+    chatId: "wxid_small",
+    senderId: "wxid_small",
+    text: "<msg><op id='11'><name>HandOffMaster</name></op></msg>",
   });
 
-  assert.equal(result.blocked, true);
-  assert.equal(result.reason, "internal-status-message");
+  assert.equal(lastMessage.blocked, true);
+  assert.equal(lastMessage.reason, "internal-status-message");
+  assert.equal(handoff.blocked, true);
+  assert.equal(handoff.reason, "internal-status-message");
   assert.equal(requests, 0);
 });
 

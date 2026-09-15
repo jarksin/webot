@@ -65,7 +65,7 @@ function isPadInternalStatusMessage(message) {
   const text = String(message?.text || "");
   return (
     /<op\b/i.test(text) &&
-    /<name>\s*lastMessage\s*<\/name>/i.test(text)
+    /<name>\s*(?:lastMessage|HandOffMaster)\s*<\/name>/i.test(text)
   );
 }
 

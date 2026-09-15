@@ -88,7 +88,8 @@ source repository.
 - Self-account pairs have explicit per-direction ingress permission.
 - Pad outbound events never trigger workers outside exact same-account private
   self chat. System destinations such as `filehelper` and internal
-  `lastMessage` status events are rejected before case ingestion.
+  `lastMessage` and `HandOffMaster` status events are rejected before case
+  ingestion.
 - Exact same-account private chat must be enabled per source. Its human and
   assistant messages are both reported as outbound, so the AI echo marker is
   emitted only for assistant replies and rejected on ingress.
