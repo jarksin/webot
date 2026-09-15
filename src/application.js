@@ -60,6 +60,16 @@ export class WebotApplication {
       this.caseStore = new CaseStore(
         path.join(this.config.dataDir, "webot.sqlite"),
       );
+      const codex = codexRuntimeStatus(this.config.assistant, this.env);
+      const reconciled = this.caseStore.reconcileCodexUsage({
+        codexHome: codex.home,
+        model: codex.effective.model,
+        reasoningEffort: codex.effective.reasoningEffort,
+        env: this.env,
+      });
+      if (reconciled.updated) {
+        this.logger.info("Reconciled Codex session usage", reconciled);
+      }
     }
     this.knowledgeBase = new KnowledgeBaseCloud(
       this.config.knowledgeBase,

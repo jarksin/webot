@@ -8,6 +8,7 @@ import {
   locateCodexSessionFile,
   parseCodexSessionProgressLine,
 } from "./codex-session-progress.js";
+import { parseCodexSessionUsage } from "./codex-usage.js";
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
@@ -589,11 +590,27 @@ async function runCodex(config, request) {
     const output = nonEmpty(await fsPromises.readFile(outputPath, "utf8"));
     if (!output) throw new Error("Codex returned no final message");
     const assistant = parseAssistantResult(output);
+    const runtime = codexRuntimeStatus(config);
+    const sessionId = request.sessionId || parsed.threadId;
+    const sessionUsage = parseCodexSessionUsage({
+      sessionId,
+      codexHome: runtimeFiles(config).home,
+      runStartedAt,
+      runEndedAt: Date.now(),
+      model: runtime.effective.model,
+    });
     return {
       ...assistant,
-      sessionId: request.sessionId || parsed.threadId,
-      usage: parsed.usage,
-      model: codexRuntimeStatus(config).effective.model,
+      sessionId,
+      usage: sessionUsage?.runUsage || parsed.usage,
+      cumulativeUsage: sessionUsage?.cumulativeUsage,
+      requestCount: sessionUsage?.runRequestCount,
+      cumulativeRequestCount: sessionUsage?.cumulativeRequestCount,
+      estimatedCostUsd: sessionUsage?.runEstimatedCostUsd,
+      cumulativeEstimatedCostUsd:
+        sessionUsage?.cumulativeEstimatedCostUsd,
+      model: runtime.effective.model,
+      effort: runtime.effective.reasoningEffort,
     };
   } finally {
     stopSessionTail();
@@ -669,6 +686,8 @@ export function createCodexProvider(config, options = {}) {
       return {
         ...result,
         ...assistant,
+        model: nonEmpty(result?.model) || runtime.effective.model,
+        effort: nonEmpty(result?.effort) || runtime.effective.reasoningEffort,
         artifacts: result?.artifacts?.length
           ? artifactList(result.artifacts)
           : assistant.artifacts,

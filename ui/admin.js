@@ -132,6 +132,18 @@ function time(value) {
   }).format(new Date(value));
 }
 
+function countText(value) {
+  return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+}
+
+function costText(value, hasUsage = false) {
+  if (value == null || !Number.isFinite(Number(value))) {
+    return hasUsage ? "无法估算" : "$0.0000";
+  }
+  const amount = Number(value);
+  return `$${amount.toFixed(amount >= 100 ? 2 : 4)}`;
+}
+
 function badge(label, tone = "") {
   return `<span class="badge ${tone}"><span class="status-dot ${tone === "good" ? "ok" : ""}"></span>${escapeHtml(label)}</span>`;
 }
@@ -286,6 +298,17 @@ function renderCaseDetail(item) {
     (entry) => entry.level === "live",
   );
   const progressPanel = "codex-progress";
+  const inputTokens = Number(session.input_tokens || 0);
+  const cachedInputTokens = Number(session.cached_input_tokens || 0);
+  const cacheWriteInputTokens = Number(
+    session.cache_write_input_tokens || 0,
+  );
+  const outputTokens = Number(session.output_tokens || 0);
+  const reasoningTokens = Number(session.reasoning_output_tokens || 0);
+  const totalTokens = Number(
+    session.total_tokens || inputTokens + outputTokens,
+  );
+  const hasUsage = totalTokens > 0;
   const windowText = [
     `消息 ${Number(window.messageShown || item.messages?.length || 0)} / ${Number(window.messageTotal || item.messages?.length || 0)}`,
     `草稿 ${Number(window.draftShown || item.drafts?.length || 0)} / ${Number(window.draftTotal || item.drafts?.length || 0)}`,
@@ -305,6 +328,35 @@ function renderCaseDetail(item) {
           : `<button class="button secondary" data-action="run-case" data-case-id="${escapeHtml(item.case_id)}"><i data-lucide="play"></i><span>运行</span></button>`}
       </div>
     </div>
+    <section class="codex-session-summary" aria-label="Codex Session 信息">
+      <div class="codex-session-summary-grid">
+        <div class="codex-session-stat codex-session-id">
+          <span>Codex Session</span>
+          <strong class="mono" title="${escapeHtml(session.codex_session_id || "")}">${escapeHtml(session.codex_session_id || "尚未创建")}</strong>
+        </div>
+        <div class="codex-session-stat">
+          <span>模型</span>
+          <strong>${escapeHtml(session.model || "未记录")}</strong>
+        </div>
+        <div class="codex-session-stat">
+          <span>Effort</span>
+          <strong>${escapeHtml(session.reasoning_effort || "default")}</strong>
+        </div>
+        <div class="codex-session-stat">
+          <span>模型请求</span>
+          <strong>${countText(session.request_count)}</strong>
+        </div>
+        <div class="codex-session-stat codex-token-stat">
+          <span>Session Token</span>
+          <strong>${countText(totalTokens)}</strong>
+          <small>输入 ${countText(inputTokens)} · 缓存 ${countText(cachedInputTokens)} · 写缓存 ${countText(cacheWriteInputTokens)} · 输出 ${countText(outputTokens)} · 推理 ${countText(reasoningTokens)}</small>
+        </div>
+        <div class="codex-session-stat">
+          <span>估算消费</span>
+          <strong>${costText(session.estimated_cost_usd, hasUsage)}</strong>
+        </div>
+      </div>
+    </section>
     <div class="case-detail-scroll">
       <div class="case-window">
         <span>${escapeHtml(windowText)}</span>

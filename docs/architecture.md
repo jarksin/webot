@@ -72,6 +72,9 @@ source repository.
 - The Case console uses independently scrolling list and detail panes. Case
   summaries are paginated, while messages, drafts, and progress are loaded in a
   bounded window and expanded only on demand.
+- Each Case shows its persisted Codex session ID, model, reasoning effort,
+  request count, token breakdown, and estimated USD cost. Usage is reconciled
+  from Codex session records so cumulative counters are not added repeatedly.
 - Gateway queues and history keys include the source-defined conversation id.
 - Multi-account replies resolve credentials from the originating source.
 - Self-account pairs have explicit per-direction ingress permission.

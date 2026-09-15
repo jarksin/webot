@@ -12,6 +12,11 @@ import {
   sessionByName,
   sessionForTarget,
 } from "./named-sessions.js";
+import {
+  estimateCodexCostUsd,
+  normalizeCodexUsage,
+  parseCodexSessionUsage,
+} from "./codex-usage.js";
 
 function json(value, fallback = null) {
   try {
@@ -218,6 +223,18 @@ export class CaseStore {
       "worker_sessions",
       "reasoning_output_tokens",
       "INTEGER NOT NULL DEFAULT 0",
+    );
+    ensureColumn(
+      this.db,
+      "worker_sessions",
+      "reasoning_effort",
+      "TEXT NOT NULL DEFAULT ''",
+    );
+    ensureColumn(
+      this.db,
+      "worker_sessions",
+      "estimated_cost_usd",
+      "REAL",
     );
     const addedProcessedMessageCursor = ensureColumn(
       this.db,
@@ -987,9 +1004,17 @@ export class CaseStore {
           }
         : null,
       caseSessionOptions: this.caseSessionOptions(caseId),
-      workerSession: this.db
-        .prepare("SELECT * FROM worker_sessions WHERE case_id=?")
-        .get(caseId) || null,
+      workerSession: (() => {
+        const session = this.workerSession(caseId);
+        return session
+          ? {
+              ...session,
+              total_tokens:
+                Number(session.input_tokens || 0)
+                + Number(session.output_tokens || 0),
+            }
+          : null;
+      })(),
       displayWindow: {
         expanded,
         messageTotal,
@@ -1042,7 +1067,40 @@ export class CaseStore {
   }
 
   recordProviderResult(caseId, result = {}) {
-    const usage = result.usage || {};
+    const current = this.workerSession(caseId);
+    if (!current) return;
+    const hasCumulativeUsage =
+      result.cumulativeUsage && typeof result.cumulativeUsage === "object";
+    const usage = normalizeCodexUsage(
+      hasCumulativeUsage ? result.cumulativeUsage : result.usage,
+    );
+    const totals = hasCumulativeUsage
+      ? usage
+      : {
+          inputTokens: Number(current.input_tokens || 0) + usage.inputTokens,
+          cachedInputTokens:
+            Number(current.cached_input_tokens || 0)
+            + usage.cachedInputTokens,
+          cacheWriteInputTokens:
+            Number(current.cache_write_input_tokens || 0)
+            + usage.cacheWriteInputTokens,
+          outputTokens:
+            Number(current.output_tokens || 0) + usage.outputTokens,
+          reasoningOutputTokens:
+            Number(current.reasoning_output_tokens || 0)
+            + usage.reasoningOutputTokens,
+        };
+    const cumulativeRequestCount = Number(result.cumulativeRequestCount || 0);
+    const requestIncrement = Math.max(1, Number(result.requestCount || 0));
+    const requestCount = hasCumulativeUsage && cumulativeRequestCount > 0
+      ? cumulativeRequestCount
+      : Number(current.request_count || 0) + requestIncrement;
+    const model = String(result.model || current.model || "");
+    const suppliedCost = result.cumulativeEstimatedCostUsd;
+    const estimatedCostUsd =
+      suppliedCost != null && Number.isFinite(Number(suppliedCost))
+        ? Number(suppliedCost)
+        : estimateCodexCostUsd(totals, model);
     this.db.prepare(`
       UPDATE worker_sessions SET
         codex_session_id=CASE
@@ -1050,12 +1108,17 @@ export class CaseStore {
           ELSE codex_session_id
         END,
         model=CASE WHEN ?!='' THEN ? ELSE model END,
-        request_count=request_count + 1,
-        input_tokens=input_tokens + ?,
-        cached_input_tokens=cached_input_tokens + ?,
-        cache_write_input_tokens=cache_write_input_tokens + ?,
-        output_tokens=output_tokens + ?,
-        reasoning_output_tokens=reasoning_output_tokens + ?,
+        reasoning_effort=CASE
+          WHEN ?!='' THEN ?
+          ELSE reasoning_effort
+        END,
+        request_count=?,
+        input_tokens=?,
+        cached_input_tokens=?,
+        cache_write_input_tokens=?,
+        output_tokens=?,
+        reasoning_output_tokens=?,
+        estimated_cost_usd=?,
         updated_at=?
       WHERE case_id=?
     `).run(
@@ -1063,14 +1126,85 @@ export class CaseStore {
       String(result.sessionId || ""),
       String(result.model || ""),
       String(result.model || ""),
-      Number(usage.inputTokens || 0),
-      Number(usage.cachedInputTokens || 0),
-      Number(usage.cacheWriteInputTokens || 0),
-      Number(usage.outputTokens || 0),
-      Number(usage.reasoningOutputTokens || 0),
+      String(result.effort || ""),
+      String(result.effort || ""),
+      requestCount,
+      totals.inputTokens,
+      totals.cachedInputTokens,
+      totals.cacheWriteInputTokens,
+      totals.outputTokens,
+      totals.reasoningOutputTokens,
+      estimatedCostUsd,
       now(),
       caseId,
     );
+  }
+
+  reconcileCodexUsage({
+    codexHome = "",
+    model = "",
+    reasoningEffort = "",
+    env = process.env,
+  } = {}) {
+    const marker = "codex_usage_reconciled_v1";
+    if (this.runtimeSetting(marker, "") === "1") return { updated: 0 };
+    const rows = this.db.prepare(`
+      SELECT * FROM worker_sessions WHERE codex_session_id!=''
+    `).all();
+    let updated = 0;
+    const update = this.db.prepare(`
+      UPDATE worker_sessions SET
+        model=?,
+        reasoning_effort=?,
+        request_count=?,
+        input_tokens=?,
+        cached_input_tokens=?,
+        cache_write_input_tokens=?,
+        output_tokens=?,
+        reasoning_output_tokens=?,
+        estimated_cost_usd=?,
+        updated_at=?
+      WHERE case_id=?
+    `);
+    this.db.exec("BEGIN");
+    try {
+      for (const row of rows) {
+        const sessionModel = String(row.model || model || "");
+        const usage = parseCodexSessionUsage({
+          sessionId: row.codex_session_id,
+          codexHome,
+          model: sessionModel,
+          env,
+        });
+        if (!usage) continue;
+        const effort = String(
+          row.reasoning_effort
+          || this.runtimeSetting(`assistant_effort:${row.case_id}`, "")
+          || reasoningEffort
+          || "",
+        );
+        update.run(
+          sessionModel,
+          effort,
+          usage.cumulativeRequestCount,
+          usage.cumulativeUsage.inputTokens,
+          usage.cumulativeUsage.cachedInputTokens,
+          usage.cumulativeUsage.cacheWriteInputTokens,
+          usage.cumulativeUsage.outputTokens,
+          usage.cumulativeUsage.reasoningOutputTokens,
+          usage.cumulativeEstimatedCostUsd,
+          now(),
+          row.case_id,
+        );
+        updated += 1;
+      }
+      this.setRuntimeSetting(marker, "1");
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return { updated };
   }
 
   resetCodexSession(caseId) {

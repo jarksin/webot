@@ -63,13 +63,17 @@ test("case workspace groups named sessions and reloads on runtime revision chang
   assert.match(javascript, /window\.location\.reload\(\)/);
 });
 
-test("case detail uses Codex Live Progress instead of the worker session card", () => {
+test("case detail keeps Codex session usage above live progress", () => {
   assert.match(javascript, /Codex Live Progress/);
   assert.match(javascript, /waiting for first update/);
   assert.match(javascript, /codex-progress-item/);
-  assert.doesNotMatch(javascript, /Worker 会话/);
-  assert.doesNotMatch(javascript, /class="session-grid"/);
+  assert.match(javascript, /codex-session-summary/);
+  assert.match(javascript, /Session Token/);
+  assert.match(javascript, /估算消费/);
+  assert.match(javascript, /reasoning_effort/);
   assert.match(css, /\.codex-progress-panel/);
+  assert.match(css, /\.case-detail-head \{[^}]*flex: 0 0 auto/);
+  assert.match(css, /\.case-detail-scroll \{[^}]*overflow-anchor: none/);
 });
 
 test("owner intermediate replies are described as private self conversations only", () => {

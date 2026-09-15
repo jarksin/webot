@@ -97,6 +97,7 @@ test("persists a WeChat case, worker session, draft, and send result", async () 
           text: "pong",
           sessionId: "codex-session-1",
           model: "test-model",
+          effort: "high",
           usage: {
             inputTokens: 100,
             cachedInputTokens: 20,
@@ -131,9 +132,12 @@ test("persists a WeChat case, worker session, draft, and send result", async () 
   assert.equal(detail.workerSession.status, "draft_ready");
   assert.equal(detail.workerSession.codex_session_id, "codex-session-1");
   assert.equal(detail.workerSession.model, "test-model");
+  assert.equal(detail.workerSession.reasoning_effort, "high");
   assert.equal(detail.workerSession.request_count, 1);
   assert.equal(detail.workerSession.input_tokens, 100);
   assert.equal(detail.workerSession.output_tokens, 12);
+  assert.equal(detail.workerSession.total_tokens, 112);
+  assert.equal(detail.workerSession.estimated_cost_usd, null);
   assert.equal(detail.drafts[0].text, "pong");
 
   await manager.sendDraft(received.caseId, detail.drafts[0].id);
@@ -143,6 +147,75 @@ test("persists a WeChat case, worker session, draft, and send result", async () 
   assert.equal(
     caseStore.detail(received.caseId).workerSession.codex_session_id,
     "",
+  );
+  caseStore.close();
+});
+
+test("reconciles inflated worker totals from the Codex session record", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-reconcile-"));
+  const codexHome = path.join(directory, "codex");
+  const sessionId = "reconcile-session";
+  const sessionDirectory = path.join(codexHome, "sessions", "2026", "09", "15");
+  await fs.mkdir(sessionDirectory, { recursive: true });
+  await fs.writeFile(
+    path.join(sessionDirectory, `rollout-${sessionId}.jsonl`),
+    `${JSON.stringify({
+      timestamp: "2026-09-15T10:00:00.000Z",
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 1_000,
+            cached_input_tokens: 800,
+            cache_write_input_tokens: 100,
+            output_tokens: 50,
+            reasoning_output_tokens: 20,
+          },
+          last_token_usage: {
+            input_tokens: 1_000,
+            cached_input_tokens: 800,
+            cache_write_input_tokens: 100,
+            output_tokens: 50,
+            reasoning_output_tokens: 20,
+          },
+        },
+      },
+    })}\n`,
+  );
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const received = caseStore.ingest(message("reconcile-message"));
+  caseStore.startRun(received.caseId, received.messageRow);
+  caseStore.db.prepare(`
+    UPDATE worker_sessions SET
+      codex_session_id=?,
+      model='company-gpt-5.6-sol',
+      request_count=9,
+      input_tokens=9000,
+      output_tokens=900
+    WHERE case_id=?
+  `).run(sessionId, received.caseId);
+  caseStore.setRuntimeSetting(`assistant_effort:${received.caseId}`, "high");
+
+  assert.deepEqual(
+    caseStore.reconcileCodexUsage({
+      codexHome,
+      model: "company-gpt-5.6-sol",
+      reasoningEffort: "medium",
+    }),
+    { updated: 1 },
+  );
+  const session = caseStore.detail(received.caseId).workerSession;
+  assert.equal(session.request_count, 1);
+  assert.equal(session.input_tokens, 1_000);
+  assert.equal(session.cached_input_tokens, 800);
+  assert.equal(session.output_tokens, 50);
+  assert.equal(session.total_tokens, 1_050);
+  assert.equal(session.reasoning_effort, "high");
+  assert.equal(session.estimated_cost_usd, 0.0029);
+  assert.deepEqual(
+    caseStore.reconcileCodexUsage({ codexHome }),
+    { updated: 0 },
   );
   caseStore.close();
 });
