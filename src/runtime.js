@@ -69,6 +69,20 @@ export function acceptedMessage(message, config) {
     return { accepted: false, reason: "official-account" };
   }
   if (
+    message.transport === "pad" &&
+    message.direction === "outgoing" &&
+    message.selfPeer
+  ) {
+    return { accepted: false, reason: "self-peer-outgoing" };
+  }
+  if (
+    message.transport === "pad" &&
+    message.direction === "outgoing" &&
+    !message.exactSelfChat
+  ) {
+    return { accepted: false, reason: "pad-outgoing" };
+  }
+  if (
     !source?.strictPolicy &&
     !config.policy.allowSelf &&
     message.selfId &&
@@ -88,9 +102,6 @@ export function acceptedMessage(message, config) {
     }
     if (message.selfConversation && hasAiReplyPrefix(message.text)) {
       return { accepted: false, reason: "assistant-echo" };
-    }
-    if (message.selfPeer && message.direction === "outgoing") {
-      return { accepted: false, reason: "self-peer-outgoing" };
     }
     if (message.exactSelfChat) {
       if (!source.allowSelf) return { accepted: false, reason: "self" };

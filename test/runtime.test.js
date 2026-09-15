@@ -147,6 +147,30 @@ test("applies source-scoped self, group, and nickname policies", () => {
     acceptedMessage({ ...base, direction: "outgoing" }, sourceConfig).reason,
     "self-peer-outgoing",
   );
+  assert.equal(
+    acceptedMessage({
+      ...base,
+      selfConversation: false,
+      selfPeer: false,
+      senderId: "wxid_small",
+      chatId: "filehelper",
+      direction: "outgoing",
+    }, sourceConfig).reason,
+    "pad-outgoing",
+  );
+  assert.equal(
+    acceptedMessage({
+      ...base,
+      chatType: "group",
+      chatId: "project@chatroom",
+      senderId: "wxid_small",
+      selfConversation: false,
+      selfPeer: false,
+      text: "webot status",
+      direction: "outgoing",
+    }, sourceConfig).reason,
+    "pad-outgoing",
+  );
   sourceConfig.pad.sources[0].acceptSelfChatPeerMessages = false;
   assert.equal(
     acceptedMessage(base, sourceConfig).reason,

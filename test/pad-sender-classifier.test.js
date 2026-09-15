@@ -19,6 +19,7 @@ function message(senderId) {
     transport: "pad",
     sourceId: "small",
     chatType: "private",
+    chatId: senderId,
     senderId,
   };
 }
@@ -41,6 +42,37 @@ test("blocks known system and gh_ accounts without a contact lookup", async () =
     (await classifier.classify(message("gh_example"))).blocked,
     true,
   );
+  assert.equal(
+    (await classifier.classify({
+      ...message("wxid_small"),
+      chatId: "filehelper",
+      direction: "outgoing",
+    })).blocked,
+    true,
+  );
+  assert.equal(requests, 0);
+});
+
+test("blocks internal lastMessage status events in any conversation", async () => {
+  let requests = 0;
+  const classifier = new PadSenderClassifier(config(), {
+    fetchImpl: async () => {
+      requests += 1;
+      throw new Error("unexpected request");
+    },
+  });
+
+  const result = await classifier.classify({
+    transport: "pad",
+    sourceId: "small",
+    chatType: "group",
+    chatId: "project@chatroom",
+    senderId: "wxid_small",
+    text: "<msg><op id='2'><name>lastMessage</name></op></msg>",
+  });
+
+  assert.equal(result.blocked, true);
+  assert.equal(result.reason, "internal-status-message");
   assert.equal(requests, 0);
 });
 

@@ -61,6 +61,14 @@ export function isPadSystemAccountId(value) {
   );
 }
 
+function isPadInternalStatusMessage(message) {
+  const text = String(message?.text || "");
+  return (
+    /<op\b/i.test(text) &&
+    /<name>\s*lastMessage\s*<\/name>/i.test(text)
+  );
+}
+
 export class PadSenderClassifier {
   constructor(
     config,
@@ -105,12 +113,22 @@ export class PadSenderClassifier {
   }
 
   async classify(message) {
-    if (message?.transport !== "pad" || message.chatType !== "private") {
+    if (message?.transport !== "pad") {
       return { blocked: false };
     }
-    if (isPadSystemAccountId(message.senderId)) {
+    if (isPadInternalStatusMessage(message)) {
+      return { blocked: true, reason: "internal-status-message" };
+    }
+    if (
+      message.chatType === "private" &&
+      (
+        isPadSystemAccountId(message.senderId) ||
+        isPadSystemAccountId(message.chatId)
+      )
+    ) {
       return { blocked: true, reason: "system-or-official-account" };
     }
+    if (message.chatType !== "private") return { blocked: false };
     if (message.selfConversation || message.selfPeer || message.exactSelfChat) {
       return { blocked: false };
     }

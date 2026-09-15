@@ -81,6 +81,9 @@ source repository.
   at least 10 seconds between request starts. Bulk lookups must use bounded
   batches without parallel calls; persisted local data is preferred.
 - Self-account pairs have explicit per-direction ingress permission.
+- Pad outbound events never trigger workers outside exact same-account private
+  self chat. System destinations such as `filehelper` and internal
+  `lastMessage` status events are rejected before case ingestion.
 - The AI echo marker is emitted only for same-account private self replies.
 - A SQLite unique constraint suppresses repeated delivery of the same source
   event.
