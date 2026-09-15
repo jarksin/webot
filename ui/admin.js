@@ -649,8 +649,11 @@ function assistantMarkup() {
       <div class="section-head"><div><h2>Case 自动化</h2><p>入站先形成 Case，再由 worker 生成 draft</p></div></div>
       ${toggle("自动运行 Worker", "case-auto-run", caseManagement.autoRun !== false, "新消息进入后自动生成 draft")}
       ${toggle("本人接收中间回复", "case-owner-intermediate-items", caseManagement.ownerIntermediateItems === true, "仅 owner 任务发送 Codex 的自然语言中间 item")}
-      <div class="form-grid">
+      <div class="form-grid three">
         ${field("Worker 并发", "case-worker-concurrency", caseManagement.workerConcurrency || 2, { type: "number" })}
+        ${field("群上下文注入条数", "case-group-context-limit", caseManagement.groupContextLimit ?? 50, { type: "number" })}
+        ${field("群上下文保留（小时）", "case-group-context-retention", caseManagement.groupContextRetentionHours ?? 168, { type: "number" })}
+        ${field("每群最多留存", "case-group-context-max", caseManagement.groupContextMaxMessages ?? 2000, { type: "number" })}
       </div>
     </div>`;
 }
@@ -830,6 +833,15 @@ function readAssistantForm() {
     ownerIntermediateItems: document.querySelector(
       "#case-owner-intermediate-items",
     ).checked,
+    groupContextLimit: Number(
+      document.querySelector("#case-group-context-limit").value,
+    ),
+    groupContextRetentionHours: Number(
+      document.querySelector("#case-group-context-retention").value,
+    ),
+    groupContextMaxMessages: Number(
+      document.querySelector("#case-group-context-max").value,
+    ),
     workerConcurrency: Number(
       document.querySelector("#case-worker-concurrency").value,
     ),

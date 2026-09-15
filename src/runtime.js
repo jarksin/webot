@@ -128,7 +128,11 @@ export function acceptedMessage(message, config) {
       lowerText.startsWith(trigger.toLowerCase()),
     );
     if (!mentioned && !triggered) {
-      return { accepted: false, reason: "group-not-triggered" };
+      return {
+        accepted: false,
+        reason: "group-not-triggered",
+        retainGroupContext: true,
+      };
     }
   }
 

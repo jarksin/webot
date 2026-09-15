@@ -53,8 +53,31 @@ export class CaseManager {
     return this.config.caseManagement || {};
   }
 
+  groupContextSettings() {
+    const settings = this.caseSettings();
+    return {
+      limit: Number(settings.groupContextLimit ?? 50),
+      retentionHours: Number(settings.groupContextRetentionHours ?? 168),
+      maxMessages: Number(settings.groupContextMaxMessages ?? 2000),
+    };
+  }
+
   async receive(message) {
     const decision = acceptedMessage(message, this.config);
+    if (decision.retainGroupContext || (
+      decision.accepted && message.chatType === "group"
+    )) {
+      const context = this.caseStore.ingestGroupContext(
+        message,
+        this.groupContextSettings(),
+      );
+      if (!decision.accepted) {
+        return {
+          ...decision,
+          contextStored: context.inserted,
+        };
+      }
+    }
     if (!decision.accepted) return decision;
     const clean = { ...message, text: decision.text || message.text };
     const owner = this.requesterAccess(clean) === "owner";
@@ -200,6 +223,12 @@ export class CaseManager {
     }
     if (!pending.length) return;
     const trigger = pending[pending.length - 1];
+    const previousMessage = previousSession?.last_processed_message_id
+      ? this.caseStore.messageByRowId(
+          caseId,
+          previousSession.last_processed_message_id,
+        )
+      : null;
     const cutoffMessageId = trigger.id;
     const session = this.caseStore.startRun(caseId, cutoffMessageId);
     const controller = new AbortController();
@@ -251,12 +280,21 @@ export class CaseManager {
         ...trigger.message,
         text: currentText || trigger.message.text,
       };
+      const conversationContext = this.caseStore.groupContextBefore(
+        trigger.message,
+        {
+          ...this.groupContextSettings(),
+          afterMessageId: previousMessage?.message_id || "",
+          excludeMessageIds: pending.map((item) => item.message_id),
+        },
+      );
       this.caseStore.addProgress(caseId, session.run_count, "正在生成 draft");
       const providerResult = await this.provider.reply({
         caseId,
         codexSessionId: session.codex_session_id || "",
         message: currentMessage,
         history,
+        conversationContext,
         currentMessageCount: pending.length,
         signal: controller.signal,
         onItem,

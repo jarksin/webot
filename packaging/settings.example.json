@@ -40,6 +40,9 @@
   "caseManagement": {
     "autoRun": true,
     "autoSend": true,
+    "groupContextLimit": 50,
+    "groupContextRetentionHours": 168,
+    "groupContextMaxMessages": 2000,
     "ownerIntermediateItems": false,
     "workerConcurrency": 2
   },

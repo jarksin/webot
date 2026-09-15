@@ -44,7 +44,11 @@ test("requires a trigger in group chats", () => {
     text: "hello",
     mentions: [],
   };
-  assert.equal(acceptedMessage(base, config()).accepted, false);
+  assert.deepEqual(acceptedMessage(base, config()), {
+    accepted: false,
+    reason: "group-not-triggered",
+    retainGroupContext: true,
+  });
   assert.equal(
     acceptedMessage({ ...base, text: "webot hello" }, config()).text,
     "hello",

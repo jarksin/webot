@@ -32,6 +32,13 @@ function caseIdFor(message) {
   return `wechat:${message.sourceId || "default"}:${conversation}`;
 }
 
+function conversationIdFor(message) {
+  return String(
+    message.conversationId ||
+    `${message.chatType || "private"}:${message.chatId}`,
+  );
+}
+
 function ensureColumn(db, table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
   if (columns.some((item) => item.name === column)) return false;
@@ -65,6 +72,26 @@ export class CaseStore {
       );
       CREATE INDEX IF NOT EXISTS messages_case_time
         ON messages(case_id, timestamp, id);
+      CREATE TABLE IF NOT EXISTS group_context_messages (
+        id INTEGER PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        timestamp INTEGER NOT NULL,
+        direction TEXT NOT NULL,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        text TEXT NOT NULL,
+        message_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        UNIQUE(source_id, message_id)
+      );
+      CREATE INDEX IF NOT EXISTS group_context_conversation_time
+        ON group_context_messages(
+          source_id, conversation_id, timestamp DESC, id DESC
+        );
+      CREATE INDEX IF NOT EXISTS group_context_expiry
+        ON group_context_messages(timestamp);
       CREATE TABLE IF NOT EXISTS cases (
         case_id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL,
@@ -228,6 +255,8 @@ export class CaseStore {
       SET status='new', last_error='', updated_at=${recoveredAt}
       WHERE status='running';
     `);
+    this.groupContextWrites = 0;
+    this.groupContextCounts = new Map();
   }
 
   close() {
@@ -286,6 +315,169 @@ export class CaseStore {
 
   deleteSession(scopeCaseId, name) {
     return deleteSession(this.db, scopeCaseId, name);
+  }
+
+  ingestGroupContext(message, options = {}) {
+    if (message?.chatType !== "group") {
+      return { inserted: false, reason: "not-group" };
+    }
+    const createdAt = now();
+    const sourceId = String(message.sourceId || "default");
+    const conversationId = conversationIdFor(message);
+    const result = this.db.prepare(`
+      INSERT OR IGNORE INTO group_context_messages(
+        source_id, conversation_id, message_id, timestamp, direction,
+        sender_id, sender_name, text, message_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      sourceId,
+      conversationId,
+      String(message.messageId),
+      Number(message.timestamp || createdAt),
+      String(message.direction || "incoming"),
+      String(message.senderId || ""),
+      String(message.senderName || ""),
+      String(message.text || ""),
+      JSON.stringify(message),
+      createdAt,
+    );
+    if (!result.changes) return { inserted: false, reason: "duplicate" };
+
+    this.groupContextWrites += 1;
+    const countKey = `${sourceId}\u0000${conversationId}`;
+    let conversationCount = this.groupContextCounts.get(countKey);
+    if (conversationCount == null) {
+      conversationCount = Number(
+        this.db.prepare(`
+          SELECT COUNT(*) AS count FROM group_context_messages
+          WHERE source_id=? AND conversation_id=?
+        `).get(sourceId, conversationId).count || 0,
+      );
+    } else {
+      conversationCount += 1;
+    }
+    this.groupContextCounts.set(countKey, conversationCount);
+    const maxMessages = Math.min(
+      Math.max(Number(options.maxMessages) || 2000, 100),
+      100_000,
+    );
+    const pruneExpired =
+      this.groupContextWrites === 1 || this.groupContextWrites % 100 === 0;
+    if (pruneExpired || conversationCount > maxMessages) {
+      this.pruneGroupContext(sourceId, conversationId, {
+        ...options,
+        pruneExpired,
+      });
+      this.groupContextCounts.set(
+        countKey,
+        Number(
+          this.db.prepare(`
+            SELECT COUNT(*) AS count FROM group_context_messages
+            WHERE source_id=? AND conversation_id=?
+          `).get(sourceId, conversationId).count || 0,
+        ),
+      );
+    }
+    return {
+      inserted: true,
+      rowId: Number(result.lastInsertRowid),
+      conversationId,
+    };
+  }
+
+  pruneGroupContext(sourceId, conversationId, options = {}) {
+    const retentionHours = Math.min(
+      Math.max(Number(options.retentionHours) || 168, 1),
+      24 * 365,
+    );
+    const maxMessages = Math.min(
+      Math.max(Number(options.maxMessages) || 2000, 100),
+      100_000,
+    );
+    const cutoff = now() - retentionHours * 60 * 60 * 1000;
+    if (options.pruneExpired !== false) {
+      this.db.prepare(
+        "DELETE FROM group_context_messages WHERE timestamp<?",
+      ).run(cutoff);
+      this.groupContextCounts.clear();
+    }
+    this.db.prepare(`
+      DELETE FROM group_context_messages
+      WHERE source_id=? AND conversation_id=? AND id IN (
+        SELECT id FROM group_context_messages
+        WHERE source_id=? AND conversation_id=?
+        ORDER BY timestamp DESC, id DESC
+        LIMIT -1 OFFSET ?
+      )
+    `).run(
+      sourceId,
+      conversationId,
+      sourceId,
+      conversationId,
+      maxMessages,
+    );
+  }
+
+  groupContextBefore(message, options = {}) {
+    if (message?.chatType !== "group") return [];
+    const limit = Math.min(
+      Math.max(Number(options.limit) || 0, 0),
+      200,
+    );
+    if (!limit) return [];
+    const retentionHours = Math.min(
+      Math.max(Number(options.retentionHours) || 168, 1),
+      24 * 365,
+    );
+    const sourceId = String(message.sourceId || "default");
+    const conversationId = conversationIdFor(message);
+    const position = this.db.prepare(`
+      SELECT id, timestamp FROM group_context_messages
+      WHERE source_id=? AND message_id=?
+      LIMIT 1
+    `);
+    const upper = position.get(sourceId, String(message.messageId)) || {
+      id: Number.MAX_SAFE_INTEGER,
+      timestamp: Number(message.timestamp || now()),
+    };
+    const after = options.afterMessageId
+      ? position.get(sourceId, String(options.afterMessageId))
+      : null;
+    const configuredLower =
+      Number(upper.timestamp) - retentionHours * 60 * 60 * 1000;
+    const lower = after || { id: 0, timestamp: configuredLower };
+    const excluded = [
+      ...new Set(
+        (options.excludeMessageIds || [])
+          .map((item) => String(item || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const exclusionSql = excluded.length
+      ? `AND message_id NOT IN (${excluded.map(() => "?").join(", ")})`
+      : "";
+    const rows = this.db.prepare(`
+      SELECT * FROM group_context_messages
+      WHERE source_id=? AND conversation_id=?
+        AND (timestamp, id)>(?, ?)
+        AND (timestamp, id)<(?, ?)
+        ${exclusionSql}
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ?
+    `).all(
+      sourceId,
+      conversationId,
+      Number(lower.timestamp),
+      Number(lower.id),
+      Number(upper.timestamp),
+      Number(upper.id),
+      ...excluded,
+      limit,
+    );
+    return rows.reverse().map((row) => ({
+      ...row,
+      message: json(row.message_json, {}),
+    }));
   }
 
   ingest(message, text = message.text, options = {}) {

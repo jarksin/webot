@@ -123,6 +123,9 @@ test("new installations use an isolated workspace under the data directory", () 
   );
   assert.equal(config.assistant.timeoutMs, 0);
   assert.equal(config.caseManagement.ownerIntermediateItems, false);
+  assert.equal(config.caseManagement.groupContextLimit, 50);
+  assert.equal(config.caseManagement.groupContextRetentionHours, 168);
+  assert.equal(config.caseManagement.groupContextMaxMessages, 2000);
 });
 
 test("source installations use the Webot repository as the Codex workdir", () => {
@@ -144,8 +147,16 @@ test("source installations use the Webot repository as the Codex workdir", () =>
 test("worker timeout and owner intermediate items are configurable", () => {
   const config = loadConfig({}, {
     assistant: { timeoutMs: -1 },
-    caseManagement: { ownerIntermediateItems: true },
+    caseManagement: {
+      ownerIntermediateItems: true,
+      groupContextLimit: 300,
+      groupContextRetentionHours: 0,
+      groupContextMaxMessages: 5,
+    },
   });
   assert.equal(config.assistant.timeoutMs, 0);
   assert.equal(config.caseManagement.ownerIntermediateItems, true);
+  assert.equal(config.caseManagement.groupContextLimit, 200);
+  assert.equal(config.caseManagement.groupContextRetentionHours, 1);
+  assert.equal(config.caseManagement.groupContextMaxMessages, 100);
 });

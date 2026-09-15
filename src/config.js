@@ -222,6 +222,24 @@ export function loadConfig(env = process.env, settings = {}) {
     caseManagement: {
       autoRun: value(caseSettings.autoRun, true),
       autoSend: value(caseSettings.autoSend, true),
+      groupContextLimit: Math.min(
+        Math.max(integer(value(caseSettings.groupContextLimit, 50), 50), 0),
+        200,
+      ),
+      groupContextRetentionHours: Math.min(
+        Math.max(
+          integer(value(caseSettings.groupContextRetentionHours, 168), 168),
+          1,
+        ),
+        24 * 365,
+      ),
+      groupContextMaxMessages: Math.min(
+        Math.max(
+          integer(value(caseSettings.groupContextMaxMessages, 2000), 2000),
+          100,
+        ),
+        100_000,
+      ),
       ownerIntermediateItems: value(
         caseSettings.ownerIntermediateItems,
         boolean(env.WEBOT_OWNER_INTERMEDIATE_ITEMS),

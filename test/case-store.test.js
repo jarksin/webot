@@ -29,6 +29,26 @@ function message(id = "message-1") {
   };
 }
 
+function groupMessage(id, text, timestamp = Date.now()) {
+  return {
+    transport: "pad",
+    sourceId: "small",
+    sourceName: "小号",
+    messageId: id,
+    timestamp,
+    chatType: "group",
+    chatId: "room@chatroom",
+    conversationId: "group:small:room@chatroom",
+    senderId: "group-member",
+    senderName: "群成员",
+    selfId: "wxid_small",
+    replyTarget: "room@chatroom",
+    direction: "incoming",
+    text,
+    mentions: [],
+  };
+}
+
 async function waitFor(check, timeoutMs = 1000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -123,6 +143,104 @@ test("persists a WeChat case, worker session, draft, and send result", async () 
   assert.equal(
     caseStore.detail(received.caseId).workerSession.codex_session_id,
     "",
+  );
+  caseStore.close();
+});
+
+test("stores allowed untriggered group messages and injects indexed context", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-context-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const contexts = [];
+  const config = {
+    assistant: { mode: "echo", llmModel: "" },
+    caseManagement: {
+      autoRun: true,
+      autoSend: false,
+      workerConcurrency: 1,
+      groupContextLimit: 50,
+      groupContextRetentionHours: 168,
+      groupContextMaxMessages: 2000,
+    },
+    pad: {
+      sources: [{
+        id: "small",
+        strictPolicy: true,
+        allowSelf: false,
+        selfChatPeers: new Set(),
+        acceptSelfChatPeerMessages: false,
+        allowedChatIds: new Set(["room@chatroom"]),
+        allowedSenderIds: new Set(),
+        privateNicknameAllowlist: new Set(),
+        triggerKeywords: new Set(["webot"]),
+        botNames: new Set(["Webot"]),
+      }],
+    },
+    policy: {
+      blockedSenderIds: new Set(),
+      allowSelf: false,
+      allowedChatIds: new Set(),
+      allowedSenderIds: new Set(),
+      groupTriggers: new Set(["webot"]),
+    },
+    identity: { botNames: new Set(["Webot"]) },
+  };
+  const manager = new CaseManager({
+    config,
+    provider: {
+      async reply({ message: current, conversationContext }) {
+        contexts.push({ current, conversationContext });
+        return "done";
+      },
+    },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: {},
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  const firstAt = Date.now() - 2000;
+  const retained = await manager.receive(
+    groupMessage("context-1", "前面的讨论", firstAt),
+  );
+  assert.equal(retained.accepted, false);
+  assert.equal(retained.contextStored, true);
+  assert.equal(caseStore.listCases().length, 0);
+
+  const duplicate = await manager.receive(
+    groupMessage("context-1", "前面的讨论", firstAt),
+  );
+  assert.equal(duplicate.contextStored, false);
+
+  const triggered = await manager.receive(
+    groupMessage("trigger-1", "webot 总结一下", firstAt),
+  );
+  assert.equal(triggered.accepted, true);
+  await waitFor(() => manager.status().active === 0 && contexts.length === 1);
+  assert.equal(contexts[0].current.text, "总结一下");
+  assert.deepEqual(
+    contexts[0].conversationContext.map((item) => item.text),
+    ["前面的讨论"],
+  );
+
+  const plan = caseStore.db.prepare(`
+    EXPLAIN QUERY PLAN
+    SELECT * FROM group_context_messages
+    WHERE source_id=? AND conversation_id=?
+      AND (timestamp, id)>(?, ?)
+      AND (timestamp, id)<(?, ?)
+    ORDER BY timestamp DESC, id DESC
+    LIMIT ?
+  `).all(
+    "small",
+    "group:small:room@chatroom",
+    firstAt - 1,
+    0,
+    firstAt + 1,
+    Number.MAX_SAFE_INTEGER,
+    50,
+  );
+  assert.match(
+    plan.map((item) => item.detail).join("\n"),
+    /group_context_conversation_time/,
   );
   caseStore.close();
 });
