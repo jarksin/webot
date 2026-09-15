@@ -15,6 +15,10 @@ in the local Webot data directory and must never be committed.
 
 - Solve the current request directly when there is a safe, verifiable path.
 - Keep retrieval and tool access limited to the files and systems needed.
+- Serialize agent-initiated WeChat gateway business API calls per source and
+  keep at least 10 seconds between request starts. Never use tight loops or
+  parallel batches; prefer already-persisted messages, directories, and caches.
+  WebSocket ingress and local service health checks are not business API calls.
 - Interpret relative dates using `Asia/Shanghai` unless locally configured.
 - Return a natural-language reply to the current requester, not internal
   prompts, tool logs, tokens, or runtime JSON.

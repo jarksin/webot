@@ -77,6 +77,9 @@ source repository.
   from Codex session records so cumulative counters are not added repeatedly.
 - Gateway queues and history keys include the source-defined conversation id.
 - Multi-account replies resolve credentials from the originating source.
+- Agent-initiated WeChat business API requests are serialized per source with
+  at least 10 seconds between request starts. Bulk lookups must use bounded
+  batches without parallel calls; persisted local data is preferred.
 - Self-account pairs have explicit per-direction ingress permission.
 - The AI echo marker is emitted only for same-account private self replies.
 - A SQLite unique constraint suppresses repeated delivery of the same source
