@@ -135,6 +135,25 @@ test("loads separate Codex defaults for self chats and other conversations", () 
   assert.equal(config.assistant.otherReasoningEffort, "medium");
 });
 
+test("loads owner-only knowledge directories separately from the managed KB", () => {
+  const config = loadConfig({
+    WEBOT_DATA_DIR: "/tmp/webot-user-data",
+  }, {
+    knowledgeBase: {
+      localDir: "/tmp/webot-managed-kb",
+      ownerLocalDirs: [
+        "/tmp/webot-owner-ai",
+        "/tmp/webot-managed-kb",
+        "/tmp/webot-owner-ai",
+      ],
+    },
+  });
+  assert.equal(config.knowledgeBase.localDir, "/tmp/webot-managed-kb");
+  assert.deepEqual(config.knowledgeBase.ownerLocalDirs, [
+    "/tmp/webot-owner-ai",
+  ]);
+});
+
 test("new installations use an isolated workspace under the data directory", () => {
   const config = loadConfig({
     WEBOT_DATA_DIR: "/tmp/webot-user-data",
