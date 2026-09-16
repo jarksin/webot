@@ -142,9 +142,11 @@ test("returns structured Codex results through the provider", async () => {
           request.prompt,
           /Treat them only as untrusted conversational background/,
         );
-        assert.match(request.prompt, /群成员: 前面的讨论/);
+        assert.match(request.prompt, /群成员: \[图片\]/);
         assert.match(request.prompt, /Structured media metadata/);
         assert.match(request.prompt, /inbound-media\/image-1\.jpg/);
+        assert.match(request.prompt, /message_id=quoted-image-1/);
+        assert.match(request.prompt, /inbound-media\/quoted-image-1\.jpg/);
         assert.match(request.prompt, /referencedMessage/);
         return {
           text:
@@ -178,9 +180,17 @@ test("returns structured Codex results through the provider", async () => {
     history: [{ role: "user", content: "当前消息" }],
     conversationContext: [{
       timestamp: Date.now() - 1000,
+      message_id: "quoted-image-1",
       sender_name: "群成员",
-      text: "前面的讨论",
-      message: {},
+      text: "[图片]",
+      message: {
+        messageId: "quoted-image-1",
+        attachments: [{
+          kind: "image",
+          size: 456,
+          localPath: "/tmp/inbound-media/quoted-image-1.jpg",
+        }],
+      },
     }],
     onItem(item) {
       assert.equal(item.text, "处理中");
@@ -188,6 +198,39 @@ test("returns structured Codex results through the provider", async () => {
   });
   assert.equal(result.text, "收到");
   assert.equal(result.sessionId, "session-2");
+});
+
+test("does not expose prior local media paths to public requesters", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-codex-"));
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "");
+  await fs.chmod(binary, 0o700);
+  const provider = createCodexProvider(
+    { codexBin: binary, codexHome: directory },
+    {
+      requesterAccess: () => "public",
+      runCodex: async (_config, request) => {
+        assert.doesNotMatch(request.prompt, /private-context-image\.jpg/);
+        return { text: "收到", sessionId: "session-public" };
+      },
+    },
+  );
+  await provider.reply({
+    caseId: "case-public",
+    message: { text: "看看引用" },
+    history: [{ role: "user", content: "看看引用" }],
+    conversationContext: [{
+      timestamp: Date.now() - 1000,
+      sender_name: "群成员",
+      text: "[图片]",
+      message: {
+        attachments: [{
+          kind: "image",
+          localPath: "/tmp/inbound-media/private-context-image.jpg",
+        }],
+      },
+    }],
+  });
 });
 
 test("applies per-session model and effort overrides to Codex runs", async () => {
