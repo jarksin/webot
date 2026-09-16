@@ -356,7 +356,23 @@ export class CaseManager {
         cutoffMessageId,
       );
       if (this.caseSettings().autoSend !== false) {
-        await this.sendDraft(caseId, draftId);
+        try {
+          await this.sendDraft(caseId, draftId);
+        } catch (error) {
+          this.caseStore.markDraftError(caseId, draftId, error.message);
+          this.caseStore.finishRun(
+            caseId,
+            "draft_ready",
+            error.message,
+            cutoffMessageId,
+          );
+          this.caseStore.addProgress(
+            caseId,
+            session.run_count,
+            `draft #${draftId} 自动发送失败，已保留待重试：${error.message}`,
+            "warn",
+          );
+        }
       }
       if (owner && this.afterOwnerRun) {
         try {

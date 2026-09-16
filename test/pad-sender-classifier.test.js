@@ -18,6 +18,7 @@ function message(senderId) {
   return {
     transport: "pad",
     sourceId: "small",
+    messageType: 1,
     chatType: "private",
     chatId: senderId,
     senderId,
@@ -65,6 +66,7 @@ test("blocks internal Pad status events in any conversation", async () => {
   const lastMessage = await classifier.classify({
     transport: "pad",
     sourceId: "small",
+    messageType: 51,
     chatType: "group",
     chatId: "project@chatroom",
     senderId: "wxid_small",
@@ -73,6 +75,7 @@ test("blocks internal Pad status events in any conversation", async () => {
   const handoff = await classifier.classify({
     transport: "pad",
     sourceId: "small",
+    messageType: 51,
     chatType: "private",
     chatId: "wxid_small",
     senderId: "wxid_small",
@@ -81,6 +84,7 @@ test("blocks internal Pad status events in any conversation", async () => {
   const download = await classifier.classify({
     transport: "pad",
     sourceId: "small",
+    messageType: 51,
     chatType: "private",
     chatId: "wxid_small",
     senderId: "wxid_small",
@@ -93,6 +97,7 @@ test("blocks internal Pad status events in any conversation", async () => {
   const quotedXml = await classifier.classify({
     transport: "pad",
     sourceId: "small",
+    messageType: 1,
     chatType: "group",
     chatId: "project@chatroom",
     senderId: "wxid_person",
@@ -107,6 +112,34 @@ test("blocks internal Pad status events in any conversation", async () => {
   assert.equal(download.reason, "internal-status-message");
   assert.equal(quotedXml.blocked, false);
   assert.equal(requests, 0);
+});
+
+test("allows only configured regular Pad message types", async () => {
+  const classifier = new PadSenderClassifier(config(), {
+    fetchImpl: async () => {
+      throw new Error("unexpected request");
+    },
+  });
+  const base = {
+    transport: "pad",
+    sourceId: "small",
+    chatType: "group",
+    chatId: "project@chatroom",
+    senderId: "wxid_person",
+    text: "content",
+  };
+
+  for (const messageType of [1, 3, 34, 37, 42, 43, 47, 48, 49, 62]) {
+    assert.equal(
+      (await classifier.classify({ ...base, messageType })).blocked,
+      false,
+    );
+  }
+  for (const messageType of [51, 10000, 10002, null]) {
+    const result = await classifier.classify({ ...base, messageType });
+    assert.equal(result.blocked, true);
+    assert.equal(result.reason, "unsupported-message-type");
+  }
 });
 
 test("blocks WeChat safety notices without blocking the contact", async () => {

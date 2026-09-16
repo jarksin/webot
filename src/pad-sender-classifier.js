@@ -10,6 +10,18 @@ const DEFAULT_SYSTEM_ACCOUNT_IDS = new Set([
   "mphelper",
   "wxid_novlwrv3lqwv11",
 ]);
+const ALLOWED_PAD_MESSAGE_TYPES = new Set([
+  1,
+  3,
+  34,
+  37,
+  42,
+  43,
+  47,
+  48,
+  49,
+  62,
+]);
 
 function scalar(value) {
   if (value && typeof value === "object") {
@@ -65,6 +77,12 @@ function isPadInternalStatusMessage(message) {
   const text = String(message?.text || "");
   return /^\s*<msg(?:\s[^>]*)?>\s*<op\b[^>]*>[\s\S]*<\/op>\s*<\/msg>\s*$/i
     .test(text);
+}
+
+function isAllowedPadMessageType(message) {
+  const messageType = Number(message?.messageType);
+  return Number.isInteger(messageType) &&
+    ALLOWED_PAD_MESSAGE_TYPES.has(messageType);
 }
 
 function isPadSafetyNotice(message) {
@@ -126,6 +144,9 @@ export class PadSenderClassifier {
     }
     if (isPadInternalStatusMessage(message)) {
       return { blocked: true, reason: "internal-status-message" };
+    }
+    if (!isAllowedPadMessageType(message)) {
+      return { blocked: true, reason: "unsupported-message-type" };
     }
     if (isPadSafetyNotice(message)) {
       return { blocked: true, reason: "wechat-safety-notice" };

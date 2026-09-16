@@ -1739,7 +1739,7 @@ export class CaseStore {
   markSent(caseId, draftId, outbound) {
     const timestamp = now();
     this.db.prepare(`
-      UPDATE drafts SET status='sent', sent_at=?, outbound_json=?
+      UPDATE drafts SET status='sent', sent_at=?, outbound_json=?, error=''
       WHERE id=? AND case_id=?
     `).run(timestamp, JSON.stringify(outbound || {}), Number(draftId), caseId);
     this.db.prepare(`
@@ -1760,6 +1760,13 @@ export class CaseStore {
         updated_at=?
       WHERE case_id=?
     `).run(Number(draftId), Number(draftId), timestamp, caseId);
+  }
+
+  markDraftError(caseId, draftId, error) {
+    this.db.prepare(`
+      UPDATE drafts SET error=?
+      WHERE id=? AND case_id=? AND status!='sent'
+    `).run(String(error || ""), Number(draftId), caseId);
   }
 
   draft(caseId, draftId) {

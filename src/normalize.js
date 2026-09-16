@@ -33,7 +33,209 @@ function xmlTag(xml, tag) {
   return match ? decodeXmlText(match[1]).trim() : "";
 }
 
+function objectValue(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : null;
+}
+
+function numberValue(value) {
+  const number = Number(scalar(value));
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function padDownloadContext(value) {
+  const context = objectValue(value);
+  if (!context) return null;
+  const section = objectValue(context.section ?? context.Section);
+  const result = {
+    endpoint: scalar(context.endpoint ?? context.Endpoint),
+    msgId: numberValue(context.msg_id ?? context.MsgID ?? context.msgId),
+    newMsgId: scalar(
+      context.new_msg_id ?? context.NewMsgID ?? context.newMsgId,
+    ),
+    clientMsgId: scalar(
+      context.client_msg_id ?? context.ClientMsgID ?? context.clientMsgId,
+    ),
+    masterBufferId: scalar(
+      context.master_buf_id ??
+        context.MasterBufferID ??
+        context.masterBufferId,
+    ),
+    toWxid: scalar(context.to_wxid ?? context.ToWXID ?? context.toWxid),
+    chatRoomName: scalar(
+      context.chat_room_name ??
+        context.ChatRoomName ??
+        context.chatRoomName,
+    ),
+    attachId: scalar(
+      context.attach_id ?? context.AttachID ?? context.attachId,
+    ),
+    appId: scalar(context.app_id ?? context.AppID ?? context.appId),
+    userName: scalar(
+      context.user_name ?? context.UserName ?? context.userName,
+    ),
+    dataLen: numberValue(context.data_len ?? context.DataLen ?? context.dataLen),
+    length: numberValue(context.length ?? context.Length),
+    format: numberValue(context.format ?? context.Format),
+    compressType: numberValue(
+      context.compress_type ?? context.CompressType ?? context.compressType,
+    ),
+    section: section
+      ? {
+          startPos: numberValue(
+            section.start_pos ?? section.StartPos ?? section.startPos,
+          ),
+          dataLen: numberValue(
+            section.data_len ?? section.DataLen ?? section.dataLen,
+          ),
+        }
+      : null,
+  };
+  if (!result.endpoint) return null;
+  return Object.fromEntries(
+    Object.entries(result).filter(([, item]) =>
+      item != null && item !== "" && item !== 0
+    ),
+  );
+}
+
+function padReference(message) {
+  const reference = objectValue(
+    message.app?.reference ??
+      message.App?.Reference ??
+      message.reference ??
+      message.Reference,
+  );
+  if (!reference) return null;
+  const result = {
+    messageId: scalar(
+      reference.new_msg_id ??
+        reference.NewMsgID ??
+        reference.svr_id ??
+        reference.SvrID,
+    ),
+    messageType: numberValue(
+      reference.msg_type ?? reference.MsgType ?? reference.messageType,
+    ),
+    kind: scalar(reference.kind ?? reference.Kind),
+    senderId: scalar(
+      reference.from_user_id ??
+        reference.FromUserID ??
+        reference.senderId,
+    ),
+    senderName: scalar(
+      reference.display_name ??
+        reference.DisplayName ??
+        reference.senderName,
+    ),
+    text: scalar(
+      reference.display_text ??
+        reference.DisplayText ??
+        reference.content ??
+        reference.Content,
+    ),
+  };
+  return Object.fromEntries(
+    Object.entries(result).filter(([, item]) =>
+      item != null && item !== "" && item !== 0
+    ),
+  );
+}
+
+function structuredPadAttachments(message) {
+  const attachments = [];
+  const image = objectValue(message.image ?? message.Image);
+  if (image) {
+    attachments.push({
+      kind: "image",
+      size: numberValue(image.data_len ?? image.DataLen),
+      width: numberValue(
+        image.standard_width ??
+          image.StandardWidth ??
+          image.original_width ??
+          image.OriginalWidth,
+      ),
+      height: numberValue(
+        image.standard_height ??
+          image.StandardHeight ??
+          image.original_height ??
+          image.OriginalHeight,
+      ),
+      md5: scalar(image.md5 ?? image.MD5),
+      downloadContext: padDownloadContext(
+        image.download_context ?? image.DownloadContext,
+      ),
+    });
+  }
+  const voice = objectValue(message.voice ?? message.Voice);
+  if (voice) {
+    attachments.push({
+      kind: "audio",
+      size: numberValue(voice.data_length ?? voice.DataLength),
+      durationMs: numberValue(voice.duration_ms ?? voice.DurationMS),
+      format: numberValue(voice.format ?? voice.Format),
+      transcript: scalar(voice.transcript ?? voice.Transcript),
+      downloadContext: padDownloadContext(
+        voice.download_context ?? voice.DownloadContext,
+      ),
+    });
+  }
+  const video = objectValue(message.video ?? message.Video);
+  if (video) {
+    attachments.push({
+      kind: "video",
+      size: numberValue(video.data_len ?? video.DataLen),
+      durationSeconds: numberValue(
+        video.duration_seconds ?? video.DurationSeconds,
+      ),
+      md5: scalar(video.md5 ?? video.MD5),
+      downloadContext: padDownloadContext(
+        video.download_context ?? video.DownloadContext,
+      ),
+    });
+  }
+  const file = objectValue(message.file ?? message.File);
+  if (file) {
+    let filename = scalar(file.name ?? file.Name) || "微信文件";
+    const extension = scalar(file.extension ?? file.Extension).replace(/^\./, "");
+    if (
+      extension &&
+      !filename.toLowerCase().endsWith(`.${extension.toLowerCase()}`)
+    ) {
+      filename = `${filename}.${extension}`;
+    }
+    attachments.push({
+      kind: "file",
+      filename,
+      size: numberValue(file.data_len ?? file.DataLen),
+      fileExtension: extension,
+      md5: scalar(file.md5 ?? file.MD5),
+      downloadContext: padDownloadContext(
+        file.download_context ?? file.DownloadContext,
+      ),
+    });
+  }
+  return attachments.map((attachment) =>
+    Object.fromEntries(
+      Object.entries(attachment).filter(([, item]) =>
+        item != null && item !== "" && item !== 0
+      ),
+    )
+  );
+}
+
 function padContent(message, rawContent) {
+  const structuredText = scalar(
+    message.display_text ?? message.DisplayText ?? message.displayText,
+  ).trim();
+  const structuredAttachments = structuredPadAttachments(message);
+  if (structuredText || structuredAttachments.length) {
+    return {
+      text: structuredText || rawContent,
+      attachments: structuredAttachments,
+    };
+  }
   const messageType = Number(
     scalar(message.MsgType ?? message.msg_type ?? message.type),
   );
@@ -202,6 +404,9 @@ function normalizePadMessage(message, sourceValue) {
     typeof sourceValue === "string"
       ? { id: "default", displayName: "default", selfId: sourceValue }
       : sourceValue || { id: "default", displayName: "default", selfId: "" };
+  const messageType = Number(
+    scalar(message.MsgType ?? message.msg_type ?? message.type),
+  );
   const selfId = scalar(source.selfId);
   const from = scalar(
     message.FromUserName ??
@@ -287,6 +492,7 @@ function normalizePadMessage(message, sourceValue) {
     transport: "pad",
     sourceId: source.id,
     sourceName: source.displayName,
+    messageType: Number.isInteger(messageType) ? messageType : null,
     messageId:
       scalar(
         message.NewMsgId ??
@@ -316,6 +522,7 @@ function normalizePadMessage(message, sourceValue) {
     replyTarget: room || peerId,
     text: split.text.trim(),
     attachments: content.attachments,
+    reference: padReference(message),
     mentions: padMentionIds(message),
   };
 }

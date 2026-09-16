@@ -91,6 +91,7 @@ test("persists rejected Pad sync messages and explicitly syncs contact names", a
     transport: "pad",
     sourceId: "small",
     sourceName: "小号",
+    messageType: 1,
     messageId: "group-1",
     timestamp: Date.now(),
     chatType: "group",
@@ -130,10 +131,43 @@ test("persists rejected Pad sync messages and explicitly syncs contact names", a
     /must-not-be-persisted|localPath|\/tmp\/preview\.jpg/,
   );
 
+  const unsupported = await application.receive({
+    transport: "pad",
+    sourceId: "small",
+    sourceName: "小号",
+    messageType: 51,
+    messageId: "control-1",
+    timestamp: Date.now(),
+    chatType: "private",
+    chatId: "wxid_member",
+    conversationId: "private:small:wxid_member",
+    senderId: "wxid_member",
+    selfId: "wxid_small",
+    direction: "incoming",
+    text: "<msg><op id='11'><name>DownloadFile</name></op></msg>",
+    mentions: [],
+  });
+  assert.equal(unsupported.reason, "internal-status-message");
+  const rejectedControl = application.caseStore.syncedMessages({
+    sourceId: "small",
+    conversationId: "private:small:wxid_member",
+  });
+  assert.equal(rejectedControl.length, 1);
+  assert.equal(rejectedControl[0].decision, "internal-status-message");
+  assert.equal(rejectedControl[0].accepted, false);
+  assert.equal(
+    application.caseStore.db.prepare(`
+      SELECT COUNT(*) AS count FROM messages
+      WHERE source_id=? AND message_id=?
+    `).get("small", "control-1").count,
+    0,
+  );
+
   const duplicate = await application.receive({
     transport: "pad",
     sourceId: "small",
     sourceName: "小号",
+    messageType: 1,
     messageId: "group-1",
     timestamp: Date.now(),
     chatType: "group",

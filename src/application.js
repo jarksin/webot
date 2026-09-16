@@ -51,11 +51,16 @@ export class WebotApplication {
     this.padStatuses = new Map();
     this.padIngressCounts = new Map();
     this.padSenderClassifier = null;
+    this.transports = null;
+    this.padMediaRequestTails = new Map();
+    this.padMediaLastRequestAt = new Map();
     this.padTimer = null;
     this.caseStore = null;
     this.caseManager = null;
     this.workspacePolicy = null;
     this.connectorsStarted = false;
+    this.pendingSettings = null;
+    this.settingsApplyTimer = null;
     this.startedAt = Date.now();
     this.sourceActivator = createSourceActivator({ env });
     this.fetch = fetchImpl;
@@ -114,8 +119,10 @@ export class WebotApplication {
         this.config.pad,
         this.config.outboundMode,
         this.logger,
+        this.fetch,
       ),
     };
+    this.transports = transports;
     this.runtime = new WebotRuntime({
       config: this.config,
       provider,
@@ -176,6 +183,11 @@ export class WebotApplication {
         this.caseStore.markSyncedMessageResult(message, result);
         return result;
       }
+      if (
+        requesterAccess(message, this.config.policy.ownerSenderIds) === "owner"
+      ) {
+        message = await this.hydratePadMedia(message);
+      }
     }
     try {
       const result = await this.caseManager.receive(message);
@@ -188,6 +200,63 @@ export class WebotApplication {
       });
       throw error;
     }
+  }
+
+  async serializePadMediaRequest(sourceId, operation) {
+    const key = String(sourceId || "default");
+    const previous = this.padMediaRequestTails.get(key) || Promise.resolve();
+    const current = previous.catch(() => {}).then(async () => {
+      const last = Number(this.padMediaLastRequestAt.get(key) || 0);
+      const wait = PAD_BUSINESS_REQUEST_GAP_MS - (Date.now() - last);
+      if (last && wait > 0) await sleep(wait);
+      this.padMediaLastRequestAt.set(key, Date.now());
+      return operation();
+    });
+    this.padMediaRequestTails.set(key, current);
+    try {
+      return await current;
+    } finally {
+      if (this.padMediaRequestTails.get(key) === current) {
+        this.padMediaRequestTails.delete(key);
+      }
+    }
+  }
+
+  async hydratePadMedia(message) {
+    const attachments = Array.isArray(message.attachments)
+      ? [...message.attachments]
+      : [];
+    for (let index = 0; index < attachments.length; index += 1) {
+      const attachment = attachments[index];
+      if (
+        attachment?.kind !== "image" ||
+        !attachment?.downloadContext?.endpoint
+      ) {
+        continue;
+      }
+      try {
+        const cached = await this.serializePadMediaRequest(
+          message.sourceId,
+          () => this.transports.pad.downloadInboundAttachment(
+            message,
+            attachment,
+            this.config.dataDir,
+          ),
+        );
+        attachments[index] = { ...attachment, ...cached };
+      } catch (error) {
+        attachments[index] = {
+          ...attachment,
+          error: String(error.message || error),
+        };
+        this.logger.warn("pad inbound image cache failed", {
+          sourceId: message.sourceId,
+          messageId: message.messageId,
+          error: error.message,
+        });
+      }
+    }
+    return { ...message, attachments };
   }
 
   async probePads() {
@@ -219,6 +288,8 @@ export class WebotApplication {
   }
 
   async stopConnectors() {
+    clearTimeout(this.settingsApplyTimer);
+    this.settingsApplyTimer = null;
     clearInterval(this.padTimer);
     this.padTimer = null;
     this.knowledgeBase?.stop();
@@ -382,8 +453,44 @@ export class WebotApplication {
     const candidateConfig = loadConfig(this.env, candidate);
     createProvider(candidateConfig.assistant);
     const saved = await this.settingsStore.save(candidate);
+    if (this.caseManager?.status().active > 0) {
+      this.pendingSettings = saved;
+      this.caseManager.beginDrain();
+      this.schedulePendingSettingsApply();
+      const settings = this.settingsStore.publicSettings(saved);
+      settings.assistant ||= {};
+      settings.assistant.workingDirectory =
+        candidateConfig.assistant.workingDirectory;
+      return settings;
+    }
     await this.applySettings(saved);
     return this.settings();
+  }
+
+  schedulePendingSettingsApply() {
+    if (this.settingsApplyTimer) return;
+    const applyWhenIdle = async () => {
+      this.settingsApplyTimer = null;
+      if (!this.pendingSettings) return;
+      if (this.caseManager?.status().active > 0) {
+        this.settingsApplyTimer = setTimeout(applyWhenIdle, 100);
+        this.settingsApplyTimer.unref?.();
+        return;
+      }
+      const pending = this.pendingSettings;
+      this.pendingSettings = null;
+      try {
+        await this.applySettings(pending);
+        this.logger.info("deferred settings applied after workers drained");
+      } catch (error) {
+        this.pendingSettings = pending;
+        this.logger.error("deferred settings apply failed", {
+          error: error.message,
+        });
+      }
+    };
+    this.settingsApplyTimer = setTimeout(applyWhenIdle, 0);
+    this.settingsApplyTimer.unref?.();
   }
 
   settings() {

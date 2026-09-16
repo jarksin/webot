@@ -58,6 +58,7 @@ test("normalizes common Pad sync envelopes", () => {
 
   assert.equal(messages.length, 1);
   assert.equal(messages[0].chatType, "group");
+  assert.equal(messages[0].messageType, 1);
   assert.equal(messages[0].chatId, "123@chatroom");
   assert.equal(messages[0].senderId, "wxid_peer");
   assert.equal(messages[0].text, "webot ping");
@@ -111,6 +112,7 @@ test("normalizes top-level WeChatPad gateway events", () => {
   });
 
   assert.equal(message.messageId, "opt-message-1");
+  assert.equal(message.messageType, 1);
   assert.equal(message.timestamp, 1_789_116_782_000);
   assert.equal(message.senderId, "owner_wxid");
   assert.equal(message.selfId, "wxid_small");
@@ -172,10 +174,78 @@ test("normalizes appmsg type 6 as a WeChat file card", () => {
   });
 
   assert.equal(message.text, "[文件] holiday.mp4 (6752808B)");
+  assert.equal(message.messageType, 49);
   assert.deepEqual(message.attachments, [{
     kind: "file",
     filename: "holiday.mp4",
     size: 6752808,
     fileExtension: "mp4",
   }]);
+});
+
+test("prefers structured opt media and quote fields over raw XML", () => {
+  const [message] = normalizePadEnvelope({
+    schema: "wechatpad.message.v2",
+    messages: [{
+      id: "image-1",
+      type: 3,
+      sender_id: "wxid_owner",
+      recipient_id: "wxid_small",
+      conversation_id: "wxid_owner",
+      content: "<msg><img length=\"576335\"/></msg>",
+      display_text: "[图片]",
+      created_at: 1_789_116_782,
+      image: {
+        data_len: 576335,
+        standard_width: 1080,
+        standard_height: 1440,
+        md5: "abc",
+        download_context: {
+          endpoint: "/api/v1/media/download-img-binary",
+          msg_id: 7,
+          to_wxid: "wxid_owner",
+          data_len: 576335,
+          section: { start_pos: 0, data_len: 65536 },
+        },
+      },
+      app: {
+        reference: {
+          new_msg_id: "6",
+          msg_type: 3,
+          kind: "image",
+          display_name: "南威",
+          display_text: "[图片]",
+        },
+      },
+    }],
+  }, {
+    id: "small",
+    displayName: "小号",
+    selfId: "wxid_small",
+    selfChatPeers: new Set(),
+  });
+
+  assert.equal(message.text, "[图片]");
+  assert.deepEqual(message.attachments, [{
+    kind: "image",
+    size: 576335,
+    width: 1080,
+    height: 1440,
+    md5: "abc",
+    downloadContext: {
+      endpoint: "/api/v1/media/download-img-binary",
+      msgId: 7,
+      toWxid: "wxid_owner",
+      dataLen: 576335,
+      section: { startPos: 0, dataLen: 65536 },
+    },
+  }]);
+  assert.deepEqual(message.reference, {
+    messageId: "6",
+    messageType: 3,
+    kind: "image",
+    senderName: "南威",
+    text: "[图片]",
+  });
+  assert.doesNotMatch(message.text, /<img/);
 });

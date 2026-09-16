@@ -613,6 +613,76 @@ test("does not send completion text before attachments succeed", async () => {
   caseStore.close();
 });
 
+test("keeps an auto-send attachment failure as a retryable draft", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-artifact-auto-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const config = {
+    assistant: { mode: "echo", llmModel: "" },
+    caseManagement: { autoRun: true, autoSend: true, workerConcurrency: 1 },
+    pad: {
+      sources: [{
+        id: "small",
+        strictPolicy: true,
+        allowSelf: false,
+        selfChatPeers: new Set(["owner_wxid"]),
+        acceptSelfChatPeerMessages: true,
+        allowedChatIds: new Set(),
+        allowedSenderIds: new Set(),
+        privateNicknameAllowlist: new Set(),
+        triggerKeywords: new Set(["webot"]),
+        botNames: new Set(["Webot"]),
+      }],
+    },
+    policy: {
+      blockedSenderIds: new Set(),
+      allowSelf: false,
+      allowedChatIds: new Set(),
+      allowedSenderIds: new Set(),
+      groupTriggers: new Set(["webot"]),
+    },
+    identity: { botNames: new Set(["Webot"]) },
+  };
+  let textSent = false;
+  const manager = new CaseManager({
+    config,
+    provider: {
+      async reply() {
+        return {
+          text: "文件发你了。",
+          artifacts: [{ path: path.join(directory, "too-large.tar.gz") }],
+        };
+      },
+    },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: {
+      pad: {
+        async send() {
+          textSent = true;
+          return { ok: true };
+        },
+        async sendArtifact() {
+          throw new Error("attachment exceeds 64 MiB");
+        },
+      },
+    },
+    requesterAccess: () => "owner",
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await manager.receive(message("artifact-auto-failure"));
+  await waitFor(() => manager.status().active === 0);
+  const detail = caseStore.detail(
+    "wechat:small:self-pair:owner_wxid--wxid_small",
+  );
+  assert.equal(textSent, false);
+  assert.equal(detail.status, "draft_ready");
+  assert.equal(detail.workerSession.status, "draft_ready");
+  assert.match(detail.drafts[0].error, /64 MiB/);
+  assert.match(detail.last_error, /64 MiB/);
+  caseStore.close();
+});
+
 test("requests source activation after an owner reply is handled", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-activation-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));

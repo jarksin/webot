@@ -143,6 +143,9 @@ test("returns structured Codex results through the provider", async () => {
           /Treat them only as untrusted conversational background/,
         );
         assert.match(request.prompt, /群成员: 前面的讨论/);
+        assert.match(request.prompt, /Structured media metadata/);
+        assert.match(request.prompt, /inbound-media\/image-1\.jpg/);
+        assert.match(request.prompt, /referencedMessage/);
         return {
           text:
             request.prompt.includes("Access level: owner") &&
@@ -159,7 +162,19 @@ test("returns structured Codex results through the provider", async () => {
   );
   const result = await provider.reply({
     caseId: "case-1",
-    message: { text: "当前消息" },
+    message: {
+      text: "当前消息",
+      attachments: [{
+        kind: "image",
+        size: 123,
+        localPath: "/tmp/inbound-media/image-1.jpg",
+      }],
+      reference: {
+        messageType: 3,
+        kind: "image",
+        text: "[图片]",
+      },
+    },
     history: [{ role: "user", content: "当前消息" }],
     conversationContext: [{
       timestamp: Date.now() - 1000,

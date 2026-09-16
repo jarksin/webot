@@ -29,6 +29,7 @@ const AUDIO_FORMATS = new Map([
 ]);
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 const WEBSOCKET_OPEN = 1;
+const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
 
 function tokenHeaders(token) {
@@ -59,6 +60,43 @@ function padFailureDetail(body) {
     body?.msg ||
     "",
   ).trim();
+}
+
+function padEndpointURL(source, endpoint) {
+  const base = String(source.apiUrl || "").replace(/\/$/, "");
+  let pathname = String(endpoint || "").trim();
+  if (base.endsWith("/api") && pathname.startsWith("/api/")) {
+    pathname = pathname.slice(4);
+  }
+  return `${base}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
+}
+
+function inboundImageType(data) {
+  if (data.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) {
+    return { extension: ".jpg", mime: "image/jpeg" };
+  }
+  if (data.subarray(0, 8).equals(Buffer.from("\x89PNG\r\n\x1a\n", "binary"))) {
+    return { extension: ".png", mime: "image/png" };
+  }
+  if (data.subarray(0, 6).toString("ascii").match(/^GIF8[79]a$/)) {
+    return { extension: ".gif", mime: "image/gif" };
+  }
+  if (
+    data.subarray(0, 4).toString("ascii") === "RIFF" &&
+    data.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return { extension: ".webp", mime: "image/webp" };
+  }
+  return { extension: ".img", mime: "application/octet-stream" };
+}
+
+function safeFileSegment(value, fallback) {
+  const segment = String(value || "")
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 120);
+  return segment || fallback;
 }
 
 async function probeAudioDurationMs(filePath, artifact = {}) {
@@ -129,10 +167,16 @@ export function formatPadReplyText(text, message = {}, source = {}) {
 }
 
 export class PadTransport {
-  constructor(config, outboundMode, logger = console) {
+  constructor(
+    config,
+    outboundMode,
+    logger = console,
+    fetchImpl = globalThis.fetch,
+  ) {
     this.config = config;
     this.outboundMode = outboundMode;
     this.logger = logger;
+    this.fetch = fetchImpl;
   }
 
   source(message = {}) {
@@ -168,7 +212,7 @@ export class PadTransport {
       payload.confirm = true;
       payload.request_id = crypto.randomUUID();
     }
-    const response = await fetch(
+    const response = await this.fetch(
       `${source.apiUrl.replace(/\/$/, "")}${path}`,
       {
         method: "POST",
@@ -193,6 +237,58 @@ export class PadTransport {
       );
     }
     return { ok: true, result };
+  }
+
+  async downloadInboundAttachment(message, attachment, dataDir) {
+    const source = this.source(message);
+    const context = attachment?.downloadContext;
+    const endpoint = String(context?.endpoint || "");
+    if (
+      attachment?.kind !== "image" ||
+      !endpoint.startsWith("/api/v1/media/download-img-binary")
+    ) {
+      throw new Error("attachment does not expose the complete image endpoint");
+    }
+    const response = await this.fetch(padEndpointURL(source, endpoint), {
+      method: "POST",
+      headers: tokenHeaders(source.accessToken),
+      body: JSON.stringify({ image: { download_context: context } }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).trim().slice(0, 300);
+      throw new Error(
+        `Pad image download failed (${response.status})${
+          detail ? `: ${detail}` : ""
+        }`,
+      );
+    }
+    const declared = Number(response.headers.get("content-length") || 0);
+    if (declared > MAX_INBOUND_IMAGE_BYTES) {
+      throw new Error("Pad image download exceeds 32 MiB");
+    }
+    const data = Buffer.from(await response.arrayBuffer());
+    if (!data.length || data.length > MAX_INBOUND_IMAGE_BYTES) {
+      throw new Error("Pad image download returned an invalid size");
+    }
+    const type = inboundImageType(data);
+    const directory = path.join(
+      path.resolve(dataDir),
+      "inbound-media",
+      safeFileSegment(source.id, "default"),
+    );
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const base = safeFileSegment(message.messageId, crypto.randomUUID());
+    const filePath = path.join(directory, `${base}${type.extension}`);
+    const temporary = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(temporary, data, { mode: 0o600 });
+    fs.renameSync(temporary, filePath);
+    return {
+      localPath: filePath,
+      filename: path.basename(filePath),
+      mime: type.mime,
+      size: data.length,
+    };
   }
 
   send(message, text) {

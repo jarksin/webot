@@ -184,6 +184,54 @@ test("Pad transport reports a missing file-card capability", async (context) => 
   );
 });
 
+test("Pad transport caches a complete inbound image from its structured context", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-inbound-"));
+  const png = Buffer.concat([
+    Buffer.from("\x89PNG\r\n\x1a\n", "binary"),
+    Buffer.from("fixture"),
+  ]);
+  let call;
+  const transport = new PadTransport({
+    apiUrl: "http://pad.local/api",
+    accessToken: "test-token",
+    sources: [{
+      id: "small",
+      apiUrl: "http://pad.local/api",
+      accessToken: "test-token",
+    }],
+  }, "live", console, async (url, options) => {
+    call = {
+      url,
+      headers: options.headers,
+      body: JSON.parse(options.body),
+    };
+    return new Response(png, {
+      status: 200,
+      headers: { "Content-Length": String(png.length) },
+    });
+  });
+
+  const result = await transport.downloadInboundAttachment({
+    sourceId: "small",
+    messageId: "image:1",
+  }, {
+    kind: "image",
+    downloadContext: {
+      endpoint: "/api/v1/media/download-img-binary",
+      msgId: 7,
+      dataLen: png.length,
+      section: { dataLen: 65536 },
+    },
+  }, directory);
+
+  assert.equal(call.url, "http://pad.local/api/v1/media/download-img-binary");
+  assert.equal(call.headers["X-Access-Token"], "test-token");
+  assert.equal(call.body.image.download_context.msgId, 7);
+  assert.equal(result.mime, "image/png");
+  assert.equal(result.filename, "image_1.png");
+  assert.deepEqual(await fs.readFile(result.localPath), png);
+});
+
 test("Pad transport rejects uppercase API failures", async (context) => {
   context.mock.method(globalThis, "fetch", async () =>
     Response.json(
