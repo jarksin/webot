@@ -410,6 +410,76 @@ export class CaseStore {
     this.groupContextCounts = new Map();
     this.syncedMessageWrites = 0;
     this.syncedMessageCounts = new Map();
+    this.refreshCaseTitles();
+  }
+
+  directoryDisplayName(sourceId, entityId) {
+    const row = this.db.prepare(`
+      SELECT display_name
+      FROM identity_directory
+      WHERE source_id=? AND entity_id=? AND display_name!=''
+      LIMIT 1
+    `).get(
+      String(sourceId || "default"),
+      String(entityId || ""),
+    );
+    return String(row?.display_name || "").trim();
+  }
+
+  caseBaseTitle(message) {
+    const sourceId = String(message?.sourceId || "default");
+    const chatId = String(message?.chatId || "").trim();
+    const directoryName = this.directoryDisplayName(sourceId, chatId);
+    if (directoryName) return directoryName;
+    if (message?.chatType === "group") {
+      return String(message.chatName || "").trim() || chatId || "微信群聊";
+    }
+    const peerName =
+      String(message?.senderId || "") === chatId
+        ? String(message?.senderName || "").trim()
+        : "";
+    return String(message?.chatName || "").trim()
+      || peerName
+      || chatId
+      || String(message?.senderId || "").trim()
+      || "微信会话";
+  }
+
+  refreshCaseTitles(sourceId = "") {
+    const source = String(sourceId || "").trim();
+    const where = source ? "AND c.source_id=?" : "";
+    const rows = this.db.prepare(`
+      SELECT c.case_id, c.title, d.display_name,
+        s.session_id, s.name AS session_name
+      FROM cases c
+      JOIN identity_directory d
+        ON d.source_id=c.source_id
+       AND d.entity_id=c.chat_id
+       AND d.display_name!=''
+      LEFT JOIN assistant_sessions s
+        ON s.target_case_id=c.case_id
+       AND s.deleted_at=0
+      WHERE 1=1 ${where}
+    `).all(...(source ? [source] : []));
+    const update = this.db.prepare(`
+      UPDATE cases SET title=? WHERE case_id=? AND title!=?
+    `);
+    let updated = 0;
+    this.db.exec("BEGIN");
+    try {
+      for (const row of rows) {
+        const baseTitle = String(row.display_name || "").trim();
+        const title = row.session_id && row.session_id !== "main"
+          ? `${baseTitle} / ${row.session_name}`
+          : baseTitle;
+        updated += update.run(title, row.case_id, title).changes;
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return updated;
   }
 
   upsertIdentity(entry, options = {}) {
@@ -516,6 +586,7 @@ export class CaseStore {
         lastSeen: timestamp,
       }, { incrementMessage: true }) || changed;
     }
+    if (changed) this.refreshCaseTitles(sourceId);
     return changed;
   }
 
@@ -562,6 +633,7 @@ export class CaseStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+    this.refreshCaseTitles();
     return imported;
   }
 
@@ -1066,9 +1138,7 @@ export class CaseStore {
     }
 
     const messageRow = Number(result.lastInsertRowid);
-    const baseTitle =
-      String(message.senderName || "").trim() ||
-      String(message.chatId || message.senderId || "微信会话");
+    const baseTitle = this.caseBaseTitle(message);
     const title = assignedSession && assignedSession.session_id !== "main"
       ? `${baseTitle} / ${assignedSession.name}`
       : baseTitle;

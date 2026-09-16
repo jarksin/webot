@@ -299,6 +299,52 @@ test("indexes observed and synced identities for bounded lookup", async () => {
   caseStore.close();
 });
 
+test("uses directory names for private and group case titles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-titles-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const group = caseStore.ingest({
+    ...groupMessage("unnamed-group", "hello"),
+    chatId: "unnamed@chatroom",
+    conversationId: "group:small:unnamed@chatroom",
+    senderName: "群成员甲",
+  });
+  const privateCase = caseStore.ingest({
+    ...message("private-contact"),
+    conversationId: "private:small:wxid_friend",
+    chatId: "wxid_friend",
+    senderId: "wxid_friend",
+    senderName: "临时昵称",
+    selfConversation: false,
+    selfPeer: false,
+  });
+
+  assert.equal(caseStore.caseRow(group.caseId).title, "unnamed@chatroom");
+  assert.equal(caseStore.caseRow(privateCase.caseId).title, "临时昵称");
+
+  caseStore.importDirectory([
+    {
+      sourceId: "small",
+      entityType: "group",
+      entityId: "unnamed@chatroom",
+      displayName: "项目讨论群",
+      searchNames: ["项目讨论群"],
+      origin: "contacts",
+    },
+    {
+      sourceId: "small",
+      entityType: "user",
+      entityId: "wxid_friend",
+      displayName: "好友备注",
+      searchNames: ["好友备注", "好友昵称"],
+      origin: "contacts",
+    },
+  ]);
+
+  assert.equal(caseStore.caseRow(group.caseId).title, "项目讨论群");
+  assert.equal(caseStore.caseRow(privateCase.caseId).title, "好友备注");
+  caseStore.close();
+});
+
 test("stores allowed untriggered group messages and injects indexed context", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-context-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
