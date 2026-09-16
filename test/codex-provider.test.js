@@ -152,6 +152,8 @@ test("returns structured Codex results through the provider", async () => {
         assert.match(request.prompt, /message_id=quoted-image-1/);
         assert.match(request.prompt, /inbound-media\/quoted-image-1\.jpg/);
         assert.match(request.prompt, /referencedMessage/);
+        assert.match(request.prompt, /appMessage/);
+        assert.match(request.prompt, /private-red-packet-xml/);
         return {
           text:
             request.prompt.includes("Access level: owner") &&
@@ -180,6 +182,11 @@ test("returns structured Codex results through the provider", async () => {
         kind: "image",
         text: "[图片]",
       },
+      app: {
+        category: "2001",
+        red_packet: { pay_message_id: "pay-id" },
+      },
+      rawContent: "<private-red-packet-xml/>",
     },
     history: [{ role: "user", content: "当前消息" }],
     conversationContext: [{
@@ -215,6 +222,7 @@ test("does not expose prior local media paths to public requesters", async () =>
       requesterAccess: () => "public",
       runCodex: async (_config, request) => {
         assert.doesNotMatch(request.prompt, /private-context-image\.jpg/);
+        assert.doesNotMatch(request.prompt, /private-red-packet-xml/);
         return { text: "收到", sessionId: "session-public" };
       },
     },
@@ -228,6 +236,7 @@ test("does not expose prior local media paths to public requesters", async () =>
       sender_name: "群成员",
       text: "[图片]",
       message: {
+        rawContent: "<private-red-packet-xml/>",
         attachments: [{
           kind: "image",
           localPath: "/tmp/inbound-media/private-context-image.jpg",

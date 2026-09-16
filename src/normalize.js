@@ -39,6 +39,10 @@ function objectValue(value) {
     : null;
 }
 
+function padAppMetadata(message) {
+  return objectValue(message.app ?? message.App);
+}
+
 function numberValue(value) {
   const number = Number(scalar(value));
   return Number.isFinite(number) && number > 0 ? number : 0;
@@ -446,6 +450,12 @@ function normalizePadMessage(message, sourceValue) {
     message.Content ?? message.content ?? message.text ?? message.Text,
   );
   const content = padContent(message, rawContent);
+  const app = padAppMetadata(message);
+  const preservedRawContent =
+    rawContent &&
+      (messageType === 49 || app || content.text !== rawContent)
+      ? rawContent
+      : "";
   const split = room
     ? splitPadGroupContent(content.text)
     : { embeddedSender: "", text: content.text };
@@ -521,6 +531,8 @@ function normalizePadMessage(message, sourceValue) {
     exactSelfChat,
     replyTarget: room || peerId,
     text: split.text.trim(),
+    ...(preservedRawContent ? { rawContent: preservedRawContent } : {}),
+    ...(app ? { app } : {}),
     attachments: content.attachments,
     reference: padReference(message),
     mentions: padMentionIds(message),

@@ -249,3 +249,49 @@ test("prefers structured opt media and quote fields over raw XML", () => {
   });
   assert.doesNotMatch(message.text, /<img/);
 });
+
+test("preserves raw red-packet XML and structured app metadata", () => {
+  const rawContent = [
+    "owner_wxid:\n",
+    "<msg><appmsg>",
+    "<title><![CDATA[恭喜发财]]></title>",
+    "<des><![CDATA[微信红包]]></des>",
+    "<type>2001</type>",
+    "<wcpayinfo>",
+    "<nativeurl><![CDATA[wxpay://receive?sendid=send-1&channelid=1]]></nativeurl>",
+    "<paymsgid>pay-1</paymsgid>",
+    "</wcpayinfo>",
+    "</appmsg></msg>",
+  ].join("");
+  const app = {
+    category: "2001",
+    title: "恭喜发财",
+    description: "微信红包",
+    red_packet: {
+      app_message_type: 2001,
+      pay_message_id: "pay-1",
+    },
+  };
+  const [message] = normalizePadEnvelope({
+    schema: "wechatpad.message.v2",
+    messages: [{
+      id: "red-packet-1",
+      type: 49,
+      is_group: true,
+      sender_id: "owner_wxid",
+      recipient_id: "room@chatroom",
+      conversation_id: "room@chatroom",
+      content: rawContent,
+      display_text: "[红包] 恭喜发财 微信红包",
+      app,
+    }],
+  }, {
+    id: "small-opt",
+    displayName: "小号",
+    selfId: "wxid_small",
+  });
+
+  assert.equal(message.text, "[红包] 恭喜发财 微信红包");
+  assert.equal(message.rawContent, rawContent);
+  assert.deepEqual(message.app, app);
+});
