@@ -62,6 +62,14 @@ export function acceptedMessage(message, config) {
   const privateBotPrefix =
     message.chatType === "private" &&
     hasBotNamePrefix(message.text, botNames);
+  const outgoingPrivateBotCommand =
+    message.transport === "pad" &&
+    message.direction === "outgoing" &&
+    message.chatType === "private" &&
+    !message.selfConversation &&
+    !message.selfPeer &&
+    !message.exactSelfChat &&
+    privateBotPrefix;
   if (message.transport === "pad" && config.pad.sources.length && !source) {
     return { accepted: false, reason: "source-not-configured" };
   }
@@ -78,7 +86,8 @@ export function acceptedMessage(message, config) {
   if (
     message.transport === "pad" &&
     message.direction === "outgoing" &&
-    !message.exactSelfChat
+    !message.exactSelfChat &&
+    !outgoingPrivateBotCommand
   ) {
     return { accepted: false, reason: "pad-outgoing" };
   }

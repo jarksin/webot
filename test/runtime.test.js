@@ -401,4 +401,42 @@ test("allows private bot-name prefixes without opening all private messages", ()
     ).reason,
     "sender-not-allowed",
   );
+  assert.equal(
+    acceptedMessage(
+      {
+        ...base,
+        senderId: "wxid_small",
+        direction: "outgoing",
+        text: "@小水瓜 介绍一下自己",
+      },
+      sourceConfig,
+    ).text,
+    "介绍一下自己",
+  );
+  assert.equal(
+    acceptedMessage(
+      {
+        ...base,
+        senderId: "wxid_small",
+        direction: "outgoing",
+        text: "介绍一下自己",
+      },
+      sourceConfig,
+    ).reason,
+    "pad-outgoing",
+  );
+  assert.equal(
+    acceptedMessage(
+      {
+        ...base,
+        chatType: "group",
+        chatId: "test@chatroom",
+        senderId: "wxid_small",
+        direction: "outgoing",
+        text: "@小水瓜 介绍一下自己",
+      },
+      sourceConfig,
+    ).reason,
+    "pad-outgoing",
+  );
 });
