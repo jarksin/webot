@@ -184,6 +184,29 @@ test("Pad transport reports a missing file-card capability", async (context) => 
   );
 });
 
+test("Pad transport identifies oversized attachments for text fallback", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-files-"));
+  const file = path.join(directory, "oversized.tar.gz");
+  await fs.writeFile(file, Buffer.alloc(1));
+  await fs.truncate(file, 64 * 1024 * 1024 + 1);
+  const transport = new PadTransport({
+    apiUrl: "http://pad.local/api",
+    accessToken: "test-token",
+    requireWriteConfirmation: true,
+  }, "live");
+
+  await assert.rejects(
+    transport.sendArtifact(
+      { chatId: "wxid_peer" },
+      { path: file, mime: "application/gzip" },
+    ),
+    (error) =>
+      error.code === "WEBOT_ATTACHMENT_TOO_LARGE" &&
+      error.filePath === file &&
+      error.fileSize === 64 * 1024 * 1024 + 1,
+  );
+});
+
 test("Pad transport caches a complete inbound image from its structured context", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-inbound-"));
   const png = Buffer.concat([

@@ -1,3 +1,4 @@
+import path from "node:path";
 import { acceptedMessage } from "./runtime.js";
 import {
   applyControlCommand,
@@ -12,6 +13,13 @@ function acceptsOwnerIntermediateItems(message) {
       message.chatType === "private" &&
       message.selfConversation === true &&
       (message.selfPeer === true || message.exactSelfChat === true),
+  );
+}
+
+function oversizedAttachmentFailure(error) {
+  return Boolean(
+    error?.code === "WEBOT_ATTACHMENT_TOO_LARGE" ||
+      /(?:at most|exceeds?) 64 MiB/i.test(String(error?.message || error)),
   );
 }
 
@@ -419,6 +427,10 @@ export class CaseManager {
   }
 
   async sendDraft(caseId, draftId) {
+    return this.sendDraftWithOptions(caseId, draftId);
+  }
+
+  async sendDraftWithOptions(caseId, draftId, options = {}) {
     const draft = this.caseStore.draft(caseId, draftId);
     if (!draft) throw new Error("draft not found");
     if (draft.status === "sent") return { alreadySent: true };
@@ -433,9 +445,43 @@ export class CaseManager {
       if (typeof transport.sendArtifact !== "function") {
         throw new Error("reply transport cannot send attachments");
       }
-      artifactOutbounds.push(
-        await transport.sendArtifact(target.message, artifact),
-      );
+      try {
+        artifactOutbounds.push(
+          await transport.sendArtifact(target.message, artifact),
+        );
+      } catch (error) {
+        error.artifact ||= artifact;
+        if (
+          options.allowOversizeFallback !== false &&
+          oversizedAttachmentFailure(error) &&
+          this.requesterAccess(target.message) === "owner"
+        ) {
+          try {
+            const filename = path.basename(String(
+              artifact.filename || artifact.path || "文件",
+            ));
+            const fallbackText =
+              `文件 ${filename} 超过微信 64 MiB 限制，包太大无法发送，请手动发送。`;
+            const fallbackDraftId = this.caseStore.addDraft(
+              caseId,
+              fallbackText,
+              draft.model,
+              {
+                triggerMessageId: draft.trigger_message_id,
+                inputCutoffMessageId: draft.input_cutoff_message_id,
+              },
+            );
+            await this.sendDraftWithOptions(caseId, fallbackDraftId, {
+              allowOversizeFallback: false,
+            });
+            error.fallbackDraftId = fallbackDraftId;
+            error.fallbackSent = true;
+          } catch (fallbackError) {
+            error.fallbackError = fallbackError;
+          }
+        }
+        throw error;
+      }
     }
     const textOutbound = await transport.send(target.message, draft.text);
     const outbound = {

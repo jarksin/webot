@@ -642,9 +642,9 @@ test("keeps an auto-send attachment failure as a retryable draft", async () => {
     },
     identity: { botNames: new Set(["Webot"]) },
   };
-  let textSent = false;
+  const sentTexts = [];
   const manager = new CaseManager({
-    config,
+    config: { ...config, dataDir: directory },
     provider: {
       async reply() {
         return {
@@ -657,12 +657,15 @@ test("keeps an auto-send attachment failure as a retryable draft", async () => {
     caseStore,
     transports: {
       pad: {
-        async send() {
-          textSent = true;
+        async send(_message, text) {
+          sentTexts.push(text);
           return { ok: true };
         },
-        async sendArtifact() {
-          throw new Error("attachment exceeds 64 MiB");
+        async sendArtifact(_message, artifact) {
+          const error = new Error("attachment exceeds 64 MiB");
+          error.code = "WEBOT_ATTACHMENT_TOO_LARGE";
+          error.artifact = artifact;
+          throw error;
         },
       },
     },
@@ -675,10 +678,18 @@ test("keeps an auto-send attachment failure as a retryable draft", async () => {
   const detail = caseStore.detail(
     "wechat:small:self-pair:owner_wxid--wxid_small",
   );
-  assert.equal(textSent, false);
+  assert.deepEqual(sentTexts, [
+    "文件 too-large.tar.gz 超过微信 64 MiB 限制，包太大无法发送，请手动发送。",
+  ]);
   assert.equal(detail.status, "draft_ready");
   assert.equal(detail.workerSession.status, "draft_ready");
-  assert.match(detail.drafts[0].error, /64 MiB/);
+  const original = detail.drafts.find((draft) => draft.artifacts.length);
+  const fallback = detail.drafts.find((draft) => !draft.artifacts.length);
+  assert.match(original.error, /64 MiB/);
+  assert.equal(original.status, "draft");
+  assert.equal(fallback.status, "sent");
+  assert.match(fallback.text, /too-large\.tar\.gz/);
+  assert.doesNotMatch(fallback.text, new RegExp(directory));
   assert.match(detail.last_error, /64 MiB/);
   caseStore.close();
 });

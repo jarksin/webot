@@ -313,9 +313,15 @@ export class PadTransport {
     const filePath = path.resolve(String(artifact.path || ""));
     const stat = fs.statSync(filePath);
     if (!stat.isFile() || stat.size < 1 || stat.size > MAX_FILE_BYTES) {
-      throw new Error(
+      const error = new Error(
         "WeChat attachment must be a nonempty regular file of at most 64 MiB",
       );
+      if (stat.isFile() && stat.size > MAX_FILE_BYTES) {
+        error.code = "WEBOT_ATTACHMENT_TOO_LARGE";
+        error.filePath = filePath;
+        error.fileSize = stat.size;
+      }
+      throw error;
     }
     const data = fs.readFileSync(filePath);
     if (data.length !== stat.size) {
