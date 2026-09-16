@@ -107,9 +107,6 @@ test("knowledge editing is independent and knowledge configuration lives in sett
   assert.match(javascript, /function renderKnowledge\(\)/);
   assert.match(javascript, /function knowledgeSettingsMarkup\(\)/);
   assert.match(javascript, /KB 路径与同步/);
-  assert.match(javascript, /本人附加目录/);
-  assert.match(javascript, /kb-owner-local-dirs/);
-  assert.match(javascript, /ownerLocalDirs: parseList/);
   assert.match(javascript, /data-settings-fold="knowledge"/);
   assert.match(javascript, /\$\{knowledgeSettingsMarkup\(\)\}/);
   const knowledgeView = javascript.slice(

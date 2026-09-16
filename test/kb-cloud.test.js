@@ -7,9 +7,6 @@ import { KnowledgeBaseCloud } from "../src/kb-cloud.js";
 
 test("indexes approved markdown and returns bounded relevant notes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-"));
-  const ownerDirectory = await fs.mkdtemp(
-    path.join(os.tmpdir(), "webot-owner-kb-"),
-  );
   await fs.writeFile(
     path.join(directory, "approved.md"),
     "---\napproved: true\naudience: owner\n---\nWebot 内部发布流程与二进制校验。",
@@ -22,16 +19,11 @@ test("indexes approved markdown and returns bounded relevant notes", async () =>
     path.join(directory, "draft.md"),
     "Webot 未批准的发布草稿。",
   );
-  await fs.writeFile(
-    path.join(ownerDirectory, "ai-notes.md"),
-    "# AI 推理知识\nMegaKernel 和 KV Cache 优化笔记。",
-  );
   const kb = new KnowledgeBaseCloud({
     enabled: true,
     remote: "",
     branch: "main",
     localDir: directory,
-    ownerLocalDirs: [ownerDirectory],
     syncIntervalSeconds: 900,
     maxNotes: 2,
     maxCharsPerNote: 20,
@@ -41,9 +33,7 @@ test("indexes approved markdown and returns bounded relevant notes", async () =>
   const sync = await kb.sync();
   const results = await kb.search("内部发布", { access: "owner" });
   assert.equal(sync.ready, true);
-  assert.equal(sync.noteCount, 4);
-  assert.equal(sync.managedNoteCount, 3);
-  assert.equal(sync.ownerNoteCount, 1);
+  assert.equal(sync.noteCount, 3);
   assert.equal(results.length, 1);
   assert.equal(results[0].title, "approved");
   assert.ok(results[0].content.length <= 20);
@@ -53,14 +43,6 @@ test("indexes approved markdown and returns bounded relevant notes", async () =>
   const visible = await kb.search("公开安装", { access: "public" });
   assert.equal(visible.length, 1);
   assert.equal(visible[0].audience, "public");
-  const ownerKnowledge = await kb.search("MegaKernel", { access: "owner" });
-  assert.equal(ownerKnowledge.length, 1);
-  assert.equal(ownerKnowledge[0].audience, "owner");
-  assert.match(ownerKnowledge[0].path, /^owner-local-1\//);
-  assert.equal(
-    (await kb.search("MegaKernel", { access: "public" })).length,
-    0,
-  );
 });
 
 test("edits markdown documents with safe paths and optimistic locking", async () => {
@@ -70,7 +52,6 @@ test("edits markdown documents with safe paths and optimistic locking", async ()
     remote: "",
     branch: "main",
     localDir: directory,
-    ownerLocalDirs: [],
     syncIntervalSeconds: 900,
     maxNotes: 4,
     maxCharsPerNote: 4000,

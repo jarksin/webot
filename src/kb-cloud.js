@@ -93,9 +93,6 @@ async function markdownFiles(root, limit = 2000) {
 export class KnowledgeBaseCloud {
   constructor(config, logger = console) {
     this.config = config;
-    this.config.ownerLocalDirs = Array.isArray(config.ownerLocalDirs)
-      ? config.ownerLocalDirs
-      : [];
     this.logger = logger;
     this.timer = null;
     this.state = {
@@ -103,13 +100,9 @@ export class KnowledgeBaseCloud {
       ready: false,
       syncing: false,
       noteCount: 0,
-      managedNoteCount: 0,
-      ownerNoteCount: 0,
       lastSyncAt: "",
       lastError: "",
       localDir: config.localDir,
-      ownerLocalDirs: [...this.config.ownerLocalDirs],
-      missingOwnerLocalDirs: [],
     };
   }
 
@@ -146,21 +139,8 @@ export class KnowledgeBaseCloud {
   async refreshLocalState() {
     await fs.mkdir(this.config.localDir, { recursive: true, mode: 0o700 });
     const files = await markdownFiles(this.config.localDir);
-    let ownerNoteCount = 0;
-    const missingOwnerLocalDirs = [];
-    for (const directory of this.config.ownerLocalDirs) {
-      try {
-        ownerNoteCount += (await markdownFiles(directory)).length;
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
-        missingOwnerLocalDirs.push(directory);
-      }
-    }
     this.state.ready = true;
-    this.state.managedNoteCount = files.length;
-    this.state.ownerNoteCount = ownerNoteCount;
-    this.state.noteCount = files.length + ownerNoteCount;
-    this.state.missingOwnerLocalDirs = missingOwnerLocalDirs;
+    this.state.noteCount = files.length;
     return files;
   }
 
@@ -326,55 +306,27 @@ export class KnowledgeBaseCloud {
     const access = context.access === "owner" ? "owner" : "public";
     const queryTerms = terms(query);
     if (!queryTerms.length) return [];
+    const files = await markdownFiles(this.config.localDir);
     const matches = [];
-    const sources = [{
-      root: this.config.localDir,
-      pathPrefix: "",
-      ownerOnly: false,
-    }];
-    if (access === "owner") {
-      this.config.ownerLocalDirs.forEach((root, index) => {
-        sources.push({
-          root,
-          pathPrefix: `owner-local-${index + 1}/`,
-          ownerOnly: true,
-        });
+    for (const file of files) {
+      const content = await fs.readFile(file, "utf8");
+      const metadata = frontmatter(content);
+      if (this.config.requireApproved && !approved(metadata)) continue;
+      const documentAudience = audience(metadata);
+      if (access !== "owner" && documentAudience !== "public") continue;
+      const haystack = `${path.basename(file)}\n${content}`.toLowerCase();
+      const score = queryTerms.reduce(
+        (total, term) => total + (haystack.includes(term) ? 1 : 0),
+        0,
+      );
+      if (!score) continue;
+      matches.push({
+        title: path.basename(file, path.extname(file)),
+        path: path.relative(this.config.localDir, file),
+        content: content.slice(0, this.config.maxCharsPerNote),
+        audience: documentAudience,
+        score,
       });
-    }
-    for (const source of sources) {
-      let files;
-      try {
-        files = await markdownFiles(source.root);
-      } catch (error) {
-        if (error.code === "ENOENT" && source.ownerOnly) continue;
-        throw error;
-      }
-      for (const file of files) {
-        const content = await fs.readFile(file, "utf8");
-        const metadata = frontmatter(content);
-        if (
-          !source.ownerOnly &&
-          this.config.requireApproved &&
-          !approved(metadata)
-        ) {
-          continue;
-        }
-        const documentAudience = source.ownerOnly ? "owner" : audience(metadata);
-        if (access !== "owner" && documentAudience !== "public") continue;
-        const haystack = `${path.basename(file)}\n${content}`.toLowerCase();
-        const score = queryTerms.reduce(
-          (total, term) => total + (haystack.includes(term) ? 1 : 0),
-          0,
-        );
-        if (!score) continue;
-        matches.push({
-          title: title(content, file),
-          path: `${source.pathPrefix}${path.relative(source.root, file)}`,
-          content: content.slice(0, this.config.maxCharsPerNote),
-          audience: documentAudience,
-          score,
-        });
-      }
     }
     return matches
       .sort((left, right) => right.score - left.score)

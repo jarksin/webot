@@ -788,7 +788,7 @@ function knowledgeSettingsMarkup() {
   const kb = settings.knowledgeBase;
   const kbStatus = status.knowledgeBase || {};
   const summary = kbStatus.ready
-    ? `${Number(kbStatus.noteCount || 0)} 篇文档（主库 ${Number(kbStatus.managedNoteCount || 0)} + 本人 ${Number(kbStatus.ownerNoteCount || 0)}）· ${time(kbStatus.lastSyncAt)}`
+    ? `${Number(kbStatus.noteCount || 0)} 篇文档 · ${time(kbStatus.lastSyncAt)}`
     : kbStatus.lastError || "尚未同步";
   return `
     <details class="settings-card settings-fold" data-settings-fold="knowledge" ${settingsFoldOpen.has("knowledge") ? "open" : ""}>
@@ -800,12 +800,11 @@ function knowledgeSettingsMarkup() {
           ${field("Git Remote", "kb-remote", kb.remote, { full: true })}
           ${field("分支", "kb-branch", kb.branch)}
           ${field("本地目录", "kb-local-dir", kb.localDir)}
-          ${field("本人附加目录", "kb-owner-local-dirs", listText(kb.ownerLocalDirs), { textarea: true, full: true, note: "每行一个；只读、仅本人检索，不参与 Git 同步" })}
           ${field("同步间隔（秒）", "kb-interval", kb.syncIntervalSeconds, { type: "number" })}
           ${field("最多命中文档", "kb-max-notes", kb.maxNotes, { type: "number" })}
           ${field("单篇字符上限", "kb-max-chars", kb.maxCharsPerNote, { type: "number" })}
         </div>
-        ${toggle("主库仅使用 approved 文档", "kb-approved", kb.requireApproved, "主库 Frontmatter 需要 approved: true；本人附加目录不受此限制")}
+        ${toggle("仅使用 approved 文档", "kb-approved", kb.requireApproved, "Frontmatter 需要 approved: true")}
       </div>
     </details>`;
 }
@@ -989,9 +988,6 @@ function readKnowledgeForm() {
     remote: document.querySelector("#kb-remote").value.trim(),
     branch: document.querySelector("#kb-branch").value.trim(),
     localDir: document.querySelector("#kb-local-dir").value.trim(),
-    ownerLocalDirs: parseList(
-      document.querySelector("#kb-owner-local-dirs").value,
-    ),
     syncIntervalSeconds: Number(document.querySelector("#kb-interval").value),
     maxNotes: Number(document.querySelector("#kb-max-notes").value),
     maxCharsPerNote: Number(document.querySelector("#kb-max-chars").value),

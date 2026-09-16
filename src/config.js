@@ -44,10 +44,6 @@ function stringSet(valueToParse, fallback = "") {
   );
 }
 
-function stringList(valueToParse, fallback = "") {
-  return [...stringSet(valueToParse, fallback)];
-}
-
 export function loadConfig(env = process.env, settings = {}) {
   const channels = stringSet(
     settings.channels,
@@ -66,13 +62,6 @@ export function loadConfig(env = process.env, settings = {}) {
   const knowledgeLocalDir =
     String(kbSettings.localDir || "").trim() ||
     path.join(defaultDataDir, "knowledge");
-  const resolvedKnowledgeLocalDir = path.resolve(knowledgeLocalDir);
-  const ownerKnowledgeLocalDirs = stringList(
-    kbSettings.ownerLocalDirs,
-    env.WEBOT_OWNER_KB_DIRS,
-  )
-    .map((directory) => path.resolve(directory))
-    .filter((directory) => directory !== resolvedKnowledgeLocalDir);
   const selfId = value(identitySettings.selfId, env.WEBOT_SELF_WXID || "");
   const allowedChatIds = stringSet(
     policySettings.allowedChatIds,
@@ -237,8 +226,7 @@ export function loadConfig(env = process.env, settings = {}) {
       enabled: value(kbSettings.enabled, false),
       remote: value(kbSettings.remote, ""),
       branch: value(kbSettings.branch, "main"),
-      localDir: resolvedKnowledgeLocalDir,
-      ownerLocalDirs: ownerKnowledgeLocalDirs,
+      localDir: path.resolve(knowledgeLocalDir),
       syncIntervalSeconds: integer(
         value(kbSettings.syncIntervalSeconds, 900),
         900,
