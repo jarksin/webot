@@ -5,7 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { HookTransport } from "../src/transports/hook.js";
 import {
+  cleanPadMentionDisplayName,
   formatPadReplyText,
+  formatPadMentionText,
   PadTransport,
   PadWebSocketClient,
 } from "../src/transports/pad.js";
@@ -105,6 +107,12 @@ test("Pad transport mentions the triggering sender in group replies", async (con
       selfId: "wxid_bot",
     },
     "live",
+    console,
+    globalThis.fetch,
+    {
+      resolveMentionDisplayName: (message) =>
+        message.senderId === "wxid_member" ? "群成员甲" : "",
+    },
   );
 
   await transport.send({
@@ -119,8 +127,29 @@ test("Pad transport mentions the triggering sender in group replies", async (con
   }, "self reply");
 
   assert.equal(calls[0].body.to, "room@chatroom");
+  assert.equal(calls[0].body.content, "@群成员甲\u2005 group reply");
   assert.equal(calls[0].body.at, "wxid_member");
+  assert.equal(calls[1].body.content, "self reply");
   assert.equal(calls[1].body.at, "");
+});
+
+test("Pad mention labels prefer safe sender names and never expose raw IDs", () => {
+  assert.equal(
+    formatPadMentionText("group reply", "晴耕雨读", "wxid_member"),
+    "@晴耕雨读\u2005 group reply",
+  );
+  assert.equal(
+    formatPadMentionText("@晴耕雨读\u2005 group reply", "晴耕雨读", "wxid_member"),
+    "@晴耕雨读\u2005 group reply",
+  );
+  assert.equal(
+    formatPadMentionText("group reply", "wxid_member", "wxid_member"),
+    "@微信用户\u2005 group reply",
+  );
+  assert.equal(
+    cleanPadMentionDisplayName("wxid_member", "wxid_member"),
+    "",
+  );
 });
 
 test("Pad transport sends images, audio, and generic file cards", async (context) => {

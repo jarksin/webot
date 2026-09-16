@@ -30,6 +30,7 @@ const AUDIO_FORMATS = new Map([
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 const WEBSOCKET_OPEN = 1;
 const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
+const WECHAT_MENTION_SEPARATOR = "\u2005";
 const execFileAsync = promisify(execFile);
 
 function tokenHeaders(token) {
@@ -179,17 +180,51 @@ function replyMention(message = {}, source = {}) {
   return senderId;
 }
 
+export function cleanPadMentionDisplayName(value, atTarget = "") {
+  const name = String(value || "")
+    .trim()
+    .replace(/^@+/, "")
+    .replace(/[\s\u2005]+$/g, "");
+  const target = String(atTarget || "").trim().toLowerCase();
+  if (!name || name.length > 80 || /[\r\n]/.test(name)) return "";
+  const lower = name.toLowerCase();
+  if (
+    lower === target ||
+    lower.endsWith("@chatroom") ||
+    /^(?:wxid_|gh_|v1_|v2_)/i.test(name)
+  ) {
+    return "";
+  }
+  return name;
+}
+
+export function formatPadMentionText(text, displayName, atTarget = "") {
+  const content = String(text || "");
+  const name =
+    cleanPadMentionDisplayName(displayName, atTarget) || "微信用户";
+  const prefix = `@${name}${WECHAT_MENTION_SEPARATOR}`;
+  if (content.startsWith(prefix) || content.startsWith(`@${name} `)) {
+    return content;
+  }
+  return `${prefix}${content ? ` ${content}` : ""}`;
+}
+
 export class PadTransport {
   constructor(
     config,
     outboundMode,
     logger = console,
     fetchImpl = globalThis.fetch,
+    options = {},
   ) {
     this.config = config;
     this.outboundMode = outboundMode;
     this.logger = logger;
     this.fetch = fetchImpl;
+    this.resolveMentionDisplayName =
+      typeof options.resolveMentionDisplayName === "function"
+        ? options.resolveMentionDisplayName
+        : () => "";
   }
 
   source(message = {}) {
@@ -306,12 +341,31 @@ export class PadTransport {
 
   send(message, text) {
     const source = this.source(message);
-    const content = formatPadReplyText(text, message, source);
+    const at = replyMention(message, source);
+    const replyText = formatPadReplyText(text, message, source);
+    let displayName = cleanPadMentionDisplayName(message.senderName, at);
+    if (at && !displayName) {
+      try {
+        displayName = cleanPadMentionDisplayName(
+          this.resolveMentionDisplayName(message),
+          at,
+        );
+      } catch (error) {
+        this.logger.warn("pad mention display name lookup failed", {
+          sourceId: message.sourceId,
+          chatId: message.chatId,
+          error: error.message,
+        });
+      }
+    }
+    const content = at
+      ? formatPadMentionText(replyText, displayName, at)
+      : replyText;
     return this.request("/v1/messages/send-text", {
       to: message.replyTarget || message.chatId,
       content,
       type: 1,
-      at: replyMention(message, source),
+      at,
     }, message);
   }
 

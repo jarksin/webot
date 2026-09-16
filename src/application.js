@@ -120,6 +120,13 @@ export class WebotApplication {
         this.config.outboundMode,
         this.logger,
         this.fetch,
+        {
+          resolveMentionDisplayName: (message) =>
+            this.caseStore.directoryDisplayName(
+              message.sourceId,
+              message.senderId,
+            ),
+        },
       ),
     };
     this.transports = transports;
