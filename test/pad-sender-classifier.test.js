@@ -78,11 +78,34 @@ test("blocks internal Pad status events in any conversation", async () => {
     senderId: "wxid_small",
     text: "<msg><op id='11'><name>HandOffMaster</name></op></msg>",
   });
+  const download = await classifier.classify({
+    transport: "pad",
+    sourceId: "small",
+    chatType: "private",
+    chatId: "wxid_small",
+    senderId: "wxid_small",
+    text: [
+      "<msg><op id='11'><name>DownloadFile</name><arg><![CDATA[",
+      "<downloadList><downloadItem><username>room@chatroom</username>",
+      "</downloadItem></downloadList>]]></arg></op></msg>",
+    ].join(""),
+  });
+  const quotedXml = await classifier.classify({
+    transport: "pad",
+    sourceId: "small",
+    chatType: "group",
+    chatId: "project@chatroom",
+    senderId: "wxid_person",
+    text: "please inspect <msg><op id='11'><name>DownloadFile</name></op></msg>",
+  });
 
   assert.equal(lastMessage.blocked, true);
   assert.equal(lastMessage.reason, "internal-status-message");
   assert.equal(handoff.blocked, true);
   assert.equal(handoff.reason, "internal-status-message");
+  assert.equal(download.blocked, true);
+  assert.equal(download.reason, "internal-status-message");
+  assert.equal(quotedXml.blocked, false);
   assert.equal(requests, 0);
 });
 

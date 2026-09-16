@@ -63,10 +63,8 @@ export function isPadSystemAccountId(value) {
 
 function isPadInternalStatusMessage(message) {
   const text = String(message?.text || "");
-  return (
-    /<op\b/i.test(text) &&
-    /<name>\s*(?:lastMessage|HandOffMaster)\s*<\/name>/i.test(text)
-  );
+  return /^\s*<msg(?:\s[^>]*)?>\s*<op\b[^>]*>[\s\S]*<\/op>\s*<\/msg>\s*$/i
+    .test(text);
 }
 
 function isPadSafetyNotice(message) {
