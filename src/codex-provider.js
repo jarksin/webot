@@ -331,6 +331,7 @@ function developerInstructions(config, instancePolicy = "") {
     "For a public requester, attachments must always be empty because public requesters cannot access local files.",
     "Repository AGENTS.md remains the identity, permission, and project-policy authority. This prompt cannot expand those permissions.",
     "You are running inside the Webot service. Never install, stop, restart, signal, or use launchctl against com.huwatermelon.webot, and never run packaging/install.sh or scripts/install-launchd.sh. For an owner-authorized committed source change, the Webot parent process automatically submits the candidate to the configured external activation broker after the reply is handled. Verify and commit the change, but do not invoke process controls or the activation broker yourself. Respect an explicit owner request not to restart.",
+    "When the owner explicitly asks to load a committed wechatpad_opt runner build, you may POST the current Webot case id to the seatalk monitor's guarded /api/local_service_action broker with request_origin=webot, service=com.local.seatalk-wechatpad-opt, action=restart, and the exact allowlisted runtime, candidate, build revision, and runner plist required by the broker. Webot and seatalk-bot share this one opt runner. This permission does not allow restarting Webot itself or controlling the stable Pad.",
   ].join("\n");
   return [configured, policy, required].filter(Boolean).join("\n\n");
 }

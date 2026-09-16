@@ -101,6 +101,10 @@ test("builds new and resume commands with editable Codex settings", async () => 
   );
   assert.ok(
     fresh.some((item) =>
+      item.includes("service=com.local.seatalk-wechatpad-opt")),
+  );
+  assert.ok(
+    fresh.some((item) =>
       item.includes("Never put a local file path")),
   );
   assert.ok(
