@@ -86,6 +86,43 @@ test("blocks internal Pad status events in any conversation", async () => {
   assert.equal(requests, 0);
 });
 
+test("blocks WeChat safety notices without blocking the contact", async () => {
+  let requests = 0;
+  const classifier = new PadSenderClassifier(config(), {
+    fetchImpl: async () => {
+      requests += 1;
+      return {
+        ok: true,
+        async json() {
+          return {
+            Success: true,
+            Data: {
+              ContactList: [{
+                UserName: "wxid_contact",
+                VerifyFlag: 0,
+              }],
+            },
+          };
+        },
+      };
+    },
+  });
+  const notice = await classifier.classify({
+    ...message("wxid_contact"),
+    text:
+      '对方账号安全性未知，如涉及金钱交易务必电话确认，保护个人财产和隐私安全。<a href="weixin://expose/">我要投诉</a>',
+  });
+  const ordinary = await classifier.classify({
+    ...message("wxid_contact"),
+    text: "正常消息",
+  });
+
+  assert.equal(notice.blocked, true);
+  assert.equal(notice.reason, "wechat-safety-notice");
+  assert.equal(ordinary.blocked, false);
+  assert.equal(requests, 1);
+});
+
 test("uses VerifyFlag to block non-gh official accounts and caches results", async () => {
   let requests = 0;
   const classifier = new PadSenderClassifier(config(), {

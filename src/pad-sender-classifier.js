@@ -69,6 +69,16 @@ function isPadInternalStatusMessage(message) {
   );
 }
 
+function isPadSafetyNotice(message) {
+  const text = String(message?.text || "");
+  return (
+    message?.chatType === "private" &&
+    /weixin:\/\/expose\//i.test(text) &&
+    text.includes("对方账号安全性未知") &&
+    text.includes("保护个人财产和隐私安全")
+  );
+}
+
 export class PadSenderClassifier {
   constructor(
     config,
@@ -118,6 +128,9 @@ export class PadSenderClassifier {
     }
     if (isPadInternalStatusMessage(message)) {
       return { blocked: true, reason: "internal-status-message" };
+    }
+    if (isPadSafetyNotice(message)) {
+      return { blocked: true, reason: "wechat-safety-notice" };
     }
     if (
       message.chatType === "private" &&
