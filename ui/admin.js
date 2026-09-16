@@ -672,7 +672,6 @@ function directoryTypeLabel(value) {
   return {
     group: "群聊",
     user: "用户",
-    official: "公众号",
   }[value] || value;
 }
 
@@ -689,7 +688,6 @@ function renderDirectory() {
           <option value="">全部类型</option>
           <option value="group" ${directoryType === "group" ? "selected" : ""}>群聊</option>
           <option value="user" ${directoryType === "user" ? "selected" : ""}>用户</option>
-          <option value="official" ${directoryType === "official" ? "selected" : ""}>公众号</option>
         </select>
         <div class="directory-search">
           <input class="input" id="directory-query" value="${escapeHtml(directoryQuery)}" placeholder="名称或 wxid">

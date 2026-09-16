@@ -1,7 +1,12 @@
 import path from "node:path";
 import { CaseManager } from "./case-manager.js";
 import { CaseStore } from "./case-store.js";
-import { directoryEntriesFromContacts } from "./contact-directory.js";
+import {
+  directoryContactCursor,
+  directoryContactIds,
+  directoryEntriesFromContacts,
+  isDirectoryContactId,
+} from "./contact-directory.js";
 import { loadConfig } from "./config.js";
 import { KnowledgeBaseCloud } from "./kb-cloud.js";
 import { probeOptSource } from "./opt-status.js";
@@ -20,6 +25,14 @@ import {
   PadWebSocketClient,
 } from "./transports/pad.js";
 import { WEBOT_VERSION } from "./version.js";
+
+const DIRECTORY_DETAIL_BATCH_SIZE = 20;
+const PAD_BUSINESS_REQUEST_GAP_MS = 10_000;
+const DIRECTORY_MAX_LIST_PAGES = 20;
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 export class WebotApplication {
   constructor({
@@ -236,34 +249,102 @@ export class WebotApplication {
       if (!source.accessToken) {
         throw new Error(`missing Access Code for ${source.id}`);
       }
-      const response = await this.fetch(
-        `${source.apiUrl.replace(/\/$/, "")}/v1/contacts/list`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Access-Token": source.accessToken,
+      let lastRequestAt = 0;
+      const request = async (pathname, body, label) => {
+        const wait = PAD_BUSINESS_REQUEST_GAP_MS -
+          (Date.now() - lastRequestAt);
+        if (lastRequestAt && wait > 0) await sleep(wait);
+        lastRequestAt = Date.now();
+        const response = await this.fetch(
+          `${source.apiUrl.replace(/\/$/, "")}${pathname}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Access-Token": source.accessToken,
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(15_000),
           },
-          body: "{}",
-          signal: AbortSignal.timeout(15_000),
-        },
-      );
-      const body = await response.json();
-      if (
-        !response.ok ||
-        body?.Success === false ||
-        body?.success === false ||
-        (body?.Code != null && Number(body.Code) !== 0)
+        );
+        const responseBody = await response.json();
+        if (
+          !response.ok ||
+          responseBody?.Success === false ||
+          responseBody?.success === false ||
+          (responseBody?.Code != null && Number(responseBody.Code) !== 0)
+        ) {
+          throw new Error(`${label} returned HTTP ${response.status}`);
+        }
+        return responseBody;
+      };
+
+      const contactIds = new Set();
+      let wxContactSeq = 0;
+      let chatRoomSeq = 0;
+      let pages = 0;
+      let hasMore = false;
+      while (pages < DIRECTORY_MAX_LIST_PAGES) {
+        const body = await request("/v1/contacts/list", {
+          currentWxcontactSeq: wxContactSeq,
+          currentChatRoomContactSeq: chatRoomSeq,
+        }, "contact list");
+        for (const id of directoryContactIds(body)) contactIds.add(id);
+        pages += 1;
+        const cursor = directoryContactCursor(body);
+        hasMore = cursor.continue;
+        if (!hasMore) break;
+        if (
+          cursor.wxContactSeq === wxContactSeq &&
+          cursor.chatRoomSeq === chatRoomSeq
+        ) {
+          throw new Error("contact list cursor did not advance");
+        }
+        wxContactSeq = cursor.wxContactSeq;
+        chatRoomSeq = cursor.chatRoomSeq;
+      }
+      if (hasMore) {
+        throw new Error("contact list exceeded page limit");
+      }
+
+      const existingIdentities = this.caseStore.directoryIdentities(source.id);
+      const requestedIds = [...new Set([
+        ...[...contactIds].filter(isDirectoryContactId),
+        ...existingIdentities
+          .map((entry) => entry.entity_id)
+          .filter(isDirectoryContactId),
+      ])];
+      const entries = [];
+      for (
+        let index = 0;
+        index < requestedIds.length;
+        index += DIRECTORY_DETAIL_BATCH_SIZE
       ) {
-        throw new Error(`contact list returned HTTP ${response.status}`);
+        const batch = requestedIds.slice(
+          index,
+          index + DIRECTORY_DETAIL_BATCH_SIZE,
+        );
+        const body = await request("/v1/contacts/detail", {
+          userName: batch.join(","),
+        }, "contact detail");
+        entries.push(...directoryEntriesFromContacts(body, source.id));
       }
       const syncedAt = Date.now();
-      const entries = directoryEntriesFromContacts(body, source.id).map(
+      const syncedEntries = entries.map(
         (entry) => ({ ...entry, lastSeen: syncedAt }),
       );
+      const stale = existingIdentities
+        .filter((entry) => !isDirectoryContactId(entry.entity_id))
+        .map((entry) => entry.entity_id);
+      const removed = this.caseStore.removeDirectoryEntries(source.id, stale);
       results.push({
         sourceId: source.id,
-        imported: this.caseStore.importDirectory(entries),
+        discovered: contactIds.size,
+        requested: requestedIds.length,
+        resolved: entries.length,
+        named: entries.filter((entry) => entry.displayName).length,
+        removed,
+        imported: this.caseStore.importDirectory(syncedEntries),
       });
     }
     return {

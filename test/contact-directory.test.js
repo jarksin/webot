@@ -1,8 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { directoryEntriesFromContacts } from "../src/contact-directory.js";
+import {
+  directoryContactCursor,
+  directoryContactIds,
+  directoryEntriesFromContacts,
+  isDirectoryContactId,
+} from "../src/contact-directory.js";
 
-test("projects contact list identities for users, groups, and official accounts", () => {
+test("projects contact identities for users and groups while excluding services", () => {
   const entries = directoryEntriesFromContacts({
     Data: {
       ContactList: [
@@ -40,15 +45,38 @@ test("projects contact list identities for users, groups, and official accounts"
       entityId: "123@chatroom",
       displayName: "项目群",
     },
-    {
-      entityType: "official",
-      entityId: "service-account",
-      displayName: "服务号",
-    },
   ]);
   assert.deepEqual(entries[0].searchNames, [
     "同事",
     "朋友昵称",
     "friend_alias",
   ]);
+});
+
+test("extracts contact list ids and continuation cursors", () => {
+  const body = {
+    Data: {
+      ContactUsernameList: [
+        { string: "wxid_friend" },
+        "123@chatroom",
+        "wxid_friend",
+      ],
+      CountinueFlag: 1,
+      CurrentWxcontactSeq: 12,
+      CurrentChatRoomContactSeq: 34,
+    },
+  };
+  assert.deepEqual(directoryContactIds(body), [
+    "wxid_friend",
+    "123@chatroom",
+  ]);
+  assert.deepEqual(directoryContactCursor(body), {
+    continue: true,
+    wxContactSeq: 12,
+    chatRoomSeq: 34,
+  });
+  assert.equal(isDirectoryContactId("wxid_friend"), true);
+  assert.equal(isDirectoryContactId("123@chatroom"), true);
+  assert.equal(isDirectoryContactId("gh_service"), false);
+  assert.equal(isDirectoryContactId("newsapp"), false);
 });

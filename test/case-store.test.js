@@ -257,6 +257,15 @@ test("indexes observed and synced identities for bounded lookup", async () => {
     senderId: "service-account",
     senderName: "临时名称",
   });
+  caseStore.observeIdentity({
+    transport: "pad",
+    sourceId: "small",
+    timestamp: Date.now(),
+    chatType: "private",
+    chatId: "gh_service",
+    senderId: "gh_service",
+    senderName: "不应入目录",
+  });
 
   assert.deepEqual(
     caseStore.directory({ sourceId: "small", query: "项目" })
@@ -276,6 +285,10 @@ test("indexes observed and synced identities for bounded lookup", async () => {
     caseStore.directory({ sourceId: "small", query: "服务号备注" })
       .map((entry) => [entry.entity_type, entry.display_name]),
     [["official", "服务号备注"]],
+  );
+  assert.equal(
+    caseStore.directory({ sourceId: "small", query: "gh_service" }).length,
+    0,
   );
   const indexes = caseStore.db
     .prepare("SELECT name FROM sqlite_master WHERE type='index'")

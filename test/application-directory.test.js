@@ -35,17 +35,49 @@ test("persists rejected Pad sync messages and explicitly syncs contact names", a
     settingsStore,
     fetchImpl: async (url, options) => {
       requests.push({ url, options });
+      const requestBody = JSON.parse(options.body);
       return {
         ok: true,
         status: 200,
         async json() {
+          if (url.endsWith("/v1/contacts/list")) {
+            return {
+              Code: 0,
+              Data: {
+                ContactUsernameList: [
+                  "wxid_friend",
+                  "project@chatroom",
+                  "gh_service",
+                  "newsapp",
+                ],
+                CountinueFlag: 0,
+              },
+            };
+          }
+          assert.equal(url.endsWith("/v1/contacts/detail"), true);
+          assert.equal(
+            requestBody.userName,
+            "wxid_friend,project@chatroom,wxid_member",
+          );
           return {
             Code: 0,
             Data: {
-              ContactList: [{
-                UserName: "project@chatroom",
-                NickName: "项目讨论群",
-              }],
+              ContactList: [
+                {
+                  UserName: "wxid_friend",
+                  Remark: "同事",
+                  NickName: "好友昵称",
+                },
+                {
+                  UserName: "project@chatroom",
+                  NickName: "项目讨论群",
+                },
+                {
+                  UserName: "gh_service",
+                  NickName: "服务号",
+                  VerifyFlag: 8,
+                },
+              ],
             },
           };
         },
@@ -138,18 +170,39 @@ test("persists rejected Pad sync messages and explicitly syncs contact names", a
       .map((entry) => entry.entity_id),
     ["project@chatroom"],
   );
+  application.caseStore.upsertIdentity({
+    sourceId: "small",
+    entityType: "user",
+    entityId: "gh_service",
+    displayName: "",
+    origin: "message",
+  });
 
   const synced = await application.syncDirectory("small");
-  assert.equal(synced.imported, 1);
-  assert.equal(requests.length, 1);
+  assert.equal(synced.imported, 2);
+  assert.equal(synced.sources[0].discovered, 4);
+  assert.equal(synced.sources[0].requested, 3);
+  assert.equal(synced.sources[0].resolved, 2);
+  assert.equal(synced.sources[0].named, 2);
+  assert.equal(synced.sources[0].removed, 1);
+  assert.equal(requests.length, 2);
   assert.equal(
     requests[0].options.headers["X-Access-Token"],
     "secret",
   );
   assert.equal(
+    application.directory({ sourceId: "small", query: "同事" })[0]
+      .entity_id,
+    "wxid_friend",
+  );
+  assert.equal(
     application.directory({ sourceId: "small", query: "项目" })[0]
       .display_name,
     "项目讨论群",
+  );
+  assert.equal(
+    application.directory({ sourceId: "small", query: "gh_service" }).length,
+    0,
   );
   application.caseStore.close();
 });

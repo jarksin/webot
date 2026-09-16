@@ -17,6 +17,7 @@ import {
   normalizeCodexUsage,
   parseCodexSessionUsage,
 } from "./codex-usage.js";
+import { isDirectoryContactId } from "./contact-directory.js";
 
 function json(value, fallback = null) {
   try {
@@ -477,7 +478,10 @@ export class CaseStore {
     const sourceId = String(message?.sourceId || "default");
     const timestamp = Number(message?.timestamp || now());
     let changed = false;
-    if (message?.chatType === "group" && message.chatId) {
+    if (
+      message?.chatType === "group" &&
+      isDirectoryContactId(message.chatId)
+    ) {
       changed = this.upsertIdentity({
         sourceId,
         entityType: "group",
@@ -487,7 +491,10 @@ export class CaseStore {
         lastSeen: timestamp,
       }, { incrementMessage: true }) || changed;
     }
-    if (message?.senderId && message.senderId !== message.chatId) {
+    if (
+      isDirectoryContactId(message?.senderId) &&
+      message.senderId !== message.chatId
+    ) {
       changed = this.upsertIdentity({
         sourceId,
         entityType: "user",
@@ -496,7 +503,10 @@ export class CaseStore {
         searchNames: [message.senderName],
         lastSeen: timestamp,
       }, { incrementMessage: true }) || changed;
-    } else if (message?.chatType === "private" && message.senderId) {
+    } else if (
+      message?.chatType === "private" &&
+      isDirectoryContactId(message?.senderId)
+    ) {
       changed = this.upsertIdentity({
         sourceId,
         entityType: "user",
@@ -507,6 +517,37 @@ export class CaseStore {
       }, { incrementMessage: true }) || changed;
     }
     return changed;
+  }
+
+  directoryIdentities(sourceId) {
+    return this.db.prepare(`
+      SELECT entity_id, entity_type
+      FROM identity_directory
+      WHERE source_id=?
+    `).all(String(sourceId || ""));
+  }
+
+  removeDirectoryEntries(sourceId, entityIds) {
+    const ids = [...new Set(
+      (entityIds || []).map((id) => String(id || "").trim()).filter(Boolean),
+    )];
+    if (!ids.length) return 0;
+    const statement = this.db.prepare(`
+      DELETE FROM identity_directory
+      WHERE source_id=? AND entity_id=?
+    `);
+    let removed = 0;
+    this.db.exec("BEGIN");
+    try {
+      for (const id of ids) {
+        removed += statement.run(String(sourceId || ""), id).changes;
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    return removed;
   }
 
   importDirectory(entries) {
