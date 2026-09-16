@@ -166,6 +166,19 @@ export function formatPadReplyText(text, message = {}, source = {}) {
     : clean;
 }
 
+function replyMention(message = {}, source = {}) {
+  if (message.chatType !== "group") return "";
+  const senderId = String(message.senderId || "").trim();
+  if (
+    !senderId ||
+    /@chatroom$/i.test(senderId) ||
+    senderId.toLowerCase() === String(source.selfId || "").trim().toLowerCase()
+  ) {
+    return "";
+  }
+  return senderId;
+}
+
 export class PadTransport {
   constructor(
     config,
@@ -298,7 +311,7 @@ export class PadTransport {
       to: message.replyTarget || message.chatId,
       content,
       type: 1,
-      at: "",
+      at: replyMention(message, source),
     }, message);
   }
 

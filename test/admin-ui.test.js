@@ -15,13 +15,25 @@ const css = fs.readFileSync(
   "utf8",
 );
 
-test("admin navigation exposes cases, ID directory, knowledge, and settings", () => {
+test("admin navigation exposes cases, captured messages, ID directory, knowledge, and settings", () => {
   assert.match(html, /data-view="cases"/);
+  assert.match(html, /data-view="captured"/);
   assert.match(html, /data-view="directory"/);
   assert.match(html, /data-view="knowledge"/);
   assert.match(html, /data-view="settings"/);
   assert.doesNotMatch(html, /data-view="overview"/);
   assert.doesNotMatch(html, /data-view="release"/);
+});
+
+test("captured monitor exposes all Pad messages with filters and pagination", () => {
+  assert.match(javascript, /function renderCaptured\(\)/);
+  assert.match(javascript, /\/api\/admin\/captured/);
+  assert.match(javascript, /全部结果/);
+  assert.match(javascript, /已进入 Case/);
+  assert.match(javascript, /data-action="captured-prev"/);
+  assert.match(javascript, /data-action="captured-next"/);
+  assert.match(css, /\.captured-toolbar/);
+  assert.match(css, /\.captured-table/);
 });
 
 test("account settings expose source blacklists and a searchable ID directory", () => {

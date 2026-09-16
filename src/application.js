@@ -306,6 +306,10 @@ export class WebotApplication {
     return this.caseStore.detail(caseId, options);
   }
 
+  capturedMessages(options) {
+    return this.caseStore.syncedMessagePage(options);
+  }
+
   directory(options) {
     return this.caseStore.directory(options);
   }

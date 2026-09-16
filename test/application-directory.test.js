@@ -155,6 +155,16 @@ test("persists rejected Pad sync messages and explicitly syncs contact names", a
   assert.equal(rejectedControl.length, 1);
   assert.equal(rejectedControl[0].decision, "internal-status-message");
   assert.equal(rejectedControl[0].accepted, false);
+  const captured = application.capturedMessages({
+    sourceId: "small",
+    result: "rejected",
+    query: "member",
+    limit: 1,
+  });
+  assert.equal(captured.total, 2);
+  assert.equal(captured.messages.length, 1);
+  assert.equal(captured.hasMore, true);
+  assert.equal(captured.messages[0].source_id, "small");
   assert.equal(
     application.caseStore.db.prepare(`
       SELECT COUNT(*) AS count FROM messages

@@ -45,6 +45,7 @@ const iconSet = {
 
 const views = {
   cases: ["CASES", "微信 Case"],
+  captured: ["MONITOR", "All Captured"],
   directory: ["DIRECTORY", "微信 ID 目录"],
   knowledge: ["KNOWLEDGE", "知识库"],
   settings: ["CONFIG", "设置"],
@@ -89,6 +90,15 @@ let directoryEntries = [];
 let directoryQuery = "";
 let directoryType = "";
 let directorySource = "";
+let capturedMessages = [];
+let capturedPage = 0;
+let capturedTotal = 0;
+let capturedHasMore = false;
+const capturedPageSize = 100;
+let capturedSource = "";
+let capturedChatType = "";
+let capturedResult = "";
+let capturedQuery = "";
 
 const content = document.querySelector("#content");
 const notice = document.querySelector("#notice");
@@ -675,6 +685,118 @@ function directoryTypeLabel(value) {
   }[value] || value;
 }
 
+function capturedResultLabel(message) {
+  if (message.accepted === true) return "已进入 Case";
+  if (message.accepted === false) return message.decision || "已过滤";
+  return "待判定";
+}
+
+function capturedResultTone(message) {
+  if (message.accepted === true) return "good";
+  if (message.accepted === false) return "bad";
+  return "warn";
+}
+
+function capturedMessageText(message) {
+  if (message.text) return message.text;
+  const attachments = Array.isArray(message.attachments)
+    ? message.attachments
+    : [];
+  if (!attachments.length) return `[消息类型 ${message.message_type || "未知"}]`;
+  return attachments
+    .map((attachment) => `[${attachment.kind || attachment.filename || "附件"}]`)
+    .join(" ");
+}
+
+function renderCaptured() {
+  const sources = settings.pad.sources || [];
+  const start = capturedTotal ? capturedPage * capturedPageSize + 1 : 0;
+  const end = capturedTotal
+    ? Math.min(start + capturedMessages.length - 1, capturedTotal)
+    : 0;
+  content.innerHTML = `
+    <div class="captured-page">
+      <div class="captured-toolbar">
+        <select id="captured-source" aria-label="接入账号">
+          <option value="">全部账号</option>
+          ${sources.map((source) => `<option value="${escapeHtml(source.id)}" ${capturedSource === source.id ? "selected" : ""}>${escapeHtml(source.displayName || source.id)}</option>`).join("")}
+        </select>
+        <select id="captured-chat-type" aria-label="会话类型">
+          <option value="">全部会话</option>
+          <option value="private" ${capturedChatType === "private" ? "selected" : ""}>私聊</option>
+          <option value="group" ${capturedChatType === "group" ? "selected" : ""}>群聊</option>
+        </select>
+        <select id="captured-result" aria-label="处理结果">
+          <option value="">全部结果</option>
+          <option value="accepted" ${capturedResult === "accepted" ? "selected" : ""}>已进入 Case</option>
+          <option value="rejected" ${capturedResult === "rejected" ? "selected" : ""}>已过滤</option>
+          <option value="pending" ${capturedResult === "pending" ? "selected" : ""}>待判定</option>
+        </select>
+        <div class="captured-search">
+          <input class="input" id="captured-query" value="${escapeHtml(capturedQuery)}" placeholder="消息、名称、ID 或处理结果">
+          <button class="button primary icon-only" data-action="captured-search" title="查询"><i data-lucide="search"></i></button>
+        </div>
+      </div>
+      <div class="captured-summary">
+        <strong>${countText(capturedTotal)} 条捕获消息</strong>
+        <span>${start}-${end} / ${countText(capturedTotal)}</span>
+      </div>
+      <div class="table-wrap captured-table">
+        <table>
+          <thead><tr><th>时间</th><th>账号</th><th>会话</th><th>发送者</th><th>消息</th><th>处理结果</th></tr></thead>
+          <tbody>
+            ${capturedMessages.map((message) => `
+              <tr>
+                <td class="captured-time">${time(message.timestamp)}</td>
+                <td>${escapeHtml(sources.find((source) => source.id === message.source_id)?.displayName || message.source_id)}</td>
+                <td>
+                  <strong>${escapeHtml(message.chat_name || message.chat_id || "未知会话")}</strong>
+                  <code>${escapeHtml(message.chat_id)}</code>
+                </td>
+                <td>
+                  <strong>${escapeHtml(message.sender_name || message.sender_id || "未知发送者")}</strong>
+                  <code>${escapeHtml(message.sender_id)}</code>
+                </td>
+                <td class="captured-message">
+                  <p>${escapeHtml(capturedMessageText(message))}</p>
+                  <code>${escapeHtml(message.message_id)}</code>
+                </td>
+                <td>${badge(capturedResultLabel(message), capturedResultTone(message))}</td>
+              </tr>
+            `).join("") || `<tr><td colspan="6"><div class="empty compact"><div>没有匹配的捕获消息</div></div></td></tr>`}
+          </tbody>
+        </table>
+      </div>
+      <div class="captured-pagination">
+        <button class="button secondary compact-button" data-action="captured-prev" ${capturedPage <= 0 ? "disabled" : ""}>上一页</button>
+        <span>${start}-${end} / ${countText(capturedTotal)}</span>
+        <button class="button secondary compact-button" data-action="captured-next" ${capturedHasMore ? "" : "disabled"}>下一页</button>
+      </div>
+    </div>`;
+}
+
+async function loadCaptured() {
+  const parameters = new URLSearchParams({
+    limit: String(capturedPageSize),
+    offset: String(capturedPage * capturedPageSize),
+  });
+  if (capturedSource) parameters.set("sourceId", capturedSource);
+  if (capturedChatType) parameters.set("chatType", capturedChatType);
+  if (capturedResult) parameters.set("result", capturedResult);
+  if (capturedQuery) parameters.set("query", capturedQuery);
+  const body = await api(`/api/admin/captured?${parameters}`);
+  if (!body.messages?.length && capturedPage > 0 && Number(body.total || 0) > 0) {
+    capturedPage = Math.max(
+      0,
+      Math.ceil(Number(body.total) / capturedPageSize) - 1,
+    );
+    return loadCaptured();
+  }
+  capturedMessages = body.messages || [];
+  capturedTotal = Number(body.total || capturedMessages.length);
+  capturedHasMore = Boolean(body.hasMore);
+}
+
 function renderDirectory() {
   const sources = settings.pad.sources || [];
   content.innerHTML = `
@@ -885,6 +1007,7 @@ function renderHeaderControls() {
 function render() {
   const [eyebrow, title] = views[activeView];
   document.body.classList.toggle("view-cases", activeView === "cases");
+  document.body.classList.toggle("view-captured", activeView === "captured");
   document.body.classList.toggle("view-directory", activeView === "directory");
   document.body.classList.toggle("view-knowledge", activeView === "knowledge");
   document.body.classList.toggle("view-settings", activeView === "settings");
@@ -901,6 +1024,7 @@ function render() {
   if (!settings || !status) {
     content.innerHTML = `<div class="empty"><div><i data-lucide="refresh-cw"></i><div>正在读取运行状态</div></div></div>`;
   } else if (activeView === "cases") renderCases();
+  else if (activeView === "captured") renderCaptured();
   else if (activeView === "directory") renderDirectory();
   else if (activeView === "knowledge") renderKnowledge();
   else if (activeView === "settings") renderSettings();
@@ -1049,6 +1173,7 @@ async function load() {
   }
   settings.pad ||= { sources: [] };
   settings.pad.sources ||= [];
+  if (activeView === "captured") await loadCaptured();
   document.querySelector("#service-dot").classList.add("ok");
   document.querySelector("#service-label").textContent = "服务运行中";
   dirty = false;
@@ -1105,7 +1230,23 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("keydown", async (event) => {
-  if (event.key !== "Enter" || event.target.id !== "directory-query") return;
+  if (event.key !== "Enter") return;
+  if (event.target.id === "captured-query") {
+    event.preventDefault();
+    try {
+      capturedSource = document.querySelector("#captured-source").value;
+      capturedChatType = document.querySelector("#captured-chat-type").value;
+      capturedResult = document.querySelector("#captured-result").value;
+      capturedQuery = event.target.value.trim();
+      capturedPage = 0;
+      await loadCaptured();
+      render();
+    } catch (error) {
+      showNotice(error.message, true);
+    }
+    return;
+  }
+  if (event.target.id !== "directory-query") return;
   event.preventDefault();
   try {
     directorySource = document.querySelector("#directory-source").value;
@@ -1137,6 +1278,7 @@ document.addEventListener("click", async (event) => {
     readCurrentForm();
     activeView = nav.dataset.view;
     history.replaceState(null, "", `#${activeView}`);
+    if (activeView === "captured") await loadCaptured();
     if (activeView === "directory") await loadDirectory();
     render();
     return;
@@ -1168,7 +1310,23 @@ document.addEventListener("click", async (event) => {
   const action = event.target.closest("[data-action]")?.dataset.action;
   if (!action) return;
   try {
-    if (action === "add-source") {
+    if (action === "captured-search") {
+      capturedSource = document.querySelector("#captured-source").value;
+      capturedChatType = document.querySelector("#captured-chat-type").value;
+      capturedResult = document.querySelector("#captured-result").value;
+      capturedQuery = document.querySelector("#captured-query").value.trim();
+      capturedPage = 0;
+      await loadCaptured();
+      render();
+    } else if (action === "captured-prev" && capturedPage > 0) {
+      capturedPage -= 1;
+      await loadCaptured();
+      render();
+    } else if (action === "captured-next" && capturedHasMore) {
+      capturedPage += 1;
+      await loadCaptured();
+      render();
+    } else if (action === "add-source") {
       readAccountForm();
       settings.pad.sources.push({
         id: `account-${settings.pad.sources.length + 1}`,

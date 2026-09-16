@@ -87,6 +87,16 @@ function syncedMessageSnapshot(message) {
   };
 }
 
+function syncedMessageRow(row) {
+  return {
+    ...row,
+    accepted: row.accepted == null ? null : Boolean(row.accepted),
+    attachments: json(row.attachments_json, []),
+    mentions: json(row.mentions_json, []),
+    metadata: json(row.metadata_json, {}),
+  };
+}
+
 function ensureColumn(db, table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
   if (columns.some((item) => item.name === column)) return false;
@@ -921,13 +931,71 @@ export class CaseStore {
         ORDER BY timestamp DESC, id DESC
         LIMIT ?
       ) ORDER BY timestamp ASC, id ASC
-    `).all(...parameters, limit).map((row) => ({
-      ...row,
-      accepted: row.accepted == null ? null : Boolean(row.accepted),
-      attachments: json(row.attachments_json, []),
-      mentions: json(row.mentions_json, []),
-      metadata: json(row.metadata_json, {}),
-    }));
+    `).all(...parameters, limit).map(syncedMessageRow);
+  }
+
+  syncedMessagePage(options = {}) {
+    const sourceId = String(options.sourceId || "").trim();
+    const chatType = String(options.chatType || "").trim();
+    const result = String(options.result || "").trim();
+    const query = String(options.query || "").trim().slice(0, 200);
+    const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 200);
+    const offset = Math.max(Number(options.offset) || 0, 0);
+    const clauses = [];
+    const parameters = [];
+    if (sourceId) {
+      clauses.push("source_id=?");
+      parameters.push(sourceId);
+    }
+    if (chatType) {
+      clauses.push("chat_type=?");
+      parameters.push(chatType);
+    }
+    if (result === "accepted") {
+      clauses.push("accepted=1");
+    } else if (result === "rejected") {
+      clauses.push("accepted=0");
+    } else if (result === "pending") {
+      clauses.push("accepted IS NULL");
+    }
+    if (query) {
+      const pattern = `%${query}%`;
+      clauses.push(`(
+        message_id LIKE ? OR sender_id LIKE ? OR sender_name LIKE ?
+        OR chat_id LIKE ? OR chat_name LIKE ? OR text LIKE ?
+        OR decision LIKE ?
+      )`);
+      parameters.push(
+        pattern,
+        pattern,
+        pattern,
+        pattern,
+        pattern,
+        pattern,
+        pattern,
+      );
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const total = Number(
+      this.db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM synced_messages
+        ${where}
+      `).get(...parameters).count || 0,
+    );
+    const messages = this.db.prepare(`
+      SELECT * FROM synced_messages
+      ${where}
+      ORDER BY timestamp DESC, id DESC
+      LIMIT ? OFFSET ?
+    `).all(...parameters, limit, offset).map(syncedMessageRow);
+    return {
+      messages,
+      total,
+      limit,
+      offset,
+      hasMore: offset + messages.length < total,
+    };
   }
 
   ingestGroupContext(message, options = {}) {

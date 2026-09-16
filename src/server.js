@@ -252,6 +252,23 @@ export function createServer({
           return;
         }
         if (
+          request.method === "GET" &&
+          url.pathname === "/api/admin/captured"
+        ) {
+          respond(response, 200, {
+            ok: true,
+            ...application.capturedMessages({
+              sourceId: url.searchParams.get("sourceId"),
+              chatType: url.searchParams.get("chatType"),
+              result: url.searchParams.get("result"),
+              query: url.searchParams.get("query"),
+              limit: url.searchParams.get("limit"),
+              offset: url.searchParams.get("offset"),
+            }),
+          });
+          return;
+        }
+        if (
           request.method === "POST" &&
           url.pathname === "/api/admin/directory/sync"
         ) {

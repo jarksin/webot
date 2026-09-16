@@ -106,6 +106,23 @@ test("serves local AGENTS and knowledge editor APIs", async () => {
         display_name: "项目群",
       }];
     },
+    capturedMessages(options) {
+      return {
+        messages: [{
+          id: 1,
+          source_id: options.sourceId || "small",
+          chat_type: options.chatType || "group",
+          decision: options.result === "rejected"
+            ? "chat-not-allowed"
+            : "accepted",
+          text: options.query || "hello",
+        }],
+        total: 1,
+        limit: Number(options.limit || 100),
+        offset: Number(options.offset || 0),
+        hasMore: false,
+      };
+    },
     syncDirectory(sourceId) {
       return {
         imported: 1,
@@ -201,6 +218,14 @@ test("serves local AGENTS and knowledge editor APIs", async () => {
     body: JSON.stringify({ sourceId: "small" }),
   }).then((response) => response.json());
   assert.equal(synced.imported, 1);
+  const captured = await fetch(
+    `${base}/api/admin/captured?sourceId=small&chatType=group&result=rejected&query=hello&limit=25&offset=0`,
+  ).then((response) => response.json());
+  assert.equal(captured.messages[0].source_id, "small");
+  assert.equal(captured.messages[0].chat_type, "group");
+  assert.equal(captured.messages[0].decision, "chat-not-allowed");
+  assert.equal(captured.messages[0].text, "hello");
+  assert.equal(captured.limit, 25);
 
   await app.stop();
 });

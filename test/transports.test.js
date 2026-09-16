@@ -91,6 +91,38 @@ test("Pad transport sends the expected text contract", async (context) => {
   assert.match(call.body.request_id, /^[0-9a-f-]{36}$/);
 });
 
+test("Pad transport mentions the triggering sender in group replies", async (context) => {
+  const calls = [];
+  context.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    return Response.json({ Code: 0 });
+  });
+  const transport = new PadTransport(
+    {
+      apiUrl: "http://pad.local",
+      accessToken: "test-token",
+      requireWriteConfirmation: true,
+      selfId: "wxid_bot",
+    },
+    "live",
+  );
+
+  await transport.send({
+    chatType: "group",
+    chatId: "room@chatroom",
+    senderId: "wxid_member",
+  }, "group reply");
+  await transport.send({
+    chatType: "group",
+    chatId: "room@chatroom",
+    senderId: "wxid_bot",
+  }, "self reply");
+
+  assert.equal(calls[0].body.to, "room@chatroom");
+  assert.equal(calls[0].body.at, "wxid_member");
+  assert.equal(calls[1].body.at, "");
+});
+
 test("Pad transport sends images, audio, and generic file cards", async (context) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-files-"));
   const image = path.join(directory, "cover.png");
