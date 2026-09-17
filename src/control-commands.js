@@ -137,7 +137,7 @@ export async function applyControlCommand({
       return {
         text:
           "命令格式不对。使用 /session new <名称>、/session <名称>、"
-          + "/session delete <名称> 或 /session list。",
+          + "/session delete <名称> 或 /sessions。",
       };
     }
     if (command.action === "show") {
@@ -145,7 +145,7 @@ export async function applyControlCommand({
         text:
           `当前 session：${current.name}。\n`
           + "新建：/session new <名称>；切换：/session <名称>；"
-          + "删除：/session delete <名称>；列表：/session list；"
+          + "删除：/session delete <名称>；列表：/sessions；"
           + "切回默认：/session main。",
       };
     }
@@ -165,7 +165,7 @@ export async function applyControlCommand({
             + "该 session 的上下文、Codex session、模型和 effort 均独立。",
         };
       } catch (error) {
-        return { text: `${error.message}。用 /session list 查看现有 session。` };
+        return { text: `${error.message}。用 /sessions 查看现有 session。` };
       }
     }
     if (command.action === "delete") {
@@ -177,7 +177,7 @@ export async function applyControlCommand({
       }
       const deleted = caseStore.deleteSession(scopeCaseId, name);
       if (deleted.reason === "not-found") {
-        return { text: `找不到 session「${name}」。用 /session list 查看。` };
+        return { text: `找不到 session「${name}」。用 /sessions 查看。` };
       }
       if (deleted.reason === "main") {
         return { text: "默认 session「main」不能删除。" };
@@ -197,7 +197,7 @@ export async function applyControlCommand({
     }
     const selected = caseStore.activateSession(scopeCaseId, name);
     if (!selected) {
-      return { text: `找不到 session「${name}」。用 /session list 查看。` };
+      return { text: `找不到 session「${name}」。用 /sessions 查看。` };
     }
     return {
       text: selected.session_id === "main"
@@ -272,11 +272,7 @@ export async function applyControlCommand({
   }
 
   if (command.type === "stop") {
-    return {
-      text: stopped
-        ? "当前任务已停止；下一条任务会继续复用当前 Codex session。如需新会话请用 /clear。"
-        : "当前会话没有可停止的任务。",
-    };
+    return { text: "任务已停止" };
   }
 
   if (command.type === "status") {
@@ -292,7 +288,7 @@ export async function applyControlCommand({
 
   return {
     text:
-      "会话：/session、/session list、/session new <名称>、"
+      "会话：/session、/sessions、/session new <名称>、"
       + "/session <名称>、/session delete <名称>。\n"
       + "运行：/models、/model [模型|default]、/effort [级别|default]、"
       + "/status、/clear、/stop。\n"

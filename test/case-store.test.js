@@ -1660,7 +1660,7 @@ test("routes named sessions to independent worker and history state", async () =
   );
 
   const list = message("named-list");
-  list.text = "/session list";
+  list.text = "/sessions";
   const listed = await manager.receive(list);
   assert.equal(listed.caseId, projectReceived.caseId);
   assert.match(sent.at(-1), /\* project-a/);

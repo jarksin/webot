@@ -34,9 +34,14 @@ test("parses stable owner control commands", () => {
     type: "clear",
     action: "reset",
   });
-  assert.deepEqual(parseControlCommand("/session list"), {
+  assert.deepEqual(parseControlCommand("/sessions"), {
     type: "session",
     action: "list",
+    name: "",
+  });
+  assert.deepEqual(parseControlCommand("/session list"), {
+    type: "session",
+    action: "invalid",
     name: "",
   });
   assert.deepEqual(parseControlCommand("/session new project-a"), {
@@ -177,7 +182,7 @@ test("creates, switches, lists, and deletes isolated named sessions", async () =
   const listed = await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
-    command: parseControlCommand("/session list"),
+    command: parseControlCommand("/sessions"),
   });
   assert.match(listed.text, /\* project-a/);
   assert.match(listed.text, /- main/);
@@ -209,5 +214,23 @@ test("creates, switches, lists, and deletes isolated named sessions", async () =
     caseStore.listSessions(common.scopeCaseId).map((row) => row.name),
     ["main"],
   );
+  caseStore.close();
+});
+
+test("keeps stop replies concise", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-stop-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const sessionStore = new SessionStore(path.join(directory, "sessions"), 4);
+  for (const stopped of [false, true]) {
+    const result = await applyControlCommand({
+      command: parseControlCommand("/stop"),
+      caseId: "case-1",
+      caseStore,
+      sessionStore,
+      config: {},
+      stopped,
+    });
+    assert.equal(result.text, "任务已停止");
+  }
   caseStore.close();
 });

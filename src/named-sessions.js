@@ -19,6 +19,9 @@ export function validSessionName(value) {
 
 export function parseSessionCommand(value) {
   const text = String(value || "").trim();
+  if (/^\/sessions\s*$/i.test(text)) {
+    return { type: "session", action: "list", name: "" };
+  }
   const match = text.match(/^\/session(?:\s+([\s\S]*))?$/i);
   if (!match) return null;
 
@@ -27,7 +30,7 @@ export function parseSessionCommand(value) {
     return { type: "session", action: "show", name: "" };
   }
   if (/^list$/i.test(argument)) {
-    return { type: "session", action: "list", name: "" };
+    return { type: "session", action: "invalid", name: "" };
   }
   const newMatch = argument.match(/^new(?:\s+([\s\S]+))?$/i);
   if (newMatch) {
