@@ -27,6 +27,11 @@ function commandNeedsIdleWorker(command) {
   return command?.type === "clear" || command?.type === "stop";
 }
 
+function completedDraftText(text) {
+  const value = String(text || "").trim();
+  return /^\[done\](?:\s|$)/i.test(value) ? value : `[done] ${value}`;
+}
+
 export class CaseManager {
   constructor({
     config,
@@ -537,7 +542,15 @@ export class CaseManager {
         throw error;
       }
     }
-    const textOutbound = await transport.send(target.message, draft.text);
+    const markCompleted = (
+      this.caseSettings().ownerIntermediateItems === true &&
+      this.requesterAccess(target.message) === "owner" &&
+      acceptsOwnerIntermediateItems(target.message)
+    );
+    const textOutbound = await transport.send(
+      target.message,
+      markCompleted ? completedDraftText(draft.text) : draft.text,
+    );
     const outbound = {
       ok: true,
       dryRun:

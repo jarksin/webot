@@ -1350,7 +1350,7 @@ test("sends intermediate items only to owner self conversations", async () => {
       assistant: { mode: "codex", codexModel: "test-model", llmModel: "" },
       caseManagement: {
         autoRun: false,
-        autoSend: false,
+        autoSend: true,
         ownerIntermediateItems: true,
         workerConcurrency: 1,
       },
@@ -1440,14 +1440,26 @@ test("sends intermediate items only to owner self conversations", async () => {
     exactSelfChat: false,
   });
   const publicRequester = await runFor("public");
-  assert.deepEqual(owner.sent.map((item) => item.text), ["正在检查配置"]);
+  assert.deepEqual(
+    owner.sent.map((item) => item.text),
+    ["正在检查配置", "[done] 检查完成"],
+  );
   assert.deepEqual(
     ownerSelf.sent.map((item) => item.text),
-    ["正在检查配置"],
+    ["正在检查配置", "[done] 检查完成"],
   );
-  assert.deepEqual(ownerGroup.sent, []);
-  assert.deepEqual(ownerOrdinaryPrivate.sent, []);
-  assert.deepEqual(publicRequester.sent, []);
+  assert.deepEqual(
+    ownerGroup.sent.map((item) => item.text),
+    ["检查完成"],
+  );
+  assert.deepEqual(
+    ownerOrdinaryPrivate.sent.map((item) => item.text),
+    ["检查完成"],
+  );
+  assert.deepEqual(
+    publicRequester.sent.map((item) => item.text),
+    ["检查完成"],
+  );
   assert.deepEqual(owner.liveProgress, ["正在检查配置"]);
   assert.deepEqual(ownerSelf.liveProgress, ["正在检查配置"]);
   assert.deepEqual(ownerGroup.liveProgress, ["正在检查配置"]);
