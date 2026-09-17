@@ -1219,7 +1219,10 @@ export class CaseStore {
       ON CONFLICT(case_id) DO UPDATE SET
         source_name=excluded.source_name,
         title=excluded.title,
-        status='new',
+        status=CASE
+          WHEN cases.status='running' THEN 'running'
+          ELSE 'new'
+        END,
         unread_count=cases.unread_count + 1,
         last_message_id=excluded.last_message_id,
         last_message_at=excluded.last_message_at,
@@ -1706,8 +1709,15 @@ export class CaseStore {
         last_processed_message_id, input_cutoff_message_id, updated_at
       ) VALUES (?, 'draft_ready', 0, ?, '', ?, ?, ?)
       ON CONFLICT(case_id) DO UPDATE SET
-        status='draft_ready',
-        finished_at=excluded.finished_at,
+        status=CASE
+          WHEN worker_sessions.status='running' THEN 'running'
+          ELSE 'draft_ready'
+        END,
+        finished_at=CASE
+          WHEN worker_sessions.status='running'
+            THEN worker_sessions.finished_at
+          ELSE excluded.finished_at
+        END,
         last_error='',
         last_processed_message_id=MAX(
           worker_sessions.last_processed_message_id,
@@ -1750,6 +1760,7 @@ export class CaseStore {
     this.db.prepare(`
       UPDATE cases SET
         status=CASE
+          WHEN status='running' THEN 'running'
           WHEN last_message_id>? THEN 'new'
           ELSE 'draft_ready'
         END,
@@ -1788,7 +1799,11 @@ export class CaseStore {
     this.db.prepare(`
       UPDATE cases SET
         status=CASE
-          WHEN ?>0 AND last_message_id>? THEN 'new'
+          WHEN ?>0 AND last_message_id>(
+            SELECT last_processed_message_id
+            FROM worker_sessions
+            WHERE case_id=?
+          ) THEN 'new'
           ELSE ?
         END,
         last_error=?,
@@ -1796,7 +1811,7 @@ export class CaseStore {
       WHERE case_id=?
     `).run(
       processed,
-      processed,
+      caseId,
       status,
       String(error || ""),
       timestamp,
@@ -1813,21 +1828,47 @@ export class CaseStore {
     this.db.prepare(`
       UPDATE cases SET
         status=CASE
+          WHEN status='running' THEN 'running'
           WHEN last_message_id>(
-            SELECT input_cutoff_message_id FROM drafts WHERE id=?
+            MAX(
+              COALESCE((
+                SELECT input_cutoff_message_id FROM drafts WHERE id=?
+              ), 0),
+              COALESCE((
+                SELECT last_processed_message_id
+                FROM worker_sessions
+                WHERE case_id=?
+              ), 0)
+            )
           ) THEN 'new'
           ELSE 'replied'
         END,
         unread_count=CASE
           WHEN last_message_id>(
-            SELECT input_cutoff_message_id FROM drafts WHERE id=?
+            MAX(
+              COALESCE((
+                SELECT input_cutoff_message_id FROM drafts WHERE id=?
+              ), 0),
+              COALESCE((
+                SELECT last_processed_message_id
+                FROM worker_sessions
+                WHERE case_id=?
+              ), 0)
+            )
           ) THEN unread_count
           ELSE 0
         END,
         last_error='',
         updated_at=?
       WHERE case_id=?
-    `).run(Number(draftId), Number(draftId), timestamp, caseId);
+    `).run(
+      Number(draftId),
+      caseId,
+      Number(draftId),
+      caseId,
+      timestamp,
+      caseId,
+    );
   }
 
   markDraftError(caseId, draftId, error) {

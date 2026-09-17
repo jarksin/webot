@@ -886,6 +886,8 @@ test("steers a new message into an active Codex turn without rerunning", async (
   assert.equal(steered.length, 1);
   assert.equal(steered[0].caseId, first.caseId);
   assert.equal(steered[0].text, "补充条件");
+  assert.equal(caseStore.detail(first.caseId).status, "running");
+  assert.equal(caseStore.workerSession(first.caseId).status, "running");
 
   releaseFirst();
   await waitFor(() => manager.status().active === 0);
@@ -919,7 +921,7 @@ test("owner model and session commands do not wait for an active worker", async 
         codexHome: directory,
         codexModel: "gpt-test",
       },
-      caseManagement: { autoRun: true, autoSend: false, workerConcurrency: 1 },
+      caseManagement: { autoRun: true, autoSend: true, workerConcurrency: 1 },
       pad: {
         sources: [{
           id: "small",
@@ -951,7 +953,13 @@ test("owner model and session commands do not wait for an active worker", async 
     },
     sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
     caseStore,
-    transports: {},
+    transports: {
+      pad: {
+        async send() {
+          return { ok: true, dryRun: false };
+        },
+      },
+    },
     requesterAccess: () => "owner",
     logger: { info() {}, warn() {}, error() {} },
   });
@@ -968,6 +976,11 @@ test("owner model and session commands do not wait for an active worker", async 
     }),
   ]);
   assert.equal(modelResult.command, "model");
+  assert.equal(caseStore.detail(modelResult.caseId).status, "running");
+  assert.equal(
+    caseStore.workerSession(modelResult.caseId).status,
+    "running",
+  );
 
   const session = message("command-session");
   session.text = "/session new project-a";
@@ -978,9 +991,19 @@ test("owner model and session commands do not wait for an active worker", async 
     }),
   ]);
   assert.equal(sessionResult.command, "session");
+  assert.equal(caseStore.detail(modelResult.caseId).status, "running");
+  assert.equal(
+    caseStore.workerSession(modelResult.caseId).status,
+    "running",
+  );
 
   releaseFirst();
   await waitFor(() => manager.status().active === 0);
+  assert.equal(caseStore.detail(modelResult.caseId).status, "replied");
+  assert.equal(
+    caseStore.workerSession(modelResult.caseId).status,
+    "draft_ready",
+  );
   assert.equal(caseStore.ensureSessionScope(modelResult.caseId).name, "project-a");
   caseStore.close();
 });
