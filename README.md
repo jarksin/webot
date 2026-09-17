@@ -1,13 +1,15 @@
 # Webot
 
-Webot is a self-hosted personal assistant and digital twin built on WeChat
-message ingress and egress.
+Webot is a self-hosted personal assistant and digital twin with WeChat and
+optional Telegram message ingress and egress.
 
 It provides:
 
 - Isolated cases and persistent Codex sessions for each chat.
 - Named, isolated owner sessions controlled with `/session` commands.
 - Multi-account WeChat gateway connections.
+- Optional Telegram user-account connectivity through an authorized Telethon
+  session.
 - Automatic or reviewed draft replies.
 - Image cards, audio delivery, and confirmed file-card delivery when supported
   by the configured gateway.
@@ -65,6 +67,16 @@ gateway. Each account requires its own account ID and credential. See
 The gateway is an external component and is not included in this repository.
 Webot normalizes inbound events before they reach an assistant provider and
 uses the originating account for outbound replies.
+
+## Telegram
+
+Telegram support uses the included Python JSON-lines bridge and an existing,
+authorized Telethon session. Install Telethon in the configured Python
+environment, configure a Telegram source, and add `telegram` to `channels`.
+Saved Messages can be trusted as the owner channel when
+`trustSelfAsOwner` is explicitly enabled. Other private chats and groups are
+rejected unless their stable Telegram IDs are placed in the source allowlists.
+See [docs/telegram.md](docs/telegram.md).
 
 ## Architecture
 

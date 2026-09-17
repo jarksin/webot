@@ -41,6 +41,12 @@ async function main() {
       credentialReady: Boolean(source.accessToken),
       credentialSource: source.credentialSource,
     })),
+    telegramSources: application.config.telegram.sources.map((source) => ({
+      id: source.id,
+      sessionConfigured: Boolean(source.sessionPath),
+      credentialReady: Boolean(source.apiId && source.apiHash),
+      credentialSource: source.credentialSource,
+    })),
   });
 
   async function shutdown(signal) {

@@ -20,12 +20,23 @@ test("redacts secrets and preserves them by account id", async () => {
         { id: "second", accessToken: "second-secret" },
       ],
     },
+    telegram: {
+      sources: [{
+        id: "telegram",
+        apiId: "123456",
+        apiHash: "telegram-secret",
+      }],
+    },
   });
 
   const publicValue = store.publicSettings();
   assert.equal(publicValue.assistant.llmApiKey, "");
   assert.equal(publicValue.assistant.llmApiKeyConfigured, true);
   assert.equal(publicValue.pad.sources[0].accessToken, "");
+  assert.equal(publicValue.telegram.sources[0].apiId, "");
+  assert.equal(publicValue.telegram.sources[0].apiIdConfigured, true);
+  assert.equal(publicValue.telegram.sources[0].apiHash, "");
+  assert.equal(publicValue.telegram.sources[0].apiHashConfigured, true);
 
   await store.save({
     assistant: { llmApiKey: "" },
@@ -35,11 +46,20 @@ test("redacts secrets and preserves them by account id", async () => {
         { id: "first", accessToken: "" },
       ],
     },
+    telegram: {
+      sources: [{
+        id: "telegram",
+        apiId: "",
+        apiHash: "",
+      }],
+    },
   });
   const persisted = JSON.parse(await fs.readFile(file, "utf8"));
   assert.equal(persisted.assistant.llmApiKey, "llm-secret");
   assert.equal(persisted.pad.sources[0].accessToken, "second-secret");
   assert.equal(persisted.pad.sources[1].accessToken, "first-secret");
+  assert.equal(persisted.telegram.sources[0].apiId, "123456");
+  assert.equal(persisted.telegram.sources[0].apiHash, "telegram-secret");
   assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
 });
 

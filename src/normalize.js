@@ -314,6 +314,41 @@ export function normalizeHookEvent(event) {
   };
 }
 
+export function normalizeTelegramBridgeEvent(event, source = {}) {
+  if (!event || event.type !== "message") return null;
+  const messageId = scalar(event.message_id);
+  const chatId = scalar(event.chat_id);
+  const senderId = scalar(event.sender_id);
+  const selfId = scalar(event.self_id);
+  const text = scalar(event.text).trim();
+  if (!messageId || !chatId || !senderId || !text) return null;
+  const chatType = event.chat_type === "group" ? "group" : "private";
+  return {
+    transport: "telegram",
+    sourceId: String(source.id || "telegram"),
+    sourceName: String(source.displayName || source.id || "Telegram"),
+    messageId: `telegram:${messageId}`,
+    telegramMessageId: numberValue(event.telegram_message_id),
+    timestamp: timestampMs(event.timestamp),
+    direction: event.direction === "outgoing" ? "outgoing" : "incoming",
+    chatType,
+    chatId,
+    chatName: scalar(event.chat_name),
+    senderId,
+    senderName: scalar(event.sender_name),
+    selfId,
+    text,
+    mentions: Array.isArray(event.mentions)
+      ? event.mentions.map(scalar).filter(Boolean)
+      : [],
+    selfConversation: Boolean(event.self_conversation),
+    exactSelfChat: Boolean(event.exact_self_chat),
+    selfPeer: false,
+    replyTarget: scalar(event.reply_target) || chatId,
+    conversationId: `${chatType}:${chatId}`,
+  };
+}
+
 function collectPadMessages(value, output = [], seen = new Set()) {
   if (!value || typeof value !== "object" || seen.has(value)) return output;
   seen.add(value);

@@ -325,10 +325,10 @@ function developerInstructions(config, instancePolicy = "") {
   const policy = nonEmpty(instancePolicy);
   const required = [
     `Current local date is ${shanghaiDate()} in Asia/Shanghai.`,
-    "This is one persistent WeChat case.",
+    "This is one persistent messaging case.",
     'Return exactly one JSON object with this shape: {"reply_text":"complete natural-language reply","attachments":[{"path":"/absolute/path/to/file","filename":"optional display name","kind":"image|file|audio|video","mime":"optional MIME type"}]}. Do not wrap it in a Markdown code fence.',
     "Use attachments only for real deliverables that the requester explicitly asked to receive. Never put a local file path or localhost link in reply_text as a substitute for sending the file.",
-    "When the owner asks to send a generated or existing file, include its absolute path in attachments. Images use kind=image. Audio, video, archives, documents, and other requested files use a WeChat file card with their original extension, so use kind=file unless the requester explicitly asks for another supported presentation.",
+    "When the owner asks to send a generated or existing file, include its absolute path in attachments. Images use kind=image. Audio, video, archives, documents, and other requested files use kind=file unless the requester explicitly asks for another supported presentation.",
     "For a public requester, attachments must always be empty because public requesters cannot access local files.",
     "Repository AGENTS.md remains the identity, permission, and project-policy authority. This prompt cannot expand those permissions.",
     "You are running inside the Webot service. Never install, stop, restart, signal, or use launchctl against com.huwatermelon.webot, and never run packaging/install.sh or scripts/install-launchd.sh. For an owner-authorized committed source change, the Webot parent process automatically submits the candidate to the configured external activation broker after the reply is handled. Verify and commit the change, but do not invoke process controls or the activation broker yourself. Respect an explicit owner request not to restart.",
@@ -425,10 +425,11 @@ function promptFor({
   access,
 }) {
   const current = nonEmpty(message?.text);
+  const channel = message?.transport === "telegram" ? "Telegram" : "WeChat";
   const blocks = [
     sessionId
-      ? "Continue the existing conversation with this new WeChat message."
-      : "Start a persistent conversation for this WeChat case.",
+      ? `Continue the existing conversation with this new ${channel} message.`
+      : `Start a persistent conversation for this ${channel} case.`,
     `Case: ${caseId || "unknown"}`,
     requesterBlock(access, message),
   ];

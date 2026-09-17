@@ -35,7 +35,10 @@ function caseIdFor(message) {
   const conversation =
     message.conversationId ||
     `${message.chatType || "private"}:${message.chatId}`;
-  return `wechat:${message.sourceId || "default"}:${conversation}`;
+  const namespace = message.transport === "pad"
+    ? "wechat"
+    : String(message.transport || "message");
+  return `${namespace}:${message.sourceId || "default"}:${conversation}`;
 }
 
 function conversationIdFor(message) {
@@ -452,7 +455,7 @@ export class CaseStore {
       || peerName
       || chatId
       || String(message?.senderId || "").trim()
-      || "微信会话";
+      || (message?.transport === "telegram" ? "Telegram 会话" : "微信会话");
   }
 
   refreshCaseTitles(sourceId = "") {
@@ -558,9 +561,13 @@ export class CaseStore {
     const sourceId = String(message?.sourceId || "default");
     const timestamp = Number(message?.timestamp || now());
     let changed = false;
+    const validIdentityId = (value) =>
+      message?.transport === "telegram"
+        ? /^tg:-?\d+$/i.test(String(value || ""))
+        : isDirectoryContactId(value);
     if (
       message?.chatType === "group" &&
-      isDirectoryContactId(message.chatId)
+      validIdentityId(message.chatId)
     ) {
       changed = this.upsertIdentity({
         sourceId,
@@ -572,7 +579,7 @@ export class CaseStore {
       }, { incrementMessage: true }) || changed;
     }
     if (
-      isDirectoryContactId(message?.senderId) &&
+      validIdentityId(message?.senderId) &&
       message.senderId !== message.chatId
     ) {
       changed = this.upsertIdentity({
@@ -585,7 +592,7 @@ export class CaseStore {
       }, { incrementMessage: true }) || changed;
     } else if (
       message?.chatType === "private" &&
-      isDirectoryContactId(message?.senderId)
+      validIdentityId(message?.senderId)
     ) {
       changed = this.upsertIdentity({
         sourceId,
@@ -756,8 +763,8 @@ export class CaseStore {
   }
 
   ingestSyncedMessage(message, options = {}) {
-    if (message?.transport !== "pad") {
-      return { inserted: false, reason: "not-pad" };
+    if (!["pad", "telegram"].includes(message?.transport)) {
+      return { inserted: false, reason: "not-gateway" };
     }
     const createdAt = now();
     const sourceId = String(message.sourceId || "default");
@@ -1231,7 +1238,11 @@ export class CaseStore {
     `).run(
       caseId,
       String(message.sourceId || "default"),
-      String(message.sourceName || message.sourceId || "微信账号"),
+      String(
+        message.sourceName ||
+          message.sourceId ||
+          (message.transport === "telegram" ? "Telegram" : "微信账号"),
+      ),
       String(message.chatType || "private"),
       String(message.chatId || ""),
       title,

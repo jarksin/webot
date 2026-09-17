@@ -59,5 +59,36 @@
   "pad": {
     "requireWriteConfirmation": true,
     "sources": []
+  },
+  "telegram": {
+    "sources": [
+      {
+        "id": "telegram",
+        "displayName": "Telegram",
+        "enabled": false,
+        "pythonBin": "python3",
+        "bridgeScript": "",
+        "sessionPath": "~/.webot/telegram",
+        "apiIdEnv": "TG_API_ID",
+        "apiIdFile": "",
+        "apiHashEnv": "TG_API_HASH",
+        "apiHashFile": "",
+        "allowSelf": true,
+        "trustSelfAsOwner": false,
+        "listenSelf": true,
+        "ignoreAllowlist": false,
+        "allowedChatIds": [],
+        "blockedChatIds": [],
+        "allowedSenderIds": [],
+        "blockedSenderIds": [],
+        "privateNicknameAllowlist": [],
+        "triggerKeywords": [
+          "webot"
+        ],
+        "botNames": [
+          "Webot"
+        ]
+      }
+    ]
   }
 }

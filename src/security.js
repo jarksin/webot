@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { telegramSourceForMessage } from "./telegram-sources.js";
 
 export function validSignature(rawBody, header, secret) {
   if (!secret) return true;
@@ -15,10 +16,24 @@ export function validSignature(rawBody, header, secret) {
   );
 }
 
-export function requesterAccess(message, ownerSenderIds = new Set()) {
+export function requesterAccess(
+  message,
+  ownerSenderIds = new Set(),
+  config = null,
+) {
   const senderId = String(message?.senderId || "").trim().toLowerCase();
   const owner = senderId && [...ownerSenderIds].some(
     (candidate) => String(candidate || "").trim().toLowerCase() === senderId,
   );
-  return owner ? "owner" : "public";
+  if (owner) return "owner";
+  if (
+    config &&
+    message?.transport === "telegram" &&
+    message?.exactSelfChat === true &&
+    message?.senderId === message?.selfId
+  ) {
+    const source = telegramSourceForMessage(config, message);
+    if (source?.trustSelfAsOwner) return "owner";
+  }
+  return "public";
 }

@@ -1,4 +1,5 @@
 import { sourceForMessage } from "./ingress-sources.js";
+import { telegramSourceForMessage } from "./telegram-sources.js";
 
 function has(set, value) {
   return value && set.has(String(value));
@@ -54,8 +55,11 @@ export function acceptedMessage(message, config) {
   if (!message?.text?.trim() || !message.chatId || !message.senderId) {
     return { accepted: false, reason: "empty" };
   }
-  const source =
-    message.transport === "pad" ? sourceForMessage(config, message) : null;
+  const source = message.transport === "pad"
+    ? sourceForMessage(config, message)
+    : message.transport === "telegram"
+      ? telegramSourceForMessage(config, message)
+      : null;
   const botNames = source?.botNames?.size
     ? source.botNames
     : config.identity.botNames;
@@ -71,6 +75,13 @@ export function acceptedMessage(message, config) {
     !message.exactSelfChat &&
     privateBotPrefix;
   if (message.transport === "pad" && config.pad.sources.length && !source) {
+    return { accepted: false, reason: "source-not-configured" };
+  }
+  if (
+    message.transport === "telegram" &&
+    config.telegram.sources.length &&
+    !source
+  ) {
     return { accepted: false, reason: "source-not-configured" };
   }
   if (isPadOfficialAccount(message)) {

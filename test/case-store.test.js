@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { CaseManager } from "../src/case-manager.js";
-import { CaseStore } from "../src/case-store.js";
+import { caseIdFor, CaseStore } from "../src/case-store.js";
 import { SessionStore } from "../src/session-store.js";
 
 function message(id = "message-1") {
@@ -48,6 +48,21 @@ function groupMessage(id, text, timestamp = Date.now()) {
     mentions: [],
   };
 }
+
+test("uses the originating transport as the case namespace", () => {
+  assert.equal(
+    caseIdFor({
+      transport: "telegram",
+      sourceId: "tg-main",
+      conversationId: "private:tg:42",
+    }),
+    "telegram:tg-main:private:tg:42",
+  );
+  assert.equal(
+    caseIdFor(message()),
+    "wechat:small:self-pair:owner_wxid--wxid_small",
+  );
+});
 
 async function waitFor(check, timeoutMs = 1000) {
   const deadline = Date.now() + timeoutMs;

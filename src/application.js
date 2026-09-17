@@ -24,6 +24,10 @@ import {
   PadTransport,
   PadWebSocketClient,
 } from "./transports/pad.js";
+import {
+  TelegramBridgeClient,
+  TelegramTransport,
+} from "./transports/telegram.js";
 import { WEBOT_VERSION } from "./version.js";
 
 const DIRECTORY_DETAIL_BATCH_SIZE = 20;
@@ -48,8 +52,10 @@ export class WebotApplication {
     this.runtime = null;
     this.knowledgeBase = null;
     this.padClients = [];
+    this.telegramClients = [];
     this.padStatuses = new Map();
     this.padIngressCounts = new Map();
+    this.telegramIngressCounts = new Map();
     this.padSenderClassifier = null;
     this.transports = null;
     this.padMediaRequestTails = new Map();
@@ -98,7 +104,11 @@ export class WebotApplication {
     );
     await this.workspacePolicy.ensure();
     const accessForMessage = (message) =>
-      requesterAccess(message, this.config.policy.ownerSenderIds);
+      requesterAccess(
+        message,
+        this.config.policy.ownerSenderIds,
+        this.config,
+      );
     const provider = createProvider(this.config.assistant, {
       requesterAccess: accessForMessage,
       searchKnowledge: (query, context) =>
@@ -108,6 +118,11 @@ export class WebotApplication {
     const store = new SessionStore(
       this.config.stateDir,
       this.config.assistant.historyTurns,
+    );
+    const telegramTransport = new TelegramTransport(
+      this.config.telegram,
+      this.config.outboundMode,
+      this.logger,
     );
     const transports = {
       hook: new HookTransport(
@@ -128,6 +143,7 @@ export class WebotApplication {
             ),
         },
       ),
+      telegram: telegramTransport,
     };
     this.transports = transports;
     this.runtime = new WebotRuntime({
@@ -168,15 +184,38 @@ export class WebotApplication {
               ),
           )
       : [];
+    this.telegramClients = this.config.channels.has("telegram")
+      ? this.config.telegram.sources
+          .filter(
+            (source) =>
+              source.enabled &&
+              source.apiId &&
+              source.apiHash &&
+              source.sessionPath &&
+              source.bridgeScript,
+          )
+          .map(
+            (source) =>
+              new TelegramBridgeClient(
+                source,
+                (message) => this.receive(message),
+                this.logger,
+              ),
+          )
+      : [];
+    telegramTransport.setClients(this.telegramClients);
     if (this.connectorsStarted) await this.startConnectors();
   }
 
   async receive(message) {
-    if (message.transport === "pad") {
+    if (["pad", "telegram"].includes(message.transport)) {
       const key = message.sourceId || "default";
-      this.padIngressCounts.set(
+      const counts = message.transport === "pad"
+        ? this.padIngressCounts
+        : this.telegramIngressCounts;
+      counts.set(
         key,
-        Number(this.padIngressCounts.get(key) || 0) + 1,
+        Number(counts.get(key) || 0) + 1,
       );
       const contextSettings = this.caseManager.groupContextSettings();
       this.caseStore.ingestSyncedMessage(message, {
@@ -184,6 +223,8 @@ export class WebotApplication {
         maxMessages: contextSettings.maxMessages,
       });
       this.caseStore.observeIdentity(message);
+    }
+    if (message.transport === "pad") {
       const classification = await this.padSenderClassifier.classify(message);
       if (classification.blocked) {
         const result = { accepted: false, reason: classification.reason };
@@ -281,6 +322,7 @@ export class WebotApplication {
     this.connectorsStarted = true;
     this.knowledgeBase.start();
     for (const client of this.padClients) client.start();
+    for (const client of this.telegramClients) client.start();
     await this.probePads();
     const recovered = this.caseManager.resumePending();
     if (recovered.queued) {
@@ -301,7 +343,9 @@ export class WebotApplication {
     this.padTimer = null;
     this.knowledgeBase?.stop();
     for (const client of this.padClients) client.stop();
+    for (const client of this.telegramClients) client.stop();
     this.padClients = [];
+    this.telegramClients = [];
     this.caseManager?.stopAll();
   }
 
@@ -588,10 +632,54 @@ export class WebotApplication {
     const enabledPadSources = this.config.channels.has("pad")
       ? padSources.filter((source) => source.enabled)
       : [];
-    const ingressReady = !this.config.channels.has("pad") || (
+    const padReady = !this.config.channels.has("pad") || (
       enabledPadSources.length > 0 &&
       enabledPadSources.every((source) => source.ready)
     );
+    const telegramStatuses = new Map(
+      this.telegramClients.map((client) => [
+        client.source.id,
+        client.status(),
+      ]),
+    );
+    const telegramSources = this.config.telegram.sources.map((source) => {
+      const bridge = telegramStatuses.get(source.id) || null;
+      const ready = !source.enabled || Boolean(bridge?.connected);
+      return {
+        id: source.id,
+        displayName: source.displayName,
+        enabled: source.enabled,
+        ready,
+        credentialReady: Boolean(source.apiId && source.apiHash),
+        credentialSource: source.credentialSource,
+        sessionPath: source.sessionPath,
+        inboundMessages: Number(
+          this.telegramIngressCounts.get(source.id) || 0,
+        ),
+        bridge,
+      };
+    });
+    const enabledTelegramSources = this.config.channels.has("telegram")
+      ? telegramSources.filter((source) => source.enabled)
+      : [];
+    const telegramReady = !this.config.channels.has("telegram") || (
+      enabledTelegramSources.length > 0 &&
+      enabledTelegramSources.every((source) => source.ready)
+    );
+    const ingressReady = padReady && telegramReady;
+    const configuredSources =
+      enabledPadSources.length + enabledTelegramSources.length;
+    const connectedSources =
+      enabledPadSources.filter((source) => source.ready).length +
+      enabledTelegramSources.filter((source) => source.ready).length;
+    const degradedSourceIds = [
+      ...enabledPadSources
+        .filter((source) => !source.ready)
+        .map((source) => `pad:${source.id}`),
+      ...enabledTelegramSources
+        .filter((source) => !source.ready)
+        .map((source) => `telegram:${source.id}`),
+    ];
     return {
       ok: ingressReady,
       service: "webot",
@@ -613,15 +701,12 @@ export class WebotApplication {
       workers: this.caseManager.status(),
       ingress: {
         ready: ingressReady,
-        configuredSources: enabledPadSources.length,
-        connectedSources: enabledPadSources.filter(
-          (source) => source.ready,
-        ).length,
-        degradedSourceIds: enabledPadSources
-          .filter((source) => !source.ready)
-          .map((source) => source.id),
+        configuredSources,
+        connectedSources,
+        degradedSourceIds,
       },
       padSources,
+      telegramSources,
     };
   }
 }

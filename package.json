@@ -1,7 +1,7 @@
 {
   "name": "webot",
-  "version": "0.6.35",
-  "description": "A self-hosted personal assistant and digital twin for WeChat.",
+  "version": "0.6.36",
+  "description": "A self-hosted personal assistant and digital twin for WeChat and Telegram.",
   "type": "module",
   "bin": {
     "webot": "./bin/webot.js"

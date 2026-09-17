@@ -9,10 +9,18 @@ import { assistantConfigForMessage } from "./assistant-routing.js";
 
 function acceptsOwnerIntermediateItems(message) {
   return Boolean(
-    message?.transport === "pad" &&
-      message.chatType === "private" &&
+    message?.chatType === "private" &&
       message.selfConversation === true &&
-      (message.selfPeer === true || message.exactSelfChat === true),
+      (
+        (
+          message.transport === "pad" &&
+          (message.selfPeer === true || message.exactSelfChat === true)
+        ) ||
+        (
+          message.transport === "telegram" &&
+          message.exactSelfChat === true
+        )
+      ),
   );
 }
 
@@ -519,8 +527,9 @@ export class CaseManager {
             const filename = path.basename(String(
               artifact.filename || artifact.path || "文件",
             ));
-            const fallbackText =
-              `文件 ${filename} 超过微信 64 MiB 限制，包太大无法发送，请手动发送。`;
+            const fallbackText = target.message.transport === "telegram"
+              ? `文件 ${filename} 太大，当前 Telegram 发送失败，请手动发送。`
+              : `文件 ${filename} 超过微信 64 MiB 限制，包太大无法发送，请手动发送。`;
             const fallbackDraftId = this.caseStore.addDraft(
               caseId,
               fallbackText,

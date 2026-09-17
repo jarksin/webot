@@ -199,12 +199,22 @@ await Promise.all([
     { mode: 0o600 },
   ),
 ]);
+await fs.mkdir(path.join(releaseDir, "scripts"), { recursive: true });
+await fs.copyFile(
+  path.join(root, "scripts", "telegram_bridge.py"),
+  path.join(releaseDir, "scripts", "telegram_bridge.py"),
+);
 await fs.mkdir(path.join(releaseDir, "docs"), { recursive: true });
 await fs.copyFile(
   path.join(root, "docs", "wechatpad-gateway.md"),
   path.join(releaseDir, "docs", "wechatpad-gateway.md"),
 );
+await fs.copyFile(
+  path.join(root, "docs", "telegram.md"),
+  path.join(releaseDir, "docs", "telegram.md"),
+);
 await fs.chmod(path.join(releaseDir, "install.sh"), 0o755);
+await fs.chmod(path.join(releaseDir, "scripts", "telegram_bridge.py"), 0o755);
 
 const files = [
   "webot",
@@ -212,7 +222,9 @@ const files = [
   "settings.example.json",
   "README.md",
   "AGENTS.example.md",
+  path.join("scripts", "telegram_bridge.py"),
   path.join("docs", "wechatpad-gateway.md"),
+  path.join("docs", "telegram.md"),
 ];
 const checksums = [];
 for (const file of files) {

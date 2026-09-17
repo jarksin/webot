@@ -1,6 +1,7 @@
 import path from "node:path";
 import os from "node:os";
 import { loadPadSources } from "./ingress-sources.js";
+import { loadTelegramSources } from "./telegram-sources.js";
 
 function integer(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -54,6 +55,7 @@ export function loadConfig(env = process.env, settings = {}) {
   const policySettings = settings.policy || {};
   const assistantSettings = settings.assistant || {};
   const padSettings = settings.pad || {};
+  const telegramSettings = settings.telegram || {};
   const kbSettings = settings.knowledgeBase || {};
   const caseSettings = settings.caseManagement || {};
   const defaultDataDir =
@@ -99,6 +101,18 @@ export function loadConfig(env = process.env, settings = {}) {
     allowedChatIds,
     allowedSenderIds,
   }, padSettings.sources);
+  const telegram = {
+    sources: loadTelegramSources(env, {
+      pythonBin: env.WEBOT_TELEGRAM_PYTHON_BIN || "python3",
+      bridgeScript: path.join(
+        env.WEBOT_REPO_DIR || process.cwd(),
+        "scripts",
+        "telegram_bridge.py",
+      ),
+      sessionPath:
+        env.WEBOT_TELEGRAM_SESSION_PATH || "~/.webot/telegram",
+    }, telegramSettings.sources),
+  };
 
   return {
     server: {
@@ -275,5 +289,6 @@ export function loadConfig(env = process.env, settings = {}) {
       callbackSecret: env.WEBOT_HOOK_CALLBACK_SECRET || "",
     },
     pad,
+    telegram,
   };
 }

@@ -44,7 +44,7 @@ const iconSet = {
 };
 
 const views = {
-  cases: ["CASES", "微信 Case"],
+  cases: ["CASES", "消息 Case"],
   captured: ["MONITOR", "All Captured"],
   directory: ["DIRECTORY", "微信 ID 目录"],
   knowledge: ["KNOWLEDGE", "知识库"],
@@ -1532,7 +1532,7 @@ document.addEventListener("click", async (event) => {
       await refreshCases(true);
     } else if (action === "send-draft") {
       const target = event.target.closest("[data-draft-id]");
-      if (!confirm("发送这个 draft 到微信？")) return;
+      if (!confirm("发送这个 draft 到原会话？")) return;
       await api("/api/admin/case/send", {
         method: "POST",
         body: JSON.stringify({

@@ -3,7 +3,7 @@
 ## Message Flow
 
 ```text
-gateway WebSocket -> normalize -> synced message archive -> policy -> Case message
+gateway/bridge -> normalize -> synced message archive -> policy -> Case message
                               |                         |
                               v                         v
                      identity directory      owner named-session routing
@@ -41,6 +41,10 @@ Adapters convert protocol-specific events into this internal shape:
 }
 ```
 
+Telegram uses the same internal shape with `transport: "telegram"` and IDs
+prefixed with `tg:`. Its case namespace is separate from WeChat even when a
+source or numeric message ID happens to match.
+
 Raw envelopes are not sent to the assistant backend. Every normalized Pad sync
 message is persisted before sender, allowlist, blacklist, or trigger filtering.
 The archive stores text and media metadata but strips binary/base64 payloads,
@@ -60,7 +64,8 @@ source repository.
 
 ## Runtime Controls
 
-- `WEBOT_CHANNELS` selects which connectors start.
+- `WEBOT_CHANNELS` selects which connectors start (`pad`, `telegram`, or
+  `hook`).
 - `WEBOT_OUTBOUND_MODE` gates all sends; only `live` performs network writes.
 - Per-account chat and sender allowlists narrow accepted traffic. Per-account
   sender and group blacklists always take precedence, including when allowlist
@@ -83,6 +88,9 @@ source repository.
   from Codex session records so cumulative counters are not added repeatedly.
 - Gateway queues and history keys include the source-defined conversation id.
 - Multi-account replies resolve credentials from the originating source.
+- Telegram runs as a supervised Telethon subprocess. JSON-lines commands carry
+  normalized inbound events and outbound text/file requests; API credentials
+  and session data remain outside Git.
 - Agent-initiated WeChat business API requests are serialized per source with
   at least 10 seconds between request starts. Bulk lookups must use bounded
   batches without parallel calls; persisted local data is preferred.
