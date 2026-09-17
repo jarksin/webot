@@ -10,6 +10,7 @@ import {
 } from "./codex-session-progress.js";
 import { parseCodexSessionUsage } from "./codex-usage.js";
 import { assistantConfigForMessage } from "./assistant-routing.js";
+import { runCodexAppServer } from "./codex-app-server.js";
 
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
@@ -685,7 +686,9 @@ export function createCodexProvider(config, options = {}) {
       ? options.searchKnowledge
       : async () => [];
   const runner =
-    typeof options.runCodex === "function" ? options.runCodex : runCodex;
+    typeof options.runCodex === "function"
+      ? options.runCodex
+      : runCodexAppServer;
   const accessForMessage =
     typeof options.requesterAccess === "function"
       ? options.requesterAccess
@@ -694,6 +697,7 @@ export function createCodexProvider(config, options = {}) {
     typeof options.readAgentPolicy === "function"
       ? options.readAgentPolicy
       : async () => "";
+  const activeRuns = new Map();
   return {
     async reply({
       caseId,
@@ -724,25 +728,44 @@ export function createCodexProvider(config, options = {}) {
         await searchKnowledge(message.text, { access, message }),
       );
       const policyDocument = await readAgentPolicy();
-      const result = await runner(effectiveConfig, {
-        sessionId: nonEmpty(codexSessionId),
-        instancePolicy:
-          typeof policyDocument === "string"
-            ? policyDocument
-            : nonEmpty(policyDocument?.content),
-        prompt: promptFor({
-          caseId,
-          message,
-          history,
-          conversationContext,
-          currentMessageCount,
-          sessionId: nonEmpty(codexSessionId),
-          knowledge,
-          access,
-        }),
-        signal,
-        onItem,
+      let resolveReady;
+      const token = {};
+      const ready = new Promise((resolve) => {
+        resolveReady = resolve;
       });
+      const active = { token, ready, handle: null };
+      activeRuns.set(caseId, active);
+      let result;
+      try {
+        result = await runner(effectiveConfig, {
+          sessionId: nonEmpty(codexSessionId),
+          instancePolicy: developerInstructions(
+            effectiveConfig,
+            typeof policyDocument === "string"
+              ? policyDocument
+              : nonEmpty(policyDocument?.content),
+          ),
+          prompt: promptFor({
+            caseId,
+            message,
+            history,
+            conversationContext,
+            currentMessageCount,
+            sessionId: nonEmpty(codexSessionId),
+            knowledge,
+            access,
+          }),
+          signal,
+          onItem,
+          onActiveTurn(handle) {
+            active.handle = handle;
+            resolveReady(handle);
+          },
+        });
+      } finally {
+        resolveReady(null);
+        if (activeRuns.get(caseId)?.token === token) activeRuns.delete(caseId);
+      }
       if (typeof result === "string") return parseAssistantResult(result);
       const assistant = parseAssistantResult(result?.text);
       return {
@@ -754,6 +777,23 @@ export function createCodexProvider(config, options = {}) {
           ? artifactList(result.artifacts)
           : assistant.artifacts,
       };
+    },
+    async steer({ caseId, text, messageId = "" }) {
+      const active = activeRuns.get(caseId);
+      if (!active) return { accepted: false, reason: "not-active" };
+      const handle = active.handle || await active.ready;
+      if (!handle || activeRuns.get(caseId)?.token !== active.token) {
+        return { accepted: false, reason: "turn-ended" };
+      }
+      try {
+        return await handle.steer(text, messageId);
+      } catch (error) {
+        return {
+          accepted: false,
+          reason: "steer-rejected",
+          error: error.message,
+        };
+      }
     },
   };
 }

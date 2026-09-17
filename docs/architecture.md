@@ -65,8 +65,9 @@ source repository.
 - Per-account chat and sender allowlists narrow accepted traffic. Per-account
   sender and group blacklists always take precedence, including when allowlist
   checks are bypassed.
-- A Case never runs two workers concurrently; new inbound during a run schedules
-  one follow-up pass over the latest persisted context.
+- A Case never runs two workers concurrently. New inbound during a Codex run is
+  steered into the active turn when direct input is available; otherwise Webot
+  schedules one follow-up pass over the latest persisted context.
 - Every accepted message updates a stable account-scoped Case. Owner-created
   named sessions route subsequent messages into independent child Cases.
 - Named sessions isolate bounded history, Codex continuation, model selection,

@@ -826,6 +826,165 @@ test("reruns a case when another message arrives during an active worker", async
   caseStore.close();
 });
 
+test("steers a new message into an active Codex turn without rerunning", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-steer-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const steered = [];
+  let releaseFirst;
+  const firstReply = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const manager = new CaseManager({
+    config: {
+      assistant: { mode: "codex", codexModel: "gpt-test" },
+      caseManagement: { autoRun: true, autoSend: false, workerConcurrency: 1 },
+      pad: {
+        sources: [{
+          id: "small",
+          strictPolicy: true,
+          allowSelf: false,
+          selfChatPeers: new Set(["owner_wxid"]),
+          acceptSelfChatPeerMessages: true,
+          allowedChatIds: new Set(),
+          allowedSenderIds: new Set(),
+          privateNicknameAllowlist: new Set(),
+          triggerKeywords: new Set(["webot"]),
+          botNames: new Set(["Webot"]),
+        }],
+      },
+      policy: {
+        blockedSenderIds: new Set(),
+        allowSelf: false,
+        allowedChatIds: new Set(),
+        allowedSenderIds: new Set(),
+        groupTriggers: new Set(["webot"]),
+      },
+      identity: { botNames: new Set(["Webot"]) },
+    },
+    provider: {
+      async reply() {
+        await firstReply;
+        return { text: "combined reply", sessionId: "codex-session" };
+      },
+      async steer(input) {
+        steered.push(input);
+        return { accepted: true };
+      },
+    },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: {},
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const first = await manager.receive(message("steer-1"));
+  await waitFor(() => manager.status().active === 1);
+  const secondMessage = { ...message("steer-2"), text: "补充条件" };
+  const second = await manager.receive(secondMessage);
+  assert.equal(second.steered, true);
+  assert.equal(second.queued, false);
+  assert.equal(steered.length, 1);
+  assert.equal(steered[0].caseId, first.caseId);
+  assert.equal(steered[0].text, "补充条件");
+
+  releaseFirst();
+  await waitFor(() => manager.status().active === 0);
+  assert.equal(manager.status().queued, 0);
+  const detail = caseStore.detail(first.caseId);
+  assert.equal(detail.drafts.length, 1);
+  assert.equal(detail.drafts[0].trigger_message_id, 2);
+  assert.equal(detail.drafts[0].input_cutoff_message_id, 2);
+  assert.equal(
+    caseStore.pendingMessages(
+      first.caseId,
+      caseStore.workerSession(first.caseId).last_processed_message_id,
+    ).length,
+    0,
+  );
+  caseStore.close();
+});
+
+test("owner model and session commands do not wait for an active worker", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-command-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  let releaseFirst;
+  const firstReply = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const manager = new CaseManager({
+    config: {
+      assistant: {
+        mode: "codex",
+        codexBin: process.execPath,
+        codexHome: directory,
+        codexModel: "gpt-test",
+      },
+      caseManagement: { autoRun: true, autoSend: false, workerConcurrency: 1 },
+      pad: {
+        sources: [{
+          id: "small",
+          strictPolicy: true,
+          allowSelf: false,
+          selfChatPeers: new Set(["owner_wxid"]),
+          acceptSelfChatPeerMessages: true,
+          allowedChatIds: new Set(),
+          allowedSenderIds: new Set(),
+          privateNicknameAllowlist: new Set(),
+          triggerKeywords: new Set(["webot"]),
+          botNames: new Set(["Webot"]),
+        }],
+      },
+      policy: {
+        blockedSenderIds: new Set(),
+        allowSelf: false,
+        allowedChatIds: new Set(),
+        allowedSenderIds: new Set(),
+        groupTriggers: new Set(["webot"]),
+      },
+      identity: { botNames: new Set(["Webot"]) },
+    },
+    provider: {
+      async reply() {
+        await firstReply;
+        return { text: "done", sessionId: "codex-session" };
+      },
+    },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: {},
+    requesterAccess: () => "owner",
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  await manager.receive(message("command-task"));
+  await waitFor(() => manager.status().active === 1);
+
+  const model = message("command-model");
+  model.text = "/model gpt-test";
+  const modelResult = await Promise.race([
+    manager.receive(model),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("model command waited for worker")), 250);
+    }),
+  ]);
+  assert.equal(modelResult.command, "model");
+
+  const session = message("command-session");
+  session.text = "/session new project-a";
+  const sessionResult = await Promise.race([
+    manager.receive(session),
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error("session command waited for worker")), 250);
+    }),
+  ]);
+  assert.equal(sessionResult.command, "session");
+
+  releaseFirst();
+  await waitFor(() => manager.status().active === 0);
+  assert.equal(caseStore.ensureSessionScope(modelResult.caseId).name, "project-a");
+  caseStore.close();
+});
+
 test("drain mode stops starting new workers without persisting a pause", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-drain-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));

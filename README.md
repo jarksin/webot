@@ -52,6 +52,9 @@ Owner control commands include `/session`, `/session list`,
 `/session new <name>`, `/session <name>`, `/session delete <name>`,
 `/models` (`/modes` alias), `/model`, `/effort`, `/status`, `/clear`, and `/stop`. Named
 session metadata and conversation state remain in the local data directory.
+New owner messages can steer an active Codex turn. Control commands stay
+responsive independently, while `/clear` and `/stop` serialize with the active
+worker because they change or terminate its state.
 
 ## WeChat Gateway
 

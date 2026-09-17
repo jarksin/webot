@@ -23,6 +23,10 @@ function oversizedAttachmentFailure(error) {
   );
 }
 
+function commandNeedsIdleWorker(command) {
+  return command?.type === "clear" || command?.type === "stop";
+}
+
 export class CaseManager {
   constructor({
     config,
@@ -109,8 +113,10 @@ export class CaseManager {
     if (command) {
       let stopped = false;
       if (command.type === "stop") stopped = this.stop(ingested.caseId);
-      const active = this.runPromises.get(ingested.caseId);
-      if (active) await active.catch(() => {});
+      if (commandNeedsIdleWorker(command)) {
+        const active = this.runPromises.get(ingested.caseId);
+        if (active) await active.catch(() => {});
+      }
       const result = await applyControlCommand({
         command,
         caseId: ingested.caseId,
@@ -127,6 +133,7 @@ export class CaseManager {
           ingested.messageRow,
           result.continueText,
         );
+        clean.deferToNextRun = true;
       } else {
         const reply = String(result.text || "").trim();
         this.caseStore.markControlHandled(ingested.caseId, ingested.messageRow);
@@ -161,7 +168,36 @@ export class CaseManager {
     }
     await this.sessionStore.append(ingested.caseId, "user", clean.text);
     if (this.caseSettings().autoRun !== false) {
-      if (this.running.has(ingested.caseId)) {
+      const activeRun = this.running.get(ingested.caseId);
+      let steered = false;
+      if (
+        activeRun &&
+        !clean.deferToNextRun &&
+        typeof this.provider.steer === "function"
+      ) {
+        const result = await this.provider.steer({
+          caseId: ingested.caseId,
+          text: clean.text,
+          messageId: String(ingested.messageRow),
+        });
+        if (result?.accepted) {
+          activeRun.includeMessage(ingested.messageRow);
+          steered = true;
+          this.caseStore.addProgress(
+            ingested.caseId,
+            0,
+            "新消息已补充到当前 Codex turn",
+          );
+        } else if (result?.error) {
+          this.caseStore.addProgress(
+            ingested.caseId,
+            0,
+            `当前 Codex turn 未接受补充，改为后续处理：${result.error}`,
+            "warn",
+          );
+        }
+      }
+      if (activeRun && !steered) {
         this.rerun.add(ingested.caseId);
         this.caseStore.addProgress(
           ingested.caseId,
@@ -169,7 +205,15 @@ export class CaseManager {
           "收到新消息，当前 worker 完成后继续处理",
         );
       } else {
-        this.enqueue(ingested.caseId);
+        if (!activeRun) this.enqueue(ingested.caseId);
+      }
+      if (steered) {
+        return {
+          accepted: true,
+          caseId: ingested.caseId,
+          queued: false,
+          steered: true,
+        };
       }
     }
     return {
@@ -249,9 +293,19 @@ export class CaseManager {
         )
       : null;
     const cutoffMessageId = trigger.id;
+    let completionCutoffMessageId = cutoffMessageId;
+    let replyTargetMessageId = trigger.id;
     const session = this.caseStore.startRun(caseId, cutoffMessageId);
     const controller = new AbortController();
-    this.running.set(caseId, controller);
+    this.running.set(caseId, {
+      controller,
+      includeMessage(messageRow) {
+        const id = Number(messageRow || 0);
+        if (!id) return;
+        completionCutoffMessageId = Math.max(completionCutoffMessageId, id);
+        replyTargetMessageId = Math.max(replyTargetMessageId, id);
+      },
+    });
     this.caseStore.addProgress(caseId, session.run_count, "worker 开始处理");
     const liveProgressSeen = new Set();
     const onItem = async (item) => {
@@ -350,8 +404,8 @@ export class CaseManager {
           this.config.assistant.llmModel ||
           this.config.assistant.mode,
         {
-          triggerMessageId: trigger.id,
-          inputCutoffMessageId: cutoffMessageId,
+          triggerMessageId: replyTargetMessageId,
+          inputCutoffMessageId: completionCutoffMessageId,
           artifacts,
         },
       );
@@ -361,7 +415,7 @@ export class CaseManager {
         caseId,
         "draft_ready",
         "",
-        cutoffMessageId,
+        completionCutoffMessageId,
       );
       if (this.caseSettings().autoSend !== false) {
         try {
@@ -372,7 +426,7 @@ export class CaseManager {
             caseId,
             "draft_ready",
             error.message,
-            cutoffMessageId,
+            completionCutoffMessageId,
           );
           this.caseStore.addProgress(
             caseId,
@@ -507,7 +561,7 @@ export class CaseManager {
     this.forced.delete(caseId);
     const controller = this.running.get(caseId);
     if (!controller) return false;
-    controller.abort();
+    controller.controller.abort();
     return true;
   }
 
@@ -522,7 +576,7 @@ export class CaseManager {
     this.queue = [];
     this.rerun.clear();
     this.forced.clear();
-    for (const controller of this.running.values()) controller.abort();
+    for (const run of this.running.values()) run.controller.abort();
   }
 
   status() {
