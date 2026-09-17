@@ -314,6 +314,25 @@ textarea { min-height: 86px; resize: vertical; line-height: 1.5; }
   align-items: center;
 }
 .directory-search { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.directory-toolbar .syncing svg, .directory-sync-status.running svg { animation: directory-spin .9s linear infinite; }
+.directory-sync-status {
+  min-height: 34px;
+  margin: -4px 0 12px;
+  padding: 7px 10px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.directory-sync-status svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.directory-sync-status.running { color: var(--amber); border-color: #e6cf91; background: var(--amber-soft); }
+.directory-sync-status.success { color: var(--green); border-color: #a8d8c2; background: var(--green-soft); }
+.directory-sync-status.error { color: var(--red); border-color: #e5b9b7; background: var(--red-soft); }
+@keyframes directory-spin { to { transform: rotate(360deg); } }
 .directory-table table { min-width: 900px; }
 .directory-table td code { font-size: 10px; }
 .directory-table td strong { font-size: 11px; }
@@ -417,6 +436,7 @@ body.case-resizing { cursor: col-resize; user-select: none; }
 .draft-list { min-width: 0; }
 .draft-actions { min-height: 30px; color: var(--muted); display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 10px; }
 .draft-text { margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.draft-done-marker { margin-right: 7px; color: var(--green); font-family: "SFMono-Regular", Consolas, monospace; font-size: 10px; font-weight: 750; }
 .message-list { display: grid; gap: 7px; }
 .message-row { min-width: 0; max-width: 84%; padding: 9px 10px; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-quiet); }
 .message-row.outgoing { margin-left: auto; border-color: #bdd7fb; background: var(--primary-soft); }
@@ -490,4 +510,8 @@ body.case-resizing { cursor: col-resize; user-select: none; }
   .case-detail-scroll { padding: 8px 10px 20px; }
   .case-empty { margin: 8px; }
   .message-row { max-width: 95%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .directory-toolbar .syncing svg, .directory-sync-status.running svg { animation: none; }
 }

@@ -90,6 +90,9 @@ let directoryEntries = [];
 let directoryQuery = "";
 let directoryType = "";
 let directorySource = "";
+let directorySyncing = false;
+let directorySyncMessage = "";
+let directorySyncTone = "";
 let capturedMessages = [];
 let capturedPage = 0;
 let capturedTotal = 0;
@@ -411,7 +414,7 @@ function renderCaseDetail(item) {
                 <span>${draft.sent_at ? `发送于 ${time(draft.sent_at)}` : "尚未发送"}</span>
                 ${draft.status !== "sent" ? `<button class="button primary" data-action="send-draft" data-case-id="${escapeHtml(item.case_id)}" data-draft-id="${Number(draft.id)}"><i data-lucide="send"></i><span>发送</span></button>` : ""}
               </div>
-              <div class="draft-text">${escapeHtml(draft.text)}</div>
+              <div class="draft-text"><span class="draft-done-marker">[done]</span>${escapeHtml(draft.text)}</div>
             </div>
           </details>`;
         }).join("") || `<div class="case-muted">暂无 draft</div>`}
@@ -815,8 +818,9 @@ function renderDirectory() {
           <input class="input" id="directory-query" value="${escapeHtml(directoryQuery)}" placeholder="名称或 wxid">
           <button class="button primary icon-only" data-action="directory-search" title="查询"><i data-lucide="search"></i></button>
         </div>
-        <button class="button secondary" data-action="sync-directory"><i data-lucide="refresh-cw"></i><span>同步通讯录</span></button>
+        <button class="button secondary ${directorySyncing ? "syncing" : ""}" data-action="sync-directory" ${directorySyncing ? "disabled aria-busy=\"true\"" : ""}><i data-lucide="refresh-cw"></i><span>${directorySyncing ? "同步中" : "同步通讯录"}</span></button>
       </div>
+      ${directorySyncMessage ? `<div class="directory-sync-status ${directorySyncTone}" role="status" aria-live="polite"><i data-lucide="refresh-cw"></i><span>${escapeHtml(directorySyncMessage)}</span></div>` : ""}
       <div class="table-wrap directory-table">
         <table>
           <thead><tr><th>类型</th><th>名称</th><th>wxid / 群 ID</th><th>账号</th><th>来源</th><th>最近发现</th><th></th></tr></thead>
@@ -1375,14 +1379,42 @@ document.addEventListener("click", async (event) => {
       await loadDirectory();
       render();
     } else if (action === "sync-directory") {
+      if (directorySyncing) return;
       directorySource = document.querySelector("#directory-source").value;
-      const result = await api("/api/admin/directory/sync", {
-        method: "POST",
-        body: JSON.stringify({ sourceId: directorySource }),
-      });
-      await loadDirectory();
-      showNotice(`通讯录同步完成：${result.imported} 条`);
+      const sourceName = directorySource
+        ? settings.pad.sources.find((source) => source.id === directorySource)?.displayName || directorySource
+        : "全部账号";
+      directorySyncing = true;
+      directorySyncTone = "running";
+      directorySyncMessage = `${sourceName}通讯录同步中…`;
+      showNotice("通讯录同步已开始");
       render();
+      try {
+        const result = await api("/api/admin/directory/sync", {
+          method: "POST",
+          body: JSON.stringify({ sourceId: directorySource }),
+        });
+        await loadDirectory();
+        const sources = Array.isArray(result.sources) ? result.sources : [];
+        const discovered = sources.reduce(
+          (total, source) => total + Number(source.discovered || 0),
+          0,
+        );
+        const resolved = sources.reduce(
+          (total, source) => total + Number(source.resolved || 0),
+          0,
+        );
+        directorySyncTone = "success";
+        directorySyncMessage = `同步完成：发现 ${discovered} 个，解析 ${resolved} 个，写入 ${Number(result.imported || 0)} 条`;
+        showNotice(directorySyncMessage);
+      } catch (error) {
+        directorySyncTone = "error";
+        directorySyncMessage = `同步失败：${error.message}`;
+        throw error;
+      } finally {
+        directorySyncing = false;
+        render();
+      }
     } else if (action === "copy-directory-id") {
       await navigator.clipboard.writeText(
         event.target.closest("[data-directory-id]").dataset.directoryId,

@@ -44,8 +44,14 @@ test("account settings expose source blacklists and a searchable ID directory", 
   assert.match(javascript, /function renderDirectory\(\)/);
   assert.match(javascript, /名称或 wxid/);
   assert.match(javascript, /data-action="sync-directory"/);
+  assert.match(javascript, /directorySyncing/);
+  assert.match(javascript, /通讯录同步已开始/);
+  assert.match(javascript, /同步完成：发现/);
+  assert.match(javascript, /role="status" aria-live="polite"/);
   assert.match(javascript, /data-action="copy-directory-id"/);
   assert.match(css, /\.directory-toolbar/);
+  assert.match(css, /\.directory-sync-status/);
+  assert.match(css, /@keyframes directory-spin/);
 });
 
 test("admin header owns worker and auto reply controls", () => {
@@ -86,6 +92,11 @@ test("case detail keeps Codex session usage above live progress", () => {
   assert.match(css, /\.codex-progress-panel/);
   assert.match(css, /\.case-detail-head \{[^}]*flex: 0 0 auto/);
   assert.match(css, /\.case-detail-scroll \{[^}]*overflow-anchor: none/);
+});
+
+test("completed drafts are explicitly marked apart from live progress", () => {
+  assert.match(javascript, /class="draft-done-marker">\[done\]<\/span>/);
+  assert.match(css, /\.draft-done-marker/);
 });
 
 test("owner intermediate replies are described as private self conversations only", () => {
