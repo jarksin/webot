@@ -105,6 +105,14 @@ test("builds new and resume commands with editable Codex settings", async () => 
   );
   assert.ok(
     fresh.some((item) =>
+      item.includes("independent stable Pad Docker/Redis runtime")),
+  );
+  assert.ok(
+    fresh.every((item) =>
+      !item.includes("or controlling the stable Pad")),
+  );
+  assert.ok(
+    fresh.some((item) =>
       item.includes("Never put a local file path")),
   );
   assert.ok(
