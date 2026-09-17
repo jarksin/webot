@@ -227,6 +227,10 @@ export function loadConfig(env = process.env, settings = {}) {
       remote: value(kbSettings.remote, ""),
       branch: value(kbSettings.branch, "main"),
       localDir: path.resolve(knowledgeLocalDir),
+      productMetadataUrl: value(
+        kbSettings.productMetadataUrl,
+        "https://webot.win/health",
+      ),
       syncIntervalSeconds: integer(
         value(kbSettings.syncIntervalSeconds, 900),
         900,

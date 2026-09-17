@@ -4,6 +4,9 @@ import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 
 const MAX_DOCUMENT_BYTES = 1024 * 1024;
+const PRODUCT_VERSION_PLACEHOLDER = "{{VXULTRA_VERSION}}";
+const PRODUCT_VERSION_FALLBACK = "暂未取得，以官网为准";
+const PRODUCT_METADATA_TIMEOUT_MS = 5000;
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -91,9 +94,10 @@ async function markdownFiles(root, limit = 2000) {
 }
 
 export class KnowledgeBaseCloud {
-  constructor(config, logger = console) {
+  constructor(config, logger = console, fetchImpl = globalThis.fetch) {
     this.config = config;
     this.logger = logger;
+    this.fetch = fetchImpl;
     this.timer = null;
     this.state = {
       enabled: Boolean(config.enabled),
@@ -103,6 +107,9 @@ export class KnowledgeBaseCloud {
       lastSyncAt: "",
       lastError: "",
       localDir: config.localDir,
+      productVersion: "",
+      productVersionFetchedAt: "",
+      productVersionError: "",
     };
   }
 
@@ -142,6 +149,48 @@ export class KnowledgeBaseCloud {
     this.state.ready = true;
     this.state.noteCount = files.length;
     return files;
+  }
+
+  renderKnowledge(content) {
+    return String(content || "").replaceAll(
+      PRODUCT_VERSION_PLACEHOLDER,
+      this.state.productVersion || PRODUCT_VERSION_FALLBACK,
+    );
+  }
+
+  async refreshProductVersion() {
+    const url = String(this.config.productMetadataUrl || "").trim();
+    if (!url || typeof this.fetch !== "function") return;
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      PRODUCT_METADATA_TIMEOUT_MS,
+    );
+    try {
+      const response = await this.fetch(url, {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`official product metadata returned HTTP ${response.status}`);
+      }
+      const body = await response.json();
+      const version = String(body?.version || "").trim();
+      if (!/^\d+\.\d+\.\d+$/.test(version)) {
+        throw new Error("official product metadata has no valid version");
+      }
+      this.state.productVersion = version;
+      this.state.productVersionFetchedAt = new Date().toISOString();
+      this.state.productVersionError = "";
+    } catch (error) {
+      this.state.productVersionError = String(error.message || error).slice(0, 500);
+      this.logger.warn?.("official product metadata refresh failed", {
+        error: this.state.productVersionError,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async listDocuments() {
@@ -272,6 +321,7 @@ export class KnowledgeBaseCloud {
         });
       }
       await this.refreshLocalState();
+      await this.refreshProductVersion();
       this.state.lastSyncAt = new Date().toISOString();
     } catch (error) {
       this.state.ready = false;
@@ -309,11 +359,12 @@ export class KnowledgeBaseCloud {
     const files = await markdownFiles(this.config.localDir);
     const matches = [];
     for (const file of files) {
-      const content = await fs.readFile(file, "utf8");
-      const metadata = frontmatter(content);
+      const source = await fs.readFile(file, "utf8");
+      const metadata = frontmatter(source);
       if (this.config.requireApproved && !approved(metadata)) continue;
       const documentAudience = audience(metadata);
       if (access !== "owner" && documentAudience !== "public") continue;
+      const content = this.renderKnowledge(source);
       const haystack = `${path.basename(file)}\n${content}`.toLowerCase();
       const score = queryTerms.reduce(
         (total, term) => total + (haystack.includes(term) ? 1 : 0),

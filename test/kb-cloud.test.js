@@ -5,6 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { KnowledgeBaseCloud } from "../src/kb-cloud.js";
 
+const productMetadata = (version = "0.0.18") => async () => ({
+  ok: true,
+  status: 200,
+  json: async () => ({ version }),
+});
+
 test("indexes approved markdown and returns bounded relevant notes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-"));
   await fs.writeFile(
@@ -28,7 +34,7 @@ test("indexes approved markdown and returns bounded relevant notes", async () =>
     maxNotes: 2,
     maxCharsPerNote: 20,
     requireApproved: true,
-  }, { error() {} });
+  }, { error() {} }, productMetadata());
 
   const sync = await kb.sync();
   const results = await kb.search("内部发布", { access: "owner" });
@@ -56,7 +62,7 @@ test("edits markdown documents with safe paths and optimistic locking", async ()
     maxNotes: 4,
     maxCharsPerNote: 4000,
     requireApproved: true,
-  }, { error() {} });
+  }, { error() {} }, productMetadata());
 
   const created = await kb.writeDocument(
     "owner/profile.md",
@@ -86,4 +92,44 @@ test("edits markdown documents with safe paths and optimistic locking", async ()
     await kb.deleteDocument(updated.file, { baseHash: updated.hash }),
     { file: "owner/profile.md" },
   );
+});
+
+test("renders the official vxUltra version and keeps the last good value", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-version-"));
+  await fs.writeFile(
+    path.join(directory, "version.md"),
+    "---\napproved: true\naudience: public\n---\n# vxUltra\n当前版本 {{VXULTRA_VERSION}}。",
+  );
+  let fail = false;
+  const kb = new KnowledgeBaseCloud({
+    enabled: true,
+    remote: "",
+    branch: "main",
+    localDir: directory,
+    productMetadataUrl: "https://webot.win/health",
+    syncIntervalSeconds: 900,
+    maxNotes: 4,
+    maxCharsPerNote: 4000,
+    requireApproved: true,
+  }, { error() {}, warn() {} }, async () => {
+    if (fail) throw new Error("offline");
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ version: "0.0.18" }),
+    };
+  });
+
+  let status = await kb.sync();
+  let results = await kb.search("当前版本", { access: "public" });
+  assert.equal(status.productVersion, "0.0.18");
+  assert.match(results[0].content, /当前版本 0\.0\.18/);
+  assert.doesNotMatch(results[0].content, /\{\{VXULTRA_VERSION\}\}/);
+
+  fail = true;
+  status = await kb.sync();
+  results = await kb.search("当前版本", { access: "public" });
+  assert.equal(status.productVersion, "0.0.18");
+  assert.match(status.productVersionError, /offline/);
+  assert.match(results[0].content, /当前版本 0\.0\.18/);
 });
