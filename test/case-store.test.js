@@ -1546,6 +1546,7 @@ test("handles owner slash commands locally and sends exactly one reply", async (
   assert.equal(providerCalls, 0);
   assert.equal(sent.length, 1);
   assert.match(sent[0], /当前模型：gpt-test/);
+  assert.doesNotMatch(sent[0], /^\[done\]/i);
   assert.equal(caseStore.detail(received.caseId).drafts.length, 1);
   caseStore.close();
 });

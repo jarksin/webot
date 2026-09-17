@@ -545,7 +545,8 @@ export class CaseManager {
     const markCompleted = (
       this.caseSettings().ownerIntermediateItems === true &&
       this.requesterAccess(target.message) === "owner" &&
-      acceptsOwnerIntermediateItems(target.message)
+      acceptsOwnerIntermediateItems(target.message) &&
+      !parseControlCommand(target.message.text)
     );
     const textOutbound = await transport.send(
       target.message,
