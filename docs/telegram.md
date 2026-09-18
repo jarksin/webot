@@ -52,6 +52,8 @@ The safe default accepts Saved Messages only. Set `trustSelfAsOwner` only for a
 session controlled by the configured owner. Other private chats require their
 `tg:<user-id>` in `allowedSenderIds`; groups require their `tg:<chat-id>` in
 `allowedChatIds` and still require a configured trigger or bot mention.
+Messages from groups outside that allowlist are discarded before database
+persistence.
 
 Outbound delivery follows Webot's global `outboundMode`. `dry-run` records the
 result without sending. `live` sends text and file attachments through the

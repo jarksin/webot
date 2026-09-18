@@ -18,6 +18,7 @@ import { SessionStore } from "./session-store.js";
 import { serializeConfig } from "./settings-store.js";
 import { requesterAccess } from "./security.js";
 import { createSourceActivator } from "./source-activation.js";
+import { telegramGroupIngressDecision } from "./telegram-sources.js";
 import { WorkspacePolicy } from "./workspace-policy.js";
 import { HookTransport } from "./transports/hook.js";
 import {
@@ -208,6 +209,12 @@ export class WebotApplication {
   }
 
   async receive(message) {
+    const telegramGroupDecision = telegramGroupIngressDecision(
+      this.config,
+      message,
+    );
+    if (!telegramGroupDecision.accepted) return telegramGroupDecision;
+
     if (["pad", "telegram"].includes(message.transport)) {
       const key = message.sourceId || "default";
       const counts = message.transport === "pad"

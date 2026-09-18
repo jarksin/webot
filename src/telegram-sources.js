@@ -215,3 +215,36 @@ export function telegramSourceForMessage(config, message) {
   }
   return sources[0] || null;
 }
+
+function containsCaseInsensitive(values, candidate) {
+  const target = String(candidate || "").trim().toLowerCase();
+  return Boolean(
+    target &&
+      [...(values || [])].some(
+        (value) => String(value || "").trim().toLowerCase() === target,
+      ),
+  );
+}
+
+export function telegramGroupIngressDecision(config, message) {
+  if (
+    message?.transport !== "telegram" ||
+    message?.chatType !== "group"
+  ) {
+    return { accepted: true };
+  }
+  const source = telegramSourceForMessage(config, message);
+  if (!source) {
+    return { accepted: false, reason: "source-not-configured" };
+  }
+  if (containsCaseInsensitive(source.blockedChatIds, message.chatId)) {
+    return { accepted: false, reason: "chat-blocked" };
+  }
+  if (
+    !source.ignoreAllowlist &&
+    !containsCaseInsensitive(source.allowedChatIds, message.chatId)
+  ) {
+    return { accepted: false, reason: "chat-not-allowed" };
+  }
+  return { accepted: true };
+}
