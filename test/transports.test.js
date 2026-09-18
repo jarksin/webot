@@ -310,7 +310,11 @@ test("Pad transport caches a complete inbound image from its structured context"
 
   assert.equal(call.url, "http://pad.local/api/v1/media/download-img-binary");
   assert.equal(call.headers["X-Access-Token"], "test-token");
-  assert.equal(call.body.image.download_context.msgId, 7);
+  assert.deepEqual(call.body.image.download_context, {
+    msg_id: 7,
+    data_len: png.length,
+    section: { start_pos: 0, data_len: 65536 },
+  });
   assert.equal(result.mime, "image/png");
   assert.equal(result.filename, "image_1.png");
   assert.deepEqual(await fs.readFile(result.localPath), png);

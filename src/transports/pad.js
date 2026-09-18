@@ -72,6 +72,28 @@ function padEndpointURL(source, endpoint) {
   return `${base}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
 }
 
+function imageDownloadContextPayload(context = {}) {
+  const section = context.section && typeof context.section === "object"
+    ? {
+        start_pos: Number(context.section.startPos || 0),
+        data_len: Number(context.section.dataLen || 0),
+      }
+    : undefined;
+  return Object.fromEntries(
+    Object.entries({
+      msg_id: Number(context.msgId || 0),
+      to_wxid: String(context.toWxid || ""),
+      data_len: Number(context.dataLen || 0),
+      compress_type: Number(context.compressType || 0),
+      section,
+    }).filter(([, value]) => {
+      if (value == null || value === "" || value === 0) return false;
+      if (typeof value !== "object") return true;
+      return Object.values(value).some((item) => item !== 0 && item !== "");
+    }),
+  );
+}
+
 function inboundImageType(data) {
   if (data.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) {
     return { extension: ".jpg", mime: "image/jpeg" };
@@ -300,7 +322,11 @@ export class PadTransport {
     const response = await this.fetch(padEndpointURL(source, endpoint), {
       method: "POST",
       headers: tokenHeaders(source.accessToken),
-      body: JSON.stringify({ image: { download_context: context } }),
+      body: JSON.stringify({
+        image: {
+          download_context: imageDownloadContextPayload(context),
+        },
+      }),
       signal: AbortSignal.timeout(180_000),
     });
     if (!response.ok) {
