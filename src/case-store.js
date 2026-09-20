@@ -851,7 +851,7 @@ export class CaseStore {
   }
 
   markSyncedMessageResult(message, result = {}) {
-    if (message?.transport !== "pad") return false;
+    if (!["pad", "telegram"].includes(message?.transport)) return false;
     const accepted = result.accepted === true ? 1 : 0;
     const decision = accepted
       ? "accepted"
@@ -1003,6 +1003,56 @@ export class CaseStore {
       offset,
       hasMore: offset + messages.length < total,
     };
+  }
+
+  syncedMessageByMessageId(sourceId, messageId) {
+    const row = this.db.prepare(`
+      SELECT * FROM synced_messages
+      WHERE source_id=? AND message_id=?
+      LIMIT 1
+    `).get(String(sourceId || "default"), String(messageId || ""));
+    return row ? syncedMessageRow(row) : null;
+  }
+
+  mediaContextBefore(message, options = {}) {
+    if (message?.transport !== "telegram") return [];
+    const limit = Math.min(Math.max(Number(options.limit) || 20, 1), 100);
+    const rows = this.syncedMessages({
+      sourceId: message.sourceId,
+      conversationId: conversationIdFor(message),
+      limit: Math.min(Math.max(Number(options.scanLimit) || 200, limit), 1000),
+    });
+    const excluded = new Set(
+      (options.excludeMessageIds || []).map((item) => String(item || "")),
+    );
+    return rows
+      .filter((row) =>
+        Number(row.timestamp || 0) <= Number(message.timestamp || now()) &&
+        !excluded.has(String(row.message_id)) &&
+        Array.isArray(row.attachments) &&
+        row.attachments.some((attachment) => attachment?.kind === "image")
+      )
+      .slice(-limit)
+      .map((row) => ({
+        ...row,
+        message: {
+          transport: "telegram",
+          sourceId: row.source_id,
+          sourceName: row.metadata?.sourceName || "Telegram",
+          messageId: row.message_id,
+          telegramMessageId: Number(row.metadata?.telegramMessageId || 0) || undefined,
+          timestamp: row.timestamp,
+          direction: row.direction,
+          chatType: row.chat_type,
+          chatId: row.chat_id,
+          chatName: row.chat_name,
+          senderId: row.sender_id,
+          senderName: row.sender_name,
+          selfId: row.metadata?.selfId || "",
+          text: row.text,
+          attachments: row.attachments,
+        },
+      }));
   }
 
   ingestGroupContext(message, options = {}) {

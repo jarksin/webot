@@ -1659,7 +1659,13 @@ document.querySelector("#save-button").addEventListener("click", async () => {
     settings = body.settings;
     dirty = false;
     saveState.textContent = "已保存";
-    showNotice("配置已生效");
+    showNotice(
+      body.apply?.mode === "controlled-drain"
+        ? "配置已保存，当前 worker 完成后受控重载"
+        : body.apply?.mode === "controlled-restart"
+          ? "配置已保存，正在受控重载"
+          : "配置已动态生效",
+    );
     status = await api("/api/admin/status");
     render();
   } catch (error) {

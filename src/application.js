@@ -39,6 +39,34 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function canonicalValue(value) {
+  if (value instanceof Set) {
+    return [...value].map(canonicalValue).sort((left, right) =>
+      JSON.stringify(left).localeCompare(JSON.stringify(right)),
+    );
+  }
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalValue(value[key])]),
+    );
+  }
+  return value;
+}
+
+function connectorSignature(config) {
+  return JSON.stringify(canonicalValue({
+    channels: config.channels,
+    dataDir: config.dataDir,
+    stateDir: config.stateDir,
+    assistantWorkingDirectory: config.assistant.workingDirectory,
+    pad: config.pad,
+    telegram: config.telegram,
+  }));
+}
+
 export class WebotApplication {
   constructor({
     env = process.env,
@@ -78,6 +106,24 @@ export class WebotApplication {
     await this.applySettings(settings);
   }
 
+  providerFor(config) {
+    const accessForMessage = (message) =>
+      requesterAccess(
+        message,
+        config.policy.ownerSenderIds,
+        config,
+      );
+    return {
+      accessForMessage,
+      provider: createProvider(config.assistant, {
+        requesterAccess: accessForMessage,
+        searchKnowledge: (query, context) =>
+          this.knowledgeBase.search(query, context),
+        readAgentPolicy: () => this.workspacePolicy.read(),
+      }),
+    };
+  }
+
   async applySettings(settings) {
     await this.stopConnectors();
     this.config = loadConfig(this.env, settings);
@@ -104,18 +150,7 @@ export class WebotApplication {
       path.join(this.config.dataDir, "workspace"),
     );
     await this.workspacePolicy.ensure();
-    const accessForMessage = (message) =>
-      requesterAccess(
-        message,
-        this.config.policy.ownerSenderIds,
-        this.config,
-      );
-    const provider = createProvider(this.config.assistant, {
-      requesterAccess: accessForMessage,
-      searchKnowledge: (query, context) =>
-        this.knowledgeBase.search(query, context),
-      readAgentPolicy: () => this.workspacePolicy.read(),
-    });
+    const { accessForMessage, provider } = this.providerFor(this.config);
     const store = new SessionStore(
       this.config.stateDir,
       this.config.assistant.historyTurns,
@@ -231,6 +266,7 @@ export class WebotApplication {
       });
       this.caseStore.observeIdentity(message);
     }
+    message = this.hydrateReferencedMessage(message);
     if (message.transport === "pad") {
       const classification = await this.padSenderClassifier.classify(message);
       if (classification.blocked) {
@@ -255,6 +291,41 @@ export class WebotApplication {
       });
       throw error;
     }
+  }
+
+  hydrateReferencedMessage(message) {
+    const reference = message?.reference;
+    const referenceId = String(reference?.messageId || "").trim();
+    if (!referenceId || !["pad", "telegram"].includes(message?.transport)) {
+      return message;
+    }
+    const stored = this.caseStore.syncedMessageByMessageId(
+      message.sourceId,
+      referenceId,
+    );
+    if (!stored) return message;
+    const metadata = stored.metadata || {};
+    return {
+      ...message,
+      reference: {
+        ...reference,
+        messageId: referenceId,
+        messageType: reference.messageType || metadata.messageType,
+        senderId: reference.senderId || stored.sender_id,
+        senderName: reference.senderName || stored.sender_name,
+        text: stored.text || reference.text || "",
+        attachments: stored.attachments?.length
+          ? stored.attachments
+          : reference.attachments,
+        rawContent: metadata.rawContent || reference.rawContent,
+        app: metadata.app || reference.app,
+        originalMessage: {
+          messageId: stored.message_id,
+          text: stored.text,
+          attachments: stored.attachments,
+        },
+      },
+    };
   }
 
   async serializePadMediaRequest(sourceId, operation) {
@@ -311,7 +382,17 @@ export class WebotApplication {
         });
       }
     }
-    return { ...message, attachments };
+    let reference = message.reference;
+    if (reference && Array.isArray(reference.attachments)) {
+      const hydratedReference = await this.hydratePadMedia({
+        ...message,
+        messageId: reference.messageId || message.messageId,
+        attachments: reference.attachments,
+        reference: null,
+      });
+      reference = { ...reference, attachments: hydratedReference.attachments };
+    }
+    return { ...message, attachments, ...(reference ? { reference } : {}) };
   }
 
   async probePads() {
@@ -515,6 +596,17 @@ export class WebotApplication {
     const candidateConfig = loadConfig(this.env, candidate);
     createProvider(candidateConfig.assistant);
     const saved = await this.settingsStore.save(candidate);
+    const canApplyDynamically =
+      this.caseManager &&
+      !this.pendingSettings &&
+      connectorSignature(this.config) === connectorSignature(candidateConfig);
+    if (canApplyDynamically) {
+      await this.applyDynamicSettings(candidateConfig);
+      return {
+        settings: this.settings(),
+        apply: { mode: "dynamic", reasons: [] },
+      };
+    }
     if (this.caseManager?.status().active > 0) {
       this.pendingSettings = saved;
       this.caseManager.beginDrain();
@@ -523,10 +615,46 @@ export class WebotApplication {
       settings.assistant ||= {};
       settings.assistant.workingDirectory =
         candidateConfig.assistant.workingDirectory;
-      return settings;
+      return {
+        settings,
+        apply: {
+          mode: "controlled-drain",
+          reasons: ["connector-rebuild-required"],
+        },
+      };
     }
     await this.applySettings(saved);
-    return this.settings();
+    return {
+      settings: this.settings(),
+      apply: {
+        mode: "controlled-restart",
+        reasons: ["connector-rebuild-required"],
+      },
+    };
+  }
+
+  async applyDynamicSettings(candidateConfig) {
+    const { accessForMessage, provider } = this.providerFor(candidateConfig);
+    this.config = candidateConfig;
+    this.runtime.config = candidateConfig;
+    this.runtime.provider = provider;
+    this.caseManager.config = candidateConfig;
+    this.caseManager.provider = provider;
+    this.caseManager.requesterAccess = accessForMessage;
+    this.padSenderClassifier.config = candidateConfig.pad;
+    this.transports.hook.config = candidateConfig.hook;
+    this.transports.hook.outboundMode = candidateConfig.outboundMode;
+    this.transports.pad.config = candidateConfig.pad;
+    this.transports.pad.outboundMode = candidateConfig.outboundMode;
+    this.transports.telegram.config = candidateConfig.telegram;
+    this.transports.telegram.outboundMode = candidateConfig.outboundMode;
+    this.caseManager.sessionStore.maxEntries = Math.max(
+      2,
+      Number(candidateConfig.assistant.historyTurns || 12) * 2,
+    );
+    await this.knowledgeBase.reconfigure(candidateConfig.knowledgeBase, {
+      started: this.connectorsStarted,
+    });
   }
 
   schedulePendingSettingsApply() {

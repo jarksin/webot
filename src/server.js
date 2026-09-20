@@ -136,8 +136,8 @@ export function createServer({
           url.pathname === "/api/admin/settings"
         ) {
           const body = JSON.parse((await readBody(request)).toString("utf8"));
-          const settings = await application.updateSettings(body);
-          respond(response, 200, { ok: true, settings });
+          const result = await application.updateSettings(body);
+          respond(response, 200, { ok: true, ...result });
           return;
         }
         if (

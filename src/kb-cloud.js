@@ -346,6 +346,22 @@ export class KnowledgeBaseCloud {
     this.timer.unref?.();
   }
 
+  async reconfigure(config, { started = false } = {}) {
+    const previous = this.config;
+    const directoryChanged =
+      path.resolve(previous.localDir) !== path.resolve(config.localDir);
+    this.stop();
+    this.config = config;
+    this.state.enabled = Boolean(config.enabled);
+    this.state.localDir = config.localDir;
+    if (directoryChanged || !this.state.enabled) {
+      this.state.ready = false;
+      this.state.noteCount = 0;
+    }
+    if (started && this.state.enabled) this.start();
+    return this.status();
+  }
+
   stop() {
     clearInterval(this.timer);
     this.timer = null;

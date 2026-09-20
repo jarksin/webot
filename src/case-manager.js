@@ -123,6 +123,62 @@ export class CaseManager {
     };
   }
 
+  async hydrateTelegramMedia(message) {
+    const attachments = Array.isArray(message?.attachments)
+      ? [...message.attachments]
+      : [];
+    const transport = this.transports.telegram;
+    if (!transport || typeof transport.downloadInboundAttachment !== "function") {
+      return message;
+    }
+    for (let index = 0; index < attachments.length; index += 1) {
+      const attachment = attachments[index];
+      if (
+        attachment?.kind !== "image" ||
+        !attachment?.downloadContext?.type
+      ) continue;
+      try {
+        const cached = await transport.downloadInboundAttachment(
+          message,
+          attachment,
+          this.config.dataDir,
+        );
+        attachments[index] = { ...attachment, ...cached };
+      } catch (error) {
+        attachments[index] = {
+          ...attachment,
+          error: String(error.message || error),
+        };
+        this.logger.warn("telegram inbound image cache failed", {
+          sourceId: message.sourceId,
+          messageId: message.messageId,
+          error: error.message,
+        });
+      }
+    }
+    let reference = message.reference;
+    if (reference && Array.isArray(reference.attachments)) {
+      const hydratedReference = await this.hydrateTelegramMedia({
+        ...message,
+        messageId: reference.messageId || message.messageId,
+        telegramMessageId: reference.telegramMessageId || message.telegramMessageId,
+        attachments: reference.attachments,
+        reference: null,
+      });
+      reference = { ...reference, attachments: hydratedReference.attachments };
+    }
+    return { ...message, attachments, ...(reference ? { reference } : {}) };
+  }
+
+  async hydrateTelegramMediaContext(entries) {
+    return Promise.all(
+      (entries || []).map(async (entry) => ({
+        ...entry,
+        message: await this.hydrateTelegramMedia(entry.message || {}),
+      })),
+    );
+  }
+
   async receive(message) {
     const decision = acceptedMessage(message, this.config);
     if (decision.retainGroupContext || (
@@ -389,10 +445,21 @@ export class CaseManager {
         .map((item) => String(item.text || item.message?.text || "").trim())
         .filter(Boolean)
         .join("\n");
-      const currentMessage = {
+      const mediaContext = await this.hydrateTelegramMediaContext(
+        this.caseStore.mediaContextBefore(trigger.message, {
+          excludeMessageIds: pending.map((item) => item.message_id),
+        }),
+      );
+      const pendingAttachments = pending.flatMap((item) =>
+        Array.isArray(item.message?.attachments) ? item.message.attachments : []
+      );
+      const currentMessage = await this.hydrateTelegramMedia({
         ...trigger.message,
         text: currentText || trigger.message.text,
-      };
+        attachments: pendingAttachments.length
+          ? pendingAttachments
+          : trigger.message.attachments,
+      });
       const conversationContext = this.caseStore.groupContextBefore(
         trigger.message,
         {
@@ -408,6 +475,7 @@ export class CaseManager {
         message: currentMessage,
         history,
         conversationContext,
+        mediaContext,
         currentMessageCount: pending.length,
         signal: controller.signal,
         onItem,

@@ -215,6 +215,14 @@ test("prefers structured opt media and quote fields over raw XML", () => {
           kind: "image",
           display_name: "南威",
           display_text: "[图片]",
+          image: {
+            data_len: 456,
+            download_context: {
+              endpoint: "/api/v1/media/download-img-binary",
+              msg_id: 6,
+              to_wxid: "wxid_owner",
+            },
+          },
         },
       },
     }],
@@ -246,6 +254,15 @@ test("prefers structured opt media and quote fields over raw XML", () => {
     kind: "image",
     senderName: "南威",
     text: "[图片]",
+    attachments: [{
+      kind: "image",
+      size: 456,
+      downloadContext: {
+        endpoint: "/api/v1/media/download-img-binary",
+        msgId: 6,
+        toWxid: "wxid_owner",
+      },
+    }],
   });
   assert.doesNotMatch(message.text, /<img/);
 });

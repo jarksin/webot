@@ -67,6 +67,49 @@ test("uses the originating transport as the case namespace", () => {
   );
 });
 
+test("retains Telegram image metadata for later on-demand hydration", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-telegram-context-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const image = {
+    transport: "telegram",
+    sourceId: "tg-main",
+    sourceName: "Telegram",
+    messageId: "telegram:42:10",
+    telegramMessageId: 10,
+    timestamp: Date.now() - 1000,
+    direction: "incoming",
+    chatType: "private",
+    chatId: "tg:42",
+    conversationId: "private:tg:42",
+    senderId: "tg:42",
+    senderName: "Owner",
+    selfId: "tg:42",
+    text: "[图片]",
+    attachments: [{
+      kind: "image",
+      filename: "photo.jpg",
+      downloadContext: {
+        type: "telegram",
+        chatId: "tg:42",
+        messageId: 10,
+      },
+    }],
+  };
+  caseStore.ingestSyncedMessage(image, { retentionHours: 24, maxMessages: 100 });
+  const context = caseStore.mediaContextBefore({
+    ...image,
+    messageId: "telegram:42:11",
+    telegramMessageId: 11,
+    timestamp: Date.now(),
+    text: "@Webot 看一下刚才的图",
+  });
+
+  assert.equal(context.length, 1);
+  assert.equal(context[0].message.messageId, "telegram:42:10");
+  assert.equal(context[0].message.attachments[0].downloadContext.messageId, 10);
+  caseStore.close();
+});
+
 async function waitFor(check, timeoutMs = 1000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

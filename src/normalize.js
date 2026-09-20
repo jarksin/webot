@@ -139,10 +139,18 @@ function padReference(message) {
         reference.content ??
         reference.Content,
     ),
+    attachments: structuredPadAttachments(reference),
+    rawContent: scalar(
+      reference.raw_content ??
+        reference.rawContent ??
+        reference.raw_xml ??
+        reference.RawContent,
+    ),
   };
   return Object.fromEntries(
     Object.entries(result).filter(([, item]) =>
-      item != null && item !== "" && item !== 0
+      item != null && item !== "" && item !== 0 &&
+      !(Array.isArray(item) && item.length === 0)
     ),
   );
 }
@@ -314,15 +322,68 @@ export function normalizeHookEvent(event) {
   };
 }
 
+function normalizeTelegramAttachment(item) {
+  if (!item || typeof item !== "object") return null;
+  const downloadContext = item.download_context ?? item.downloadContext;
+  const result = {
+    kind: scalar(item.kind).toLowerCase() || "file",
+    filename: scalar(item.filename),
+    size: numberValue(item.size),
+    mime: scalar(item.mime),
+    downloadContext: downloadContext && typeof downloadContext === "object"
+      ? {
+          type: scalar(downloadContext.type),
+          chatId: scalar(downloadContext.chat_id ?? downloadContext.chatId),
+          messageId: numberValue(downloadContext.message_id ?? downloadContext.messageId),
+        }
+      : null,
+  };
+  return Object.fromEntries(
+    Object.entries(result).filter(([, value]) =>
+      value != null && value !== "" && value !== 0 &&
+      !(typeof value === "object" && !Object.keys(value).length)
+    ),
+  );
+}
+
+function normalizeTelegramReference(value) {
+  if (!value || typeof value !== "object") return null;
+  const attachments = Array.isArray(value.attachments)
+    ? value.attachments.map(normalizeTelegramAttachment).filter(Boolean)
+    : [];
+  const result = {
+    messageId: scalar(value.message_id ?? value.messageId),
+    telegramMessageId: numberValue(
+      value.telegram_message_id ?? value.telegramMessageId ?? value.message_id,
+    ),
+    senderId: scalar(value.sender_id ?? value.senderId),
+    senderName: scalar(value.sender_name ?? value.senderName),
+    text: scalar(value.text).trim(),
+    attachments,
+  };
+  return Object.fromEntries(
+    Object.entries(result).filter(([, item]) =>
+      item != null && item !== "" && item !== 0 &&
+      !(Array.isArray(item) && item.length === 0)
+    ),
+  );
+}
+
 export function normalizeTelegramBridgeEvent(event, source = {}) {
   if (!event || event.type !== "message") return null;
   const messageId = scalar(event.message_id);
   const chatId = scalar(event.chat_id);
   const senderId = scalar(event.sender_id);
   const selfId = scalar(event.self_id);
-  const text = scalar(event.text).trim();
+  const attachments = Array.isArray(event.attachments)
+    ? event.attachments.map(normalizeTelegramAttachment).filter(Boolean)
+    : [];
+  const text = scalar(event.text).trim() || (
+    attachments.some((item) => item.kind === "image") ? "[图片]" : ""
+  );
   if (!messageId || !chatId || !senderId || !text) return null;
   const chatType = event.chat_type === "group" ? "group" : "private";
+  const reference = normalizeTelegramReference(event.reference);
   return {
     transport: "telegram",
     sourceId: String(source.id || "telegram"),
@@ -338,6 +399,8 @@ export function normalizeTelegramBridgeEvent(event, source = {}) {
     senderName: scalar(event.sender_name),
     selfId,
     text,
+    attachments,
+    ...(reference ? { reference } : {}),
     mentions: Array.isArray(event.mentions)
       ? event.mentions.map(scalar).filter(Boolean)
       : [],

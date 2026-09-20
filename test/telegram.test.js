@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
 import test from "node:test";
+import os from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
 import { loadConfig } from "../src/config.js";
@@ -64,6 +67,76 @@ test("normalizes Telegram bridge messages into isolated transport events", () =>
   assert.equal(message.telegramMessageId, 9);
   assert.equal(message.conversationId, "private:tg:42");
   assert.equal(message.exactSelfChat, true);
+});
+
+test("normalizes Telegram image-only messages with a deferred download locator", () => {
+  const message = normalizeTelegramBridgeEvent({
+    type: "message",
+    message_id: "42:10",
+    telegram_message_id: 10,
+    chat_type: "private",
+    chat_id: "tg:42",
+    sender_id: "tg:42",
+    self_id: "tg:42",
+    text: "",
+    attachments: [{
+      kind: "image",
+      filename: "photo.jpg",
+      size: 1234,
+      mime: "image/jpeg",
+      download_context: {
+        type: "telegram",
+        chat_id: "tg:42",
+        message_id: 10,
+      },
+    }],
+  }, source());
+
+  assert.equal(message.text, "[图片]");
+  assert.deepEqual(message.attachments, [{
+    kind: "image",
+    filename: "photo.jpg",
+    size: 1234,
+    mime: "image/jpeg",
+    downloadContext: {
+      type: "telegram",
+      chatId: "tg:42",
+      messageId: 10,
+    },
+  }]);
+});
+
+test("preserves Telegram reply content and image locator", () => {
+  const message = normalizeTelegramBridgeEvent({
+    type: "message",
+    message_id: "42:11",
+    chat_type: "private",
+    chat_id: "tg:42",
+    sender_id: "tg:42",
+    self_id: "tg:42",
+    text: "看一下",
+    reference: {
+      message_id: 10,
+      telegram_message_id: 10,
+      sender_id: "tg:7",
+      sender_name: "Alice",
+      text: "[图片]",
+      attachments: [{
+        kind: "image",
+        filename: "photo.jpg",
+        mime: "image/jpeg",
+        download_context: {
+          type: "telegram",
+          chat_id: "tg:42",
+          message_id: 10,
+        },
+      }],
+    },
+  }, source());
+
+  assert.equal(message.reference.senderName, "Alice");
+  assert.equal(message.reference.text, "[图片]");
+  assert.equal(message.reference.attachments[0].downloadContext.messageId, 10);
 });
 
 test("Telegram strict policy accepts trusted self chat and rejects strangers", () => {
@@ -141,6 +214,45 @@ test("Telegram transport sends text and files through its source bridge", async 
     text: "reply",
     reply_to: 7,
   });
+});
+
+test("Telegram transport downloads deferred inbound images through the bridge", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-telegram-media-"));
+  const configuredSource = source();
+  const calls = [];
+  const client = {
+    source: configuredSource,
+    async request(payload) {
+      calls.push(payload);
+      await fs.writeFile(payload.path, Buffer.from("image-bytes"));
+      return { ok: true, mime: "image/jpeg", size: 11 };
+    },
+  };
+  const transport = new TelegramTransport(
+    { sources: [configuredSource] },
+    "live",
+  );
+  transport.setClients([client]);
+
+  const result = await transport.downloadInboundAttachment({
+    sourceId: "tg-main",
+    chatId: "tg:42",
+  }, {
+    kind: "image",
+    filename: "photo.jpg",
+    mime: "image/jpeg",
+    downloadContext: {
+      type: "telegram",
+      chatId: "tg:42",
+      messageId: 10,
+    },
+  }, directory);
+
+  assert.equal(calls[0].action, "download_media");
+  assert.equal(calls[0].chat_id, "tg:42");
+  assert.equal(calls[0].message_id, 10);
+  assert.equal(result.mime, "image/jpeg");
+  assert.deepEqual(await fs.readFile(result.localPath), Buffer.from("image-bytes"));
 });
 
 test("Telegram bridge client parses ready, inbound, and request responses", async (context) => {

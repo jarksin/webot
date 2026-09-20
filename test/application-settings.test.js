@@ -15,8 +15,50 @@ async function waitFor(check, timeoutMs = 1000) {
   throw new Error("condition was not met");
 }
 
-test("defers settings reload until active workers have drained", async () => {
+test("applies prompt and worker settings dynamically without draining active workers", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-"));
+  const settingsStore = new SettingsStore(path.join(directory, "settings.json"));
+  const application = new WebotApplication({
+    settingsStore,
+    env: {
+      ...process.env,
+      WEBOT_DATA_DIR: directory,
+      WEBOT_RUNTIME_MODE: "test",
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await application.initialize();
+
+  let active = 1;
+  let draining = false;
+  application.caseManager.status = () => ({ active });
+  application.caseManager.beginDrain = () => {
+    draining = true;
+    throw new Error("dynamic settings must not drain workers");
+  };
+
+  const result = await application.updateSettings({
+    assistant: { systemPrompt: "dynamic prompt" },
+    caseManagement: { autoSend: false },
+  });
+  assert.equal(result.settings.caseManagement.autoSend, false);
+  assert.equal(result.apply.mode, "dynamic");
+  assert.equal(draining, false);
+  assert.equal(active, 1);
+
+  const agent = await application.agentDocument();
+  await application.saveAgentDocument(`${agent.content}\n# hot update\n`, agent.hash);
+  await application.saveKnowledgeDocument(
+    "owner/hot-update.md",
+    "---\napproved: true\naudience: owner\n---\n# Hot update\n",
+  );
+  assert.equal(active, 1);
+
+  application.caseStore.close();
+});
+
+test("defers connector changes to a controlled reload until active workers drain", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-drain-"));
   const settingsStore = new SettingsStore(path.join(directory, "settings.json"));
   const application = new WebotApplication({
     settingsStore,
@@ -41,10 +83,8 @@ test("defers settings reload until active workers have drained", async () => {
     applied += 1;
   };
 
-  const saved = await application.updateSettings({
-    caseManagement: { autoSend: false },
-  });
-  assert.equal(saved.caseManagement.autoSend, false);
+  const result = await application.updateSettings({ channels: ["hook"] });
+  assert.equal(result.apply.mode, "controlled-drain");
   assert.equal(draining, true);
   assert.equal(applied, 0);
 

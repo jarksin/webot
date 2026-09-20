@@ -58,3 +58,13 @@ persistence.
 Outbound delivery follows Webot's global `outboundMode`. `dry-run` records the
 result without sending. `live` sends text and file attachments through the
 originating Telegram session.
+
+## Inbound media and replies
+
+Telegram image messages are first persisted as lightweight attachment metadata
+with their chat and message locator. The worker downloads the original image
+only when the current case or a referenced/history message needs it, caches it
+under Webot's private data directory, and does not store the binary in SQLite.
+Telegram reply messages carry their original text and media locator into the
+same context. WeChat quoted messages use the persisted original message when it
+is available, including its image download context.

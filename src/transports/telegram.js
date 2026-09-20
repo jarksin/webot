@@ -1,11 +1,30 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { spawn } from "node:child_process";
 import { normalizeTelegramBridgeEvent } from "../normalize.js";
 import { telegramSourceForMessage } from "../telegram-sources.js";
 
 const MAX_LINE_BYTES = 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
+
+function safeFileSegment(value, fallback) {
+  const segment = String(value || "")
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "_")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 120);
+  return segment || fallback;
+}
+
+function imageExtension(attachment = {}) {
+  const filename = path.extname(String(attachment.filename || ""));
+  if (/^\.[A-Za-z0-9]{1,8}$/.test(filename)) return filename.toLowerCase();
+  const mime = String(attachment.mime || "").toLowerCase();
+  const match = mime.match(/^image\/(jpeg|png|gif|webp|bmp|heic|avif)$/);
+  return match ? `.${match[1] === "jpeg" ? "jpg" : match[1]}` : ".img";
+}
 
 function replyMessageId(message = {}) {
   const value = Number(message.telegramMessageId || 0);
@@ -92,6 +111,68 @@ export class TelegramTransport {
         : undefined,
     }, 180_000);
     return { ok: true, result };
+  }
+
+  async downloadInboundAttachment(message, attachment, dataDir) {
+    const context = attachment?.downloadContext;
+    if (
+      attachment?.kind !== "image" ||
+      context?.type !== "telegram" ||
+      !context?.chatId ||
+      !Number.isSafeInteger(Number(context.messageId)) ||
+      Number(context.messageId) <= 0
+    ) {
+      throw new Error("attachment does not expose a Telegram image locator");
+    }
+    const source = this.source(message);
+    const directory = path.join(
+      path.resolve(dataDir),
+      "inbound-media",
+      "telegram",
+      safeFileSegment(source.id, "default"),
+    );
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const base = safeFileSegment(
+      `${context.chatId}_${context.messageId}`,
+      crypto.randomUUID(),
+    );
+    const filePath = path.join(directory, `${base}${imageExtension(attachment)}`);
+    if (fs.existsSync(filePath)) {
+      const existing = fs.statSync(filePath);
+      if (existing.isFile() && existing.size > 0 && existing.size <= MAX_INBOUND_IMAGE_BYTES) {
+        return {
+          localPath: filePath,
+          filename: path.basename(filePath),
+          mime: attachment.mime || "application/octet-stream",
+          size: existing.size,
+        };
+      }
+    }
+    const temporary = `${filePath}.${process.pid}.tmp`;
+    try {
+      const result = await this.client(message).request({
+        action: "download_media",
+        chat_id: context.chatId,
+        message_id: Number(context.messageId),
+        path: temporary,
+      }, 180_000);
+      if (!fs.existsSync(temporary)) {
+        throw new Error("Telegram image download returned no file");
+      }
+      const downloaded = fs.statSync(temporary);
+      if (!downloaded.isFile() || downloaded.size <= 0 || downloaded.size > MAX_INBOUND_IMAGE_BYTES) {
+        throw new Error("Telegram image download returned an invalid size");
+      }
+      fs.renameSync(temporary, filePath);
+      return {
+        localPath: filePath,
+        filename: path.basename(filePath),
+        mime: result.mime || attachment.mime || "application/octet-stream",
+        size: downloaded.size,
+      };
+    } finally {
+      try { fs.unlinkSync(temporary); } catch {}
+    }
   }
 }
 
