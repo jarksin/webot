@@ -26,9 +26,28 @@ function hasBotNamePrefix(text, botNames) {
       .trim()
       .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return Boolean(
-      escaped && new RegExp(`^@${escaped}(?:[\\s,:，：-]|$)`, "i").test(value),
+      escaped && new RegExp(`^@?${escaped}(?:[\\s,:，：-]|$)`, "i").test(value),
     );
   });
+}
+
+function privateTriggerText(message) {
+  const appTitle = String(message?.app?.title || "").trim();
+  if (appTitle) return appTitle;
+  const text = String(message?.text || "").trim();
+  const quotedReply = text.match(/^\[引用回复\]\s*([^\n]*)/);
+  return String(quotedReply?.[1] || text).trim();
+}
+
+function stripMessageTrigger(message, triggers, botNames) {
+  const text = String(message?.text || "").trim();
+  const command = privateTriggerText(message);
+  const stripped = stripTrigger(command, triggers, botNames);
+  if (command === text) return stripped;
+  const index = text.indexOf(command);
+  if (index < 0) return text;
+  return `${text.slice(0, index)}${stripped}${text.slice(index + command.length)}`
+    .trim();
 }
 
 function isPadOfficialAccount(message) {
@@ -63,9 +82,19 @@ export function acceptedMessage(message, config) {
   const botNames = source?.botNames?.size
     ? source.botNames
     : config.identity.botNames;
+  const triggerKeywords = source?.triggerKeywords?.size
+    ? source.triggerKeywords
+    : config.policy.groupTriggers;
+  const commandText = privateTriggerText(message);
   const privateBotPrefix =
     message.chatType === "private" &&
-    hasBotNamePrefix(message.text, botNames);
+    hasBotNamePrefix(commandText, botNames);
+  const privateTriggerPrefix =
+    message.chatType === "private" &&
+    hasBotNamePrefix(
+      commandText,
+      new Set([...triggerKeywords, ...botNames]),
+    );
   const outgoingPrivateBotCommand =
     message.transport === "pad" &&
     message.direction === "outgoing" &&
@@ -73,7 +102,7 @@ export function acceptedMessage(message, config) {
     !message.selfConversation &&
     !message.selfPeer &&
     !message.exactSelfChat &&
-    privateBotPrefix;
+    privateTriggerPrefix;
   if (message.transport === "pad" && config.pad.sources.length && !source) {
     return { accepted: false, reason: "source-not-configured" };
   }
@@ -146,7 +175,8 @@ export function acceptedMessage(message, config) {
       !source.ignoreAllowlist &&
       !hasCaseInsensitive(source.allowedSenderIds, message.senderId) &&
       !hasCaseInsensitive(source.privateNicknameAllowlist, message.senderName) &&
-      !privateBotPrefix
+      !privateBotPrefix &&
+      !outgoingPrivateBotCommand
     ) {
       return { accepted: false, reason: "sender-not-allowed" };
     }
@@ -190,13 +220,7 @@ export function acceptedMessage(message, config) {
 
   return {
     accepted: true,
-    text: stripTrigger(
-      message.text,
-      source?.triggerKeywords?.size
-        ? source.triggerKeywords
-        : config.policy.groupTriggers,
-      source?.botNames?.size ? source.botNames : config.identity.botNames,
-    ),
+    text: stripMessageTrigger(message, triggerKeywords, botNames),
   };
 }
 

@@ -439,4 +439,48 @@ test("allows private bot-name prefixes without opening all private messages", ()
     ).reason,
     "pad-outgoing",
   );
+  assert.equal(
+    acceptedMessage(
+      {
+        ...base,
+        senderId: "wxid_small",
+        direction: "outgoing",
+        text: "[引用回复] @小水瓜 看下引用内容\n引用：上一条回复",
+        app: {
+          title: "@小水瓜 看下引用内容",
+          reference: { content: "上一条回复" },
+        },
+      },
+      sourceConfig,
+    ).text,
+    "[引用回复] 看下引用内容\n引用：上一条回复",
+  );
+  assert.equal(
+    acceptedMessage(
+      {
+        ...base,
+        senderId: "wxid_small",
+        direction: "outgoing",
+        text: "[引用回复] 普通回复\n引用：@小水瓜 旧消息",
+        app: {
+          title: "普通回复",
+          reference: { content: "@小水瓜 旧消息" },
+        },
+      },
+      sourceConfig,
+    ).reason,
+    "pad-outgoing",
+  );
+  assert.equal(
+    acceptedMessage(
+      {
+        ...base,
+        senderId: "wxid_small",
+        direction: "outgoing",
+        text: "小助手 检查状态",
+      },
+      sourceConfig,
+    ).text,
+    "检查状态",
+  );
 });

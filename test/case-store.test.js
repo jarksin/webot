@@ -3,7 +3,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { CaseManager } from "../src/case-manager.js";
+import {
+  CaseManager,
+  transientProviderFailure,
+} from "../src/case-manager.js";
 import { caseIdFor, CaseStore } from "../src/case-store.js";
 import { SessionStore } from "../src/session-store.js";
 
@@ -72,6 +75,87 @@ async function waitFor(check, timeoutMs = 1000) {
   }
   throw new Error("condition was not met");
 }
+
+test("classifies only transient provider failures for automatic retry", () => {
+  assert.equal(
+    transientProviderFailure(new Error("stream disconnected before completion: error decoding response body")),
+    true,
+  );
+  assert.equal(
+    transientProviderFailure(new Error("503 Service Unavailable: auth_unavailable")),
+    true,
+  );
+  assert.equal(
+    transientProviderFailure(new Error("409 Conflict: codex_config_changed")),
+    false,
+  );
+  assert.equal(
+    transientProviderFailure(new Error("You've hit your usage limit")),
+    false,
+  );
+});
+
+test("retries one transient provider failure without failing the case", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-provider-retry-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  let attempts = 0;
+  const manager = new CaseManager({
+    config: {
+      assistant: { mode: "codex", codexModel: "gpt-test" },
+      caseManagement: {
+        autoRun: true,
+        autoSend: false,
+        workerConcurrency: 1,
+        providerTransientRetryMax: 1,
+        providerTransientRetryDelayMs: 0,
+      },
+      pad: {
+        sources: [{
+          id: "small",
+          strictPolicy: true,
+          allowSelf: false,
+          selfChatPeers: new Set(["owner_wxid"]),
+          acceptSelfChatPeerMessages: true,
+          allowedChatIds: new Set(),
+          allowedSenderIds: new Set(),
+          privateNicknameAllowlist: new Set(),
+          triggerKeywords: new Set(["webot"]),
+          botNames: new Set(["Webot"]),
+        }],
+      },
+      policy: {
+        blockedSenderIds: new Set(),
+        allowSelf: false,
+        allowedChatIds: new Set(),
+        allowedSenderIds: new Set(),
+        groupTriggers: new Set(["webot"]),
+      },
+      identity: { botNames: new Set(["Webot"]) },
+    },
+    provider: {
+      async reply() {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("stream disconnected before completion: error decoding response body");
+        }
+        return { text: "recovered", sessionId: "retry-session" };
+      },
+    },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: {},
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const received = await manager.receive(message("retry-message"));
+  await waitFor(() => manager.status().active === 0);
+  const detail = caseStore.detail(received.caseId);
+  assert.equal(attempts, 2);
+  assert.equal(detail.status, "draft_ready");
+  assert.equal(detail.drafts[0].text, "recovered");
+  assert.ok(detail.progress.some((item) => /自动重试 1\/1/.test(item.message)));
+  caseStore.close();
+});
 
 test("persists a WeChat case, worker session, draft, and send result", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-case-"));

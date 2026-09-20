@@ -40,6 +40,32 @@ function completedDraftText(text) {
   return /^\[done\](?:\s|$)/i.test(value) ? value : `[done] ${value}`;
 }
 
+export function transientProviderFailure(error) {
+  const text = String(error?.message || error || "");
+  if (/\bcodex_config_changed\b|\b409\s+Conflict\b/i.test(text)) return false;
+  if (/usage limit|rate limit|quota|insufficient_quota/i.test(text)) return false;
+  return /stream disconnected|error decoding response body|transport error:\s*network error|\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE)\b|socket hang up|\b(?:502|503|504)\b|service unavailable|bad gateway|gateway timeout|auth_unavailable/i.test(text);
+}
+
+function waitForRetry(delayMs, signal) {
+  if (signal?.aborted) return Promise.reject(new Error("worker stopped"));
+  const delay = Math.max(0, Number(delayMs || 0));
+  if (!delay) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, delay);
+    function done() {
+      signal?.removeEventListener("abort", aborted);
+      resolve();
+    }
+    function aborted() {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", aborted);
+      reject(new Error("worker stopped"));
+    }
+    signal?.addEventListener("abort", aborted, { once: true });
+  });
+}
+
 export class CaseManager {
   constructor({
     config,
@@ -376,7 +402,7 @@ export class CaseManager {
         },
       );
       this.caseStore.addProgress(caseId, session.run_count, "正在生成 draft");
-      const providerResult = await this.provider.reply({
+      const providerRequest = {
         caseId,
         codexSessionId: session.codex_session_id || "",
         message: currentMessage,
@@ -386,7 +412,39 @@ export class CaseManager {
         signal: controller.signal,
         onItem,
         runtimeOverrides: runtimeOverrides(this.caseStore, caseId),
-      });
+      };
+      const maxTransientRetries = Math.max(
+        0,
+        Number(this.caseSettings().providerTransientRetryMax ?? 1),
+      );
+      let transientRetryCount = 0;
+      let providerResult;
+      for (;;) {
+        try {
+          providerResult = await this.provider.reply(providerRequest);
+          break;
+        } catch (error) {
+          if (
+            controller.signal.aborted ||
+            !transientProviderFailure(error) ||
+            transientRetryCount >= maxTransientRetries
+          ) {
+            throw error;
+          }
+          transientRetryCount += 1;
+          const delayMs = Math.max(
+            0,
+            Number(this.caseSettings().providerTransientRetryDelayMs ?? 1500),
+          );
+          this.caseStore.addProgress(
+            caseId,
+            session.run_count,
+            `Codex 瞬态连接失败，自动重试 ${transientRetryCount}/${maxTransientRetries}：${error.message}`,
+            "warn",
+          );
+          await waitForRetry(delayMs, controller.signal);
+        }
+      }
       const result = typeof providerResult === "string"
         ? { text: providerResult }
         : providerResult;

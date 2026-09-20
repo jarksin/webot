@@ -282,6 +282,20 @@ export function loadConfig(env = process.env, settings = {}) {
         value(caseSettings.workerConcurrency, 2),
         2,
       ),
+      providerTransientRetryMax: Math.min(
+        Math.max(
+          integer(value(caseSettings.providerTransientRetryMax, 1), 1),
+          0,
+        ),
+        3,
+      ),
+      providerTransientRetryDelayMs: Math.min(
+        Math.max(
+          integer(value(caseSettings.providerTransientRetryDelayMs, 1500), 1500),
+          0,
+        ),
+        30_000,
+      ),
     },
     hook: {
       apiUrl: env.WEBOT_HOOK_API_URL || "http://127.0.0.1:58080",
