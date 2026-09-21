@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import vm from "node:vm";
 
 const html = fs.readFileSync(
   new URL("../ui/admin.html", import.meta.url),
@@ -14,6 +15,41 @@ const css = fs.readFileSync(
   new URL("../ui/admin.css", import.meta.url),
   "utf8",
 );
+
+function adminRequest(status, body) {
+  const source = javascript.slice(
+    javascript.indexOf("async function api("),
+    javascript.indexOf("function sourceStatus("),
+  );
+  return vm.runInNewContext(`${source}; api`, {
+    fetch: async () => new Response(JSON.stringify(body), { status }),
+  });
+}
+
+test("offline channel status remains readable by admin initialization and polling", async () => {
+  const snapshot = {
+    ok: false,
+    service: "webot",
+    padSources: [{ id: "fixture", ready: false }],
+  };
+  const request = adminRequest(200, snapshot);
+  const result = await request("/api/admin/status");
+  assert.equal(result.ok, false);
+  assert.equal(result.padSources[0].ready, false);
+  assert.equal(result.service, "webot");
+});
+
+test("admin status exceptions do not suppress HTTP or other API errors", async () => {
+  await assert.rejects(
+    adminRequest(503, { ok: false, error: "unavailable" })("/api/admin/status"),
+    /unavailable/,
+  );
+  await assert.rejects(
+    adminRequest(200, { ok: false, error: "invalid settings" })("/api/admin/settings"),
+    /invalid settings/,
+  );
+  assert.equal((await adminRequest(200, { ok: true })("/api/admin/status")).ok, true);
+});
 
 test("admin navigation exposes cases, captured messages, ID directory, knowledge, and settings", () => {
   assert.match(html, /data-view="cases"/);

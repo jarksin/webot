@@ -212,7 +212,9 @@ async function api(url, options = {}) {
     },
   });
   const body = await response.json();
-  if (!response.ok || body.ok === false) {
+  // Status reports channel health in ok; an offline channel is still a valid snapshot.
+  const degradedStatus = url === "/api/admin/status" && body.ok === false;
+  if (!response.ok || (body.ok === false && !degradedStatus)) {
     throw new Error(body.error || `HTTP ${response.status}`);
   }
   return body;
