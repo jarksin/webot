@@ -187,6 +187,10 @@ export class TelegramBridgeClient {
     this.onMessage = onMessage;
     this.logger = logger;
     this.spawn = options.spawnImpl || spawn;
+    this.selfCommandPrefixes = options.selfCommandPrefixes || [
+      ...(source.triggerKeywords || []),
+      ...(source.botNames || []),
+    ];
     this.child = null;
     this.buffer = "";
     this.pending = new Map();
@@ -224,6 +228,7 @@ export class TelegramBridgeClient {
         TG_API_ID: this.source.apiId,
         TG_API_HASH: this.source.apiHash,
         TG_SESSION_PATH: this.source.sessionPath,
+        TG_SELF_COMMAND_PREFIXES: JSON.stringify(this.selfCommandPrefixes),
       },
     });
     this.child = child;

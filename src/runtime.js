@@ -103,6 +103,15 @@ export function acceptedMessage(message, config) {
     !message.selfPeer &&
     !message.exactSelfChat &&
     privateTriggerPrefix;
+  const outgoingTelegramCommand =
+    message.transport === "telegram" &&
+    message.direction === "outgoing" &&
+    message.chatType === "private" &&
+    Boolean(message.selfId) &&
+    message.senderId === message.selfId &&
+    source?.listenSelf === true &&
+    source?.allowSelf === true &&
+    privateTriggerPrefix;
   if (message.transport === "pad" && config.pad.sources.length && !source) {
     return { accepted: false, reason: "source-not-configured" };
   }
@@ -115,6 +124,14 @@ export function acceptedMessage(message, config) {
   }
   if (isPadOfficialAccount(message)) {
     return { accepted: false, reason: "official-account" };
+  }
+  if (
+    message.transport === "telegram" &&
+    message.direction === "outgoing" &&
+    !message.exactSelfChat &&
+    !outgoingTelegramCommand
+  ) {
+    return { accepted: false, reason: "telegram-outgoing" };
   }
   if (
     message.transport === "pad" &&
@@ -176,7 +193,8 @@ export function acceptedMessage(message, config) {
       !hasCaseInsensitive(source.allowedSenderIds, message.senderId) &&
       !hasCaseInsensitive(source.privateNicknameAllowlist, message.senderName) &&
       !privateBotPrefix &&
-      !outgoingPrivateBotCommand
+      !outgoingPrivateBotCommand &&
+      !outgoingTelegramCommand
     ) {
       return { accepted: false, reason: "sender-not-allowed" };
     }

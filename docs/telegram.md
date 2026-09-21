@@ -55,6 +55,15 @@ session controlled by the configured owner. Other private chats require their
 Messages from groups outside that allowlist are discarded before database
 persistence.
 
+With `listenSelf` and `allowSelf` enabled, the signed-in user can also summon
+Webot in another private chat by starting a message with a configured bot
+name or trigger keyword, for example `@webot help me answer this`. Ordinary
+outgoing messages, group messages and the bridge's own replies do not trigger
+this path. Replies stay in that private chat; quote the relevant message to
+include its content. `trustSelfAsOwner` still grants owner permissions only
+in Saved Messages, so a summon in someone else's chat does not expose private
+owner data or gain administrative permissions.
+
 Outbound delivery follows Webot's global `outboundMode`. `dry-run` records the
 result without sending. `live` sends text and file attachments through the
 originating Telegram session.

@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { EventEmitter } from "node:events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { loadConfig } from "../src/config.js";
 import { normalizeTelegramBridgeEvent } from "../src/normalize.js";
 import { acceptedMessage } from "../src/runtime.js";
@@ -185,6 +187,57 @@ test("Telegram strict policy accepts trusted self chat and rejects strangers", (
   assert.equal(requesterAccess(stranger, new Set(), config), "public");
 });
 
+test("Telegram outgoing private summons require self identity and keep public access", () => {
+  const config = loadConfig({}, {
+    telegram: { sources: [{
+      id: "tg-main",
+      sessionPath: "/tmp/telegram.session",
+      allowSelf: true,
+      listenSelf: true,
+      trustSelfAsOwner: true,
+      botNames: ["Webot"],
+      triggerKeywords: ["helper"],
+    }] },
+  });
+  const message = normalizeTelegramBridgeEvent({
+    type: "message", message_id: "99:7",
+    chat_type: "private", chat_id: "tg:99",
+    sender_id: "tg:42", self_id: "tg:42",
+    direction: "outgoing", text: "@webot help",
+  }, config.telegram.sources[0]);
+  assert.deepEqual(acceptedMessage(message, config), {
+    accepted: true, text: "help",
+  });
+  assert.equal(requesterAccess(message, new Set(), config), "public");
+  assert.equal(message.replyTarget, "tg:99");
+  assert.equal(acceptedMessage({ ...message, text: "helper help" }, config).accepted, true);
+  for (const changes of [
+    { text: "hello" }, { text: "@webotany help" },
+    { senderId: "tg:12" }, { selfId: "" }, { chatType: "group" },
+    { text: "【AI】@webot help" },
+  ]) {
+    assert.equal(acceptedMessage({ ...message, ...changes }, config).accepted, false);
+  }
+  const incoming = { ...message, direction: "incoming", senderId: "tg:99" };
+  assert.equal(acceptedMessage(incoming, config).accepted, true);
+  assert.equal(requesterAccess(incoming, new Set(), config), "public");
+  const configured = config.telegram.sources[0];
+  configured.blockedChatIds.add("tg:99");
+  assert.equal(acceptedMessage(message, config).reason, "chat-blocked");
+  configured.blockedChatIds.clear();
+  configured.allowSelf = false;
+  assert.equal(acceptedMessage(message, config).accepted, false);
+  configured.allowSelf = true;
+  configured.listenSelf = false;
+  assert.equal(acceptedMessage(message, config).accepted, false);
+});
+
+test("Python bridge preserves private self summons and rejects echoes offline", async () => {
+  await promisify(execFile)("python3", [
+    "-B", "test/telegram_bridge_test.py",
+  ], { cwd: path.resolve(import.meta.dirname, "..") });
+});
+
 test("Telegram transport sends text and files through its source bridge", async () => {
   const calls = [];
   const configuredSource = source();
@@ -266,7 +319,15 @@ test("Telegram bridge client parses ready, inbound, and request responses", asyn
     source(),
     (message) => inbound.push(message),
     { info() {}, warn() {}, error() {} },
-    { spawnImpl: () => child },
+    {
+      spawnImpl: (_bin, _args, options) => {
+        assert.deepEqual(
+          JSON.parse(options.env.TG_SELF_COMMAND_PREFIXES),
+          ["webot", "Webot"],
+        );
+        return child;
+      },
+    },
   );
   client.start();
   child.stdout.write(`${JSON.stringify({

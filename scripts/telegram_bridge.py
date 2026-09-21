@@ -45,6 +45,13 @@ def raw_peer_id(value: str) -> int | str:
     return candidate
 
 
+def has_command_prefix(text: str, prefixes: list[str]) -> bool:
+    return any(
+        re.match(rf"^@?{re.escape(prefix.strip())}(?:[\s,:，：-]|$)", text.strip(), re.I)
+        for prefix in prefixes if prefix.strip()
+    )
+
+
 def image_descriptor(message: Any) -> dict[str, Any] | None:
     file = getattr(message, "file", None)
     mime = str(getattr(file, "mime_type", "") or "").strip().lower()
@@ -100,6 +107,9 @@ class Bridge:
         self.self_id = 0
         self.self_username = ""
         self.pending_outbound: Counter[tuple[str, str]] = Counter()
+        self.self_command_prefixes = json.loads(
+            os.getenv("TG_SELF_COMMAND_PREFIXES", "[]")
+        )
 
     async def start(self) -> None:
         await self.client.connect()
@@ -137,7 +147,13 @@ class Bridge:
                 if self.pending_outbound[key] <= 0:
                     self.pending_outbound.pop(key, None)
                 return
-            if not self.args.listen_self or chat_id != self.self_id:
+            if not self.args.listen_self:
+                return
+            if chat_id != self.self_id and not (
+                event.is_private
+                and int(event.sender_id or 0) == self.self_id
+                and has_command_prefix(text, self.self_command_prefixes)
+            ):
                 return
 
         sender = await event.get_sender()

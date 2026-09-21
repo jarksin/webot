@@ -236,6 +236,16 @@ export class WebotApplication {
                 source,
                 (message) => this.receive(message),
                 this.logger,
+                {
+                  selfCommandPrefixes: [
+                    ...(source.triggerKeywords.size
+                      ? source.triggerKeywords
+                      : this.config.policy.groupTriggers),
+                    ...(source.botNames.size
+                      ? source.botNames
+                      : this.config.identity.botNames),
+                  ],
+                },
               ),
           )
       : [];
