@@ -361,7 +361,7 @@ export class TelegramBridgeClient {
         reject(new Error("Telegram request timed out"));
       }, timeoutMs);
       timer.unref?.();
-      this.pending.set(id, { child, resolve, reject, timer });
+      this.pending.set(id, { child, action: payload.action, resolve, reject, timer });
       child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
         if (!error) return;
         clearTimeout(timer);
@@ -388,6 +388,14 @@ export class TelegramBridgeClient {
 
   async checkHealth(child) {
     if (this.stopped || this.child !== child || !this.ready) return;
+    // Python processes commands serially. A probe queued behind a valid
+    // upload/send must not terminate that operation after only five seconds.
+    if ([...this.pending.values()].some((request) =>
+      request.child === child && request.action !== "health"
+    )) {
+      this.scheduleHealthCheck(child);
+      return;
+    }
     try {
       const response = await this.requestForChild(
         child,

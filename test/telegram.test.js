@@ -455,3 +455,30 @@ test("Telegram bridge recycles a child that fails its active health check", asyn
   assert.equal(child.kill.mock.callCount(), 1);
   client.stop();
 });
+
+test("Telegram health does not queue a short deadline behind a media send", async () => {
+  const child = new EventEmitter();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin = new PassThrough();
+  child.kill = test.mock.fn();
+  const client = new TelegramBridgeClient(source(), async () => {},
+    { info() {}, warn() {}, error() {} },
+    { spawnImpl: () => child, healthCheckIntervalMs: 60_000 });
+  client.start();
+  child.stdout.write(`${JSON.stringify({ type: "ready", self_id: "tg:42" })}\n`);
+  const send = client.request({ action: "send_file", chat_id: "42", path: "/fixture" });
+  const command = JSON.parse(child.stdin.read().toString());
+  await client.checkHealth(child);
+  assert.equal(child.stdin.read(), null);
+  assert.equal(child.kill.mock.callCount(), 0);
+  assert.equal(client.status().connected, true);
+  child.stdout.write(`${JSON.stringify({ type: "response", id: command.id, ok: true })}\n`);
+  await send;
+  const health = client.checkHealth(child);
+  const probe = JSON.parse(child.stdin.read().toString());
+  assert.equal(probe.action, "health");
+  child.stdout.write(`${JSON.stringify({ type: "response", id: probe.id, ok: true, connected: true })}\n`);
+  await health;
+  client.stop();
+});

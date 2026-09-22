@@ -127,3 +127,15 @@ risk. They connect to Webot through explicit HTTP/WebSocket contracts.
 4. Validate inbound events with `WEBOT_OUTBOUND_MODE=dry-run`.
 5. Back up the state directory.
 6. Enable `live` outbound only after account-side verification.
+# Connector health review
+
+Pad gateways advertising `health-v1` receive nonce-bound local health probes
+every 30 seconds. A matching response is due within five seconds; failures use
+normal backoff. Healthy subscriptions remain open, avoiding periodic gaps in
+gateways without replay. Legacy gateways do not receive unsupported probes.
+Health control frames do not update the inbound-message timestamp.
+
+Telegram bridge probes are deferred while a business request is pending,
+because the Python command loop is serial. This avoids killing a legitimate
+upload/send on the probe's shorter timeout. Existing business timeouts and
+uncertain-write handling remain unchanged.
