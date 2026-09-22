@@ -28,6 +28,7 @@ const AUDIO_FORMATS = new Map([
   [".silk", 4],
 ]);
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
+const DEFAULT_WEBSOCKET_RENEW_INTERVAL_MS = 30 * 60 * 1_000;
 const WEBSOCKET_OPEN = 1;
 const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
 const WECHAT_MENTION_SEPARATOR = "\u2005";
@@ -480,7 +481,7 @@ export class PadTransport {
 }
 
 export class PadWebSocketClient {
-  constructor(config, sourceValue, onMessage, logger = console) {
+  constructor(config, sourceValue, onMessage, logger = console, options = {}) {
     this.config = config;
     this.source =
       typeof sourceValue === "string"
@@ -493,11 +494,18 @@ export class PadWebSocketClient {
     this.attempt = 0;
     this.timer = null;
     this.connectTimer = null;
+    this.renewTimer = null;
     this.connectTimeoutMs = Math.max(
       1_000,
       Number(
         this.config.websocketConnectTimeoutMs ||
           DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS,
+      ),
+    );
+    this.renewIntervalMs = Math.max(
+      1,
+      Number(
+        options.renewIntervalMs || DEFAULT_WEBSOCKET_RENEW_INTERVAL_MS,
       ),
     );
     this.state = {
@@ -508,6 +516,7 @@ export class PadWebSocketClient {
       lastMessageAt: "",
       lastError: "",
       reconnects: 0,
+      renewals: 0,
     };
   }
 
@@ -525,9 +534,46 @@ export class PadWebSocketClient {
     this.connectTimer = null;
   }
 
+  clearRenewTimer() {
+    clearTimeout(this.renewTimer);
+    this.renewTimer = null;
+  }
+
+  scheduleRenewal(socket) {
+    this.clearRenewTimer();
+    if (this.stopped || this.socket !== socket || !this.state.connected) return;
+    this.renewTimer = setTimeout(() => {
+      this.renewTimer = null;
+      this.renew(socket);
+    }, this.renewIntervalMs);
+    this.renewTimer.unref?.();
+  }
+
+  renew(socket) {
+    if (this.stopped || this.socket !== socket) return;
+    this.clearConnectTimer();
+    this.clearRenewTimer();
+    this.socket = null;
+    this.state.connected = false;
+    this.state.connectionState = "reconnecting";
+    this.state.lastDisconnectedAt = new Date().toISOString();
+    this.state.renewals += 1;
+    this.logger.info("pad websocket renewing", {
+      sourceId: this.source.id,
+      renewals: this.state.renewals,
+    });
+    try {
+      socket.close();
+    } catch {
+      // The stale socket is already detached; continue with a fresh one.
+    }
+    this.connect();
+  }
+
   disconnect(socket, error = "") {
     if (this.socket !== socket) return;
     this.clearConnectTimer();
+    this.clearRenewTimer();
     this.socket = null;
     this.state.connected = false;
     this.state.connectionState = this.stopped ? "stopped" : "disconnected";
@@ -574,6 +620,7 @@ export class PadWebSocketClient {
         sourceId: this.source.id,
         selfId: this.source.selfId,
       });
+      this.scheduleRenewal(socket);
     });
     socket.addEventListener("message", async (event) => {
       if (this.socket !== socket) return;
@@ -629,6 +676,7 @@ export class PadWebSocketClient {
     clearTimeout(this.timer);
     this.timer = null;
     this.clearConnectTimer();
+    this.clearRenewTimer();
     const socket = this.socket;
     this.socket = null;
     this.state.connected = false;

@@ -599,3 +599,50 @@ test("Pad WebSocket closes an open socket during a clean stop", (context) => {
   assert.equal(socket.closeCalls, 1);
   assert.equal(client.status().connectionState, "stopped");
 });
+
+test("Pad WebSocket periodically replaces an apparently connected socket", async (context) => {
+  class FakeWebSocket extends EventTarget {
+    static instances = [];
+
+    constructor() {
+      super();
+      this.readyState = 0;
+      this.closeCalls = 0;
+      FakeWebSocket.instances.push(this);
+    }
+
+    close() {
+      this.closeCalls += 1;
+      this.readyState = 3;
+      this.dispatchEvent(new Event("close"));
+    }
+  }
+
+  replaceWebSocket(context, FakeWebSocket);
+  const client = new PadWebSocketClient(
+    {
+      id: "small-opt",
+      selfId: "wxid_small",
+      wsUrl: "ws://127.0.0.1:18102/ws/wxid_small",
+      accessToken: "test-token",
+    },
+    "wxid_small",
+    async () => {},
+    { info() {}, warn() {}, error() {} },
+    { renewIntervalMs: 20 },
+  );
+
+  client.start();
+  const stale = FakeWebSocket.instances[0];
+  stale.readyState = 1;
+  stale.dispatchEvent(new Event("open"));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.equal(stale.closeCalls, 1);
+  assert.equal(FakeWebSocket.instances.length, 2);
+  assert.equal(client.socket, FakeWebSocket.instances[1]);
+  assert.equal(client.status().renewals, 1);
+  stale.dispatchEvent(new Event("close"));
+  assert.equal(client.socket, FakeWebSocket.instances[1]);
+  client.stop();
+});
