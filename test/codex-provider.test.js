@@ -219,6 +219,68 @@ test("returns structured Codex results through the provider", async () => {
   assert.equal(result.sessionId, "session-2");
 });
 
+test("active follow-ups retain the initiating task and permit explicit cancellation", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-followup-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  let started, finish;
+  const ready = new Promise((resolve) => { started = resolve; });
+  const completion = new Promise((resolve) => { finish = resolve; });
+  const inputs = [];
+  const provider = createCodexProvider(
+    { codexBin: binary, codexHome: directory },
+    {
+      runCodex: async (_config, request) => {
+        assert.match(request.instancePolicy, /continue the unfinished work in the same turn/);
+        assert.match(request.instancePolicy, /check every still-active requested outcome/);
+        request.onActiveTurn({
+          async steer(text, messageId) {
+            inputs.push({ text, messageId });
+            return { accepted: true };
+          },
+        });
+        started();
+        await completion;
+        return { text: "result", sessionId: "same-session" };
+      },
+    },
+  );
+  const original = "Investigate both delayed ingress and missing comments.";
+  const run = provider.reply({
+    caseId: "case-followup",
+    message: { text: original },
+    history: [],
+  });
+  t.after(() => finish());
+  await ready;
+  for (const [text, messageId] of [
+    ["Is the connection local?", "2"],
+    ["Cancel the comment investigation; only inspect ingress.", "3"],
+  ]) {
+    assert.equal((await provider.steer({
+      caseId: "case-followup", text, messageId,
+    })).accepted, true);
+    const delivered = inputs.at(-1);
+    assert.equal(delivered.messageId, messageId);
+    assert.match(delivered.text, /not a new instruction to repeat completed actions/);
+    assert.match(delivered.text, /explicitly cancels or replaces/);
+    assert.deepEqual(JSON.parse(delivered.text.split("\n\n").at(-1)), {
+      initial_request: original,
+      new_message: text,
+    });
+  }
+  assert.equal((await provider.steer({
+    caseId: "other-case", text: "unrelated",
+  })).accepted, false);
+  finish();
+  assert.equal((await run).sessionId, "same-session");
+  assert.equal((await provider.steer({
+    caseId: "case-followup", text: "after completion",
+  })).accepted, false);
+  assert.equal(inputs.length, 2);
+});
+
 test("does not expose prior local media paths to public requesters", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-codex-"));
   const binary = path.join(directory, "codex");

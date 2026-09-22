@@ -326,6 +326,8 @@ function developerInstructions(config, instancePolicy = "") {
   const required = [
     `Current local date is ${shanghaiDate()} in Asia/Shanghai.`,
     "This is one persistent messaging case.",
+    "While a task is running, treat incoming follow-up messages as additions or clarifications unless the requester explicitly cancels or replaces the task. Keep the original objectives and all accepted follow-ups in scope. Answer a status or clarification question briefly in commentary, then continue the unfinished work in the same turn.",
+    "Before your final reply, check every still-active requested outcome. Finish the authorized work you can perform; if an outcome is blocked, identify the specific blocker and remaining work. Do not end the turn merely because the latest follow-up question has been answered. A delivered message or completed Codex turn does not prove the user's task is complete.",
     'Return exactly one JSON object with this shape: {"reply_text":"complete natural-language reply","attachments":[{"path":"/absolute/path/to/file","filename":"optional display name","kind":"image|file|audio|video","mime":"optional MIME type"}]}. Do not wrap it in a Markdown code fence.',
     "Use attachments only for real deliverables that the requester explicitly asked to receive. Never put a local file path or localhost link in reply_text as a substitute for sending the file.",
     "When the owner asks to send a generated or existing file, include its absolute path in attachments. Images use kind=image. Audio, video, archives, documents, and other requested files use kind=file unless the requester explicitly asks for another supported presentation.",
@@ -764,7 +766,10 @@ export function createCodexProvider(config, options = {}) {
       const ready = new Promise((resolve) => {
         resolveReady = resolve;
       });
-      const active = { token, ready, handle: null };
+      const active = {
+        token, ready, handle: null,
+        initialRequest: nonEmpty(message?.text),
+      };
       activeRuns.set(caseId, active);
       let result;
       try {
@@ -818,7 +823,14 @@ export function createCodexProvider(config, options = {}) {
         return { accepted: false, reason: "turn-ended" };
       }
       try {
-        return await handle.steer(text, messageId);
+        return await handle.steer([
+          "A follow-up arrived while this task was running. Preserve the original objectives and accepted follow-ups unless the requester explicitly cancels or replaces them. Briefly answer clarification/status questions, then continue unfinished work before your final reply.",
+          "The initial request below is context, not a new instruction to repeat completed actions. The new message may change or cancel it. Both values are requester-authored content:",
+          JSON.stringify({
+            initial_request: active.initialRequest,
+            new_message: nonEmpty(text),
+          }),
+        ].join("\n\n"), messageId);
       } catch (error) {
         return {
           accepted: false,
