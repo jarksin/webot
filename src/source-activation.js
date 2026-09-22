@@ -43,49 +43,96 @@ export function createSourceActivator({
   env = process.env,
   fetchImpl = fetch,
   candidate = sourceCandidate,
+  ready = () => true,
+  onDeferredResult = () => {},
+  schedule = (callback, delay) => setTimeout(callback, delay),
+  now = Date.now,
+  readinessTimeoutMs = 300_000,
 } = {}) {
   const brokerUrl = String(
     env.WEBOT_ACTIVATION_BROKER_URL
       || env.SEATALK_MONITOR_URL
       || DEFAULT_BROKER_URL,
   ).replace(/\/+$/, "");
+  const pending = new Map();
+  async function submit(next, { caseId, sourceId }) {
+    const response = await fetchImpl(
+      `${brokerUrl}/api/webot_source_activation`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          case_id: String(caseId || ""),
+          requester_access: "owner",
+          service: "com.huwatermelon.webot",
+          action: "restart",
+          expected_version: next.version,
+          expected_source_revision: next.revision,
+          expected_source_id: String(sourceId || ""),
+        }),
+      },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.ok !== true) {
+      throw new Error(
+        `Webot activation broker rejected the candidate: ${
+          body.error || `HTTP ${response.status}`
+        }`,
+      );
+    }
+    return {
+      requested: true,
+      version: next.version,
+      revision: next.revision,
+      activationId: String(body.activation_id || ""),
+    };
+  }
   return {
-    async activate({ caseId, message, sourceId }) {
+    async activate(context) {
+      const { caseId, message } = context;
       if (activationSuppressed(message?.text)) {
+        pending.delete(caseId);
         return { requested: false, reason: "explicitly-suppressed" };
       }
       const next = await candidate({ env });
       if (!next) return { requested: false, reason: "source-current" };
-      const response = await fetchImpl(
-        `${brokerUrl}/api/webot_source_activation`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            case_id: String(caseId || ""),
-            requester_access: "owner",
-            service: "com.huwatermelon.webot",
-            action: "restart",
-            expected_version: next.version,
-            expected_source_revision: next.revision,
-            expected_source_id: String(sourceId || ""),
-          }),
-        },
-      );
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || body.ok !== true) {
-        throw new Error(
-          `Webot activation broker rejected the candidate: ${
-            body.error || `HTTP ${response.status}`
-          }`,
-        );
+      // Waiting inside afterOwnerRun would deadlock a connector change that
+      // itself waits for this worker to finish. Return and let the parent
+      // submit after settings application and real ingress health recover.
+      if (!ready()) {
+        if (!pending.has(caseId)) {
+          const deadline = now() + readinessTimeoutMs;
+          const ticket = {};
+          pending.set(caseId, ticket);
+          const poll = async () => {
+            if (pending.get(caseId) !== ticket) return;
+            try {
+              if (now() >= deadline) {
+                throw new Error("Webot activation readiness timed out");
+              }
+              if (!ready()) {
+                schedule(poll, 1000).unref?.();
+                return;
+              }
+              pending.delete(caseId);
+              // Re-read the committed candidate; broker still checks its
+              // exact revision and the live parent process provenance.
+              const current = await candidate({ env });
+              const result = current
+                ? await submit(current, context)
+                : { requested: false, reason: "source-current" };
+              onDeferredResult(context, result);
+            } catch (error) {
+              pending.delete(caseId);
+              onDeferredResult(context, null, error);
+            }
+          };
+          schedule(poll, 1000).unref?.();
+        }
+        return { requested: false, reason: "waiting-for-ingress" };
       }
-      return {
-        requested: true,
-        version: next.version,
-        revision: next.revision,
-        activationId: String(body.activation_id || ""),
-      };
+      pending.delete(caseId);
+      return submit(next, context);
     },
   };
 }

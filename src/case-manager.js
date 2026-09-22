@@ -588,6 +588,12 @@ export class CaseManager {
               session.run_count,
               `已提交 Webot v${activation.version} 受控激活请求`,
             );
+          } else if (activation?.reason === "waiting-for-ingress") {
+            this.caseStore.addProgress(
+              caseId,
+              session.run_count,
+              "Webot 激活等待连接配置应用和入站健康恢复",
+            );
           }
         } catch (error) {
           this.caseStore.addProgress(

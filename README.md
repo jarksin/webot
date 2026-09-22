@@ -39,6 +39,11 @@ The LaunchAgent uses the stable Node.js executable to load `bin/webot.js`
 directly. After an owner-authorized worker verifies and commits a source
 change, Webot requests guarded activation from the configured external broker.
 Set `WEBOT_ACTIVATION_BROKER_URL` to override the local broker endpoint.
+If connector settings are still draining or ingress is unhealthy, the parent
+defers submission for up to five minutes without keeping the completed worker
+active. It records a timeout or broker failure and does not retry an uncertain
+submission. The broker still verifies actual health and the exact revision;
+an accepted request is not proof that the new runtime is active.
 
 Runtime settings, messages, sessions, credentials, and knowledge are stored
 outside the source tree in the local Webot data directory. Configure gateway

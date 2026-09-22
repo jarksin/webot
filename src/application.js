@@ -95,9 +95,28 @@ export class WebotApplication {
     this.workspacePolicy = null;
     this.connectorsStarted = false;
     this.pendingSettings = null;
+    this.settingsApplying = false;
     this.settingsApplyTimer = null;
     this.startedAt = Date.now();
-    this.sourceActivator = createSourceActivator({ env });
+    this.sourceActivator = createSourceActivator({
+      env,
+      ready: () => !this.pendingSettings && !this.settingsApplying &&
+        this.status().ok === true,
+      onDeferredResult: (context, result, error) => {
+        const detail = this.caseStore.detail(context.caseId);
+        const message = error
+          ? `Webot 延后激活失败：${error.message}`
+          : result?.requested
+            ? `已提交 Webot v${result.version} 延后受控激活请求`
+            : "Webot 运行版本已更新，无需再次激活";
+        this.caseStore.addProgress(
+          context.caseId,
+          detail?.run_count || 0,
+          message,
+          error ? "warn" : "info",
+        );
+      },
+    });
     this.fetch = fetchImpl;
   }
 
@@ -679,6 +698,7 @@ export class WebotApplication {
       }
       const pending = this.pendingSettings;
       this.pendingSettings = null;
+      this.settingsApplying = true;
       try {
         await this.applySettings(pending);
         this.logger.info("deferred settings applied after workers drained");
@@ -687,6 +707,8 @@ export class WebotApplication {
         this.logger.error("deferred settings apply failed", {
           error: error.message,
         });
+      } finally {
+        this.settingsApplying = false;
       }
     };
     this.settingsApplyTimer = setTimeout(applyWhenIdle, 0);
