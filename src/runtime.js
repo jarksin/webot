@@ -19,6 +19,40 @@ function hasAiReplyPrefix(text) {
   return /^\s*【AI(?:\s+\d+\/\d+)?】/i.test(String(text || ""));
 }
 
+function isEmptyAssistantPayload(text) {
+  const raw = String(text || "").trim();
+  if (!raw || raw.length > 16 * 1024) return false;
+  const fenced = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  try {
+    const value = JSON.parse(fenced?.[1] || raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+    const replyKeys = [
+      "reply_text",
+      "reply_draft",
+      "reply",
+      "text",
+    ];
+    const attachmentKeys = [
+      "attachments",
+      "evidence_artifacts",
+      "artifacts",
+    ];
+    const hasReplyEnvelope = [...replyKeys, ...attachmentKeys]
+      .some((key) => Object.hasOwn(value, key));
+    if (!hasReplyEnvelope) return false;
+    const reply = replyKeys
+      .map((key) => String(value[key] || "").trim())
+      .find(Boolean);
+    const attachments = attachmentKeys
+      .flatMap((key) => Array.isArray(value[key]) ? value[key] : []);
+    return !reply && attachments.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 function hasBotNamePrefix(text, botNames) {
   const value = String(text || "").trim();
   return [...(botNames || [])].some((name) => {
@@ -71,9 +105,13 @@ function stripTrigger(text, triggers, botNames) {
 }
 
 export function acceptedMessage(message, config) {
-  if (!message?.text?.trim() || !message.chatId || !message.senderId) {
+  if (!message?.chatId || !message?.senderId) {
     return { accepted: false, reason: "empty" };
   }
+  if (isEmptyAssistantPayload(message.text)) {
+    return { accepted: false, reason: "empty-assistant-payload" };
+  }
+  if (!message?.text?.trim()) return { accepted: false, reason: "empty" };
   const source = message.transport === "pad"
     ? sourceForMessage(config, message)
     : message.transport === "telegram"

@@ -6,6 +6,7 @@ import {
   runtimeOverrides,
 } from "./control-commands.js";
 import { assistantConfigForMessage } from "./assistant-routing.js";
+import { parseAssistantResult } from "./codex-provider.js";
 
 function acceptsOwnerIntermediateItems(message) {
   return Boolean(
@@ -38,6 +39,23 @@ function commandNeedsIdleWorker(command) {
 function completedDraftText(text) {
   const value = String(text || "").trim();
   return /^\[done\](?:\s|$)/i.test(value) ? value : `[done] ${value}`;
+}
+
+function normalizedProviderResult(value) {
+  const result = typeof value === "string"
+    ? { text: value }
+    : value && typeof value === "object"
+      ? value
+      : {};
+  const parsed = parseAssistantResult(result.text);
+  return {
+    ...result,
+    text: parsed.text,
+    artifacts: Array.isArray(result.artifacts)
+      ? result.artifacts
+      : parsed.artifacts,
+    noReply: result.noReply === true || parsed.noReply === true,
+  };
 }
 
 export function transientProviderFailure(error) {
@@ -513,9 +531,7 @@ export class CaseManager {
           await waitForRetry(delayMs, controller.signal);
         }
       }
-      const result = typeof providerResult === "string"
-        ? { text: providerResult }
-        : providerResult;
+      const result = normalizedProviderResult(providerResult);
       const reply = String(result?.text || "").trim();
       const owner = this.requesterAccess(trigger.message) === "owner";
       const artifacts = owner && Array.isArray(result?.artifacts)

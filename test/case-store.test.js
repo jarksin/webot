@@ -698,6 +698,68 @@ test("paginates case summaries and bounds default case detail history", async ()
   caseStore.close();
 });
 
+test("normalizes a raw empty reply envelope before the transport sees it", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-no-reply-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const sent = [];
+  const manager = new CaseManager({
+    config: {
+      assistant: { mode: "codex", codexModel: "gpt-test" },
+      caseManagement: {
+        autoRun: true,
+        autoSend: true,
+        workerConcurrency: 1,
+      },
+      pad: {
+        sources: [{
+          id: "small",
+          strictPolicy: true,
+          allowSelf: false,
+          selfChatPeers: new Set(["owner_wxid"]),
+          acceptSelfChatPeerMessages: true,
+          allowedChatIds: new Set(),
+          allowedSenderIds: new Set(),
+          privateNicknameAllowlist: new Set(),
+          triggerKeywords: new Set(["webot"]),
+          botNames: new Set(["Webot"]),
+        }],
+      },
+      policy: {
+        blockedSenderIds: new Set(),
+        allowSelf: false,
+        allowedChatIds: new Set(),
+        allowedSenderIds: new Set(),
+        groupTriggers: new Set(["webot"]),
+      },
+      identity: { botNames: new Set(["Webot"]) },
+    },
+    provider: {
+      async reply() {
+        return { text: '{"reply_text":"","attachments":[]}' };
+      },
+    },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: {
+      pad: {
+        async send(target, text) {
+          sent.push({ target, text });
+          return { ok: true, dryRun: false };
+        },
+      },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const received = await manager.receive(message("raw-silent-message"));
+  await waitFor(() => manager.status().active === 0);
+  const detail = caseStore.detail(received.caseId);
+  assert.equal(detail.status, "replied");
+  assert.equal(detail.drafts.length, 0);
+  assert.equal(sent.length, 0);
+  caseStore.close();
+});
+
 test("persists and sends owner attachments with the draft", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-artifact-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
