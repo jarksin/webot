@@ -1,0 +1,210 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" role="img" aria-labelledby="title desc">
+  <title id="title">Webot architecture</title>
+  <desc id="desc">Webot receives messages from WeChatPad, Telegram, and HTTP hooks, applies normalization and access policy, routes each conversation into an isolated persistent Case, runs an assistant worker, stores a draft, and sends the result back through the originating transport.</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#172033" flood-opacity=".08"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 z" fill="#526071"/>
+    </marker>
+    <style>
+      text { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
+      .eyebrow { font-size: 15px; font-weight: 700; letter-spacing: 1.8px; fill: #587084; }
+      .title { font-size: 44px; font-weight: 750; letter-spacing: 0; }
+      .subtitle { font-size: 19px; font-weight: 450; fill: #526071; }
+      .lane { font-size: 15px; font-weight: 750; letter-spacing: 1.2px; }
+      .card-title { font-size: 20px; font-weight: 700; }
+      .card-copy { font-size: 15px; font-weight: 450; fill: #586576; }
+      .small-title { font-size: 17px; font-weight: 700; }
+      .small-copy { font-size: 13px; font-weight: 450; fill: #607082; }
+      .pill { font-size: 12px; font-weight: 700; letter-spacing: .5px; }
+      .inverse { fill: #ffffff; }
+      .inverse-muted { fill: #dce3ec; }
+      .flow { stroke: #526071; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .flow-dashed { stroke: #748397; stroke-width: 2; stroke-dasharray: 7 7; fill: none; marker-end: url(#arrow); }
+      .divider { stroke: #d8dee7; stroke-width: 1; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1040" fill="#f7f9fb"/>
+  <rect x="0" y="0" width="1600" height="10" fill="#172033"/>
+
+  <text x="72" y="72" class="eyebrow">SELF-HOSTED PERSONAL ASSISTANT</text>
+  <text x="72" y="126" class="title">Webot Architecture</text>
+  <text x="72" y="160" class="subtitle">Isolated conversations, persistent Codex sessions, reviewed delivery, and owner-scoped control.</text>
+
+  <rect x="72" y="202" width="212" height="36" rx="6" fill="#e6f6f1"/>
+  <text x="92" y="226" class="lane" fill="#087a65">CHANNELS</text>
+  <rect x="318" y="202" width="260" height="36" rx="6" fill="#eaf1fb"/>
+  <text x="338" y="226" class="lane" fill="#2f65a7">INGRESS &amp; TRUST</text>
+  <rect x="612" y="202" width="330" height="36" rx="6" fill="#fff2df"/>
+  <text x="632" y="226" class="lane" fill="#a85d0a">CASE ORCHESTRATION</text>
+  <rect x="976" y="202" width="300" height="36" rx="6" fill="#f2eafa"/>
+  <text x="996" y="226" class="lane" fill="#7c479f">ASSISTANT WORKER</text>
+  <rect x="1310" y="202" width="218" height="36" rx="6" fill="#feecef"/>
+  <text x="1330" y="226" class="lane" fill="#a94155">DELIVERY</text>
+
+  <!-- Channels -->
+  <g filter="url(#shadow)">
+    <rect x="72" y="266" width="212" height="94" rx="8" fill="#ffffff" stroke="#b9ddd2"/>
+    <circle cx="108" cy="313" r="21" fill="#16a085"/>
+    <text x="108" y="319" text-anchor="middle" font-size="16" font-weight="800" class="inverse">W</text>
+    <text x="140" y="304" class="small-title">WeChatPad</text>
+    <text x="140" y="329" class="small-copy">HTTP + WebSocket</text>
+
+    <rect x="72" y="378" width="212" height="94" rx="8" fill="#ffffff" stroke="#b9ddd2"/>
+    <circle cx="108" cy="425" r="21" fill="#2581c4"/>
+    <text x="108" y="431" text-anchor="middle" font-size="16" font-weight="800" class="inverse">T</text>
+    <text x="140" y="416" class="small-title">Telegram</text>
+    <text x="140" y="441" class="small-copy">Telethon bridge</text>
+
+    <rect x="72" y="490" width="212" height="94" rx="8" fill="#ffffff" stroke="#b9ddd2"/>
+    <circle cx="108" cy="537" r="21" fill="#46546a"/>
+    <text x="108" y="543" text-anchor="middle" font-size="16" font-weight="800" class="inverse">H</text>
+    <text x="140" y="528" class="small-title">HTTP Hook</text>
+    <text x="140" y="553" class="small-copy">Signed callback</text>
+  </g>
+
+  <!-- Ingress and policy -->
+  <g filter="url(#shadow)">
+    <rect x="318" y="266" width="260" height="112" rx="8" fill="#ffffff" stroke="#c4d4e8"/>
+    <rect x="318" y="266" width="8" height="112" rx="4" fill="#4b82c3"/>
+    <text x="350" y="301" class="card-title">Connector adapters</text>
+    <text x="350" y="330" class="card-copy">Protocol clients and source-aware</text>
+    <text x="350" y="352" class="card-copy">transport boundaries</text>
+
+    <rect x="318" y="398" width="260" height="112" rx="8" fill="#ffffff" stroke="#c4d4e8"/>
+    <rect x="318" y="398" width="8" height="112" rx="4" fill="#4b82c3"/>
+    <text x="350" y="433" class="card-title">Normalize &amp; archive</text>
+    <text x="350" y="462" class="card-copy">Canonical events, deduplication,</text>
+    <text x="350" y="484" class="card-copy">message and identity capture</text>
+
+    <rect x="318" y="530" width="260" height="112" rx="8" fill="#ffffff" stroke="#c4d4e8"/>
+    <rect x="318" y="530" width="8" height="112" rx="4" fill="#4b82c3"/>
+    <text x="350" y="565" class="card-title">Access policy</text>
+    <text x="350" y="594" class="card-copy">Stable sender identity, allowlists,</text>
+    <text x="350" y="616" class="card-copy">triggers, owner/public scope</text>
+  </g>
+
+  <!-- Case orchestration -->
+  <g filter="url(#shadow)">
+    <rect x="612" y="266" width="330" height="112" rx="8" fill="#ffffff" stroke="#ead4ae"/>
+    <rect x="612" y="266" width="8" height="112" rx="4" fill="#d38b2c"/>
+    <text x="646" y="301" class="card-title">Case router</text>
+    <text x="646" y="330" class="card-copy">One stable Case per account-scoped chat</text>
+    <text x="646" y="352" class="card-copy">with independent namespace and state</text>
+
+    <rect x="612" y="398" width="330" height="112" rx="8" fill="#ffffff" stroke="#ead4ae"/>
+    <rect x="612" y="398" width="8" height="112" rx="4" fill="#d38b2c"/>
+    <text x="646" y="433" class="card-title">Persistent conversation</text>
+    <text x="646" y="462" class="card-copy">Bounded history, Codex continuation,</text>
+    <text x="646" y="484" class="card-copy">named owner sessions and model settings</text>
+
+    <rect x="612" y="530" width="330" height="112" rx="8" fill="#ffffff" stroke="#ead4ae"/>
+    <rect x="612" y="530" width="8" height="112" rx="4" fill="#d38b2c"/>
+    <text x="646" y="565" class="card-title">Worker queue &amp; steering</text>
+    <text x="646" y="594" class="card-copy">Serialized per Case; new messages steer</text>
+    <text x="646" y="616" class="card-copy">the active turn or schedule a follow-up</text>
+  </g>
+
+  <!-- Assistant -->
+  <g filter="url(#shadow)">
+    <rect x="976" y="266" width="300" height="148" rx="8" fill="#ffffff" stroke="#d8c4e7"/>
+    <rect x="976" y="266" width="8" height="148" rx="4" fill="#9860b6"/>
+    <rect x="1008" y="292" width="88" height="24" rx="5" fill="#f2eafa"/>
+    <text x="1052" y="309" text-anchor="middle" class="pill" fill="#7c479f">CODEX</text>
+    <text x="1008" y="347" class="card-title">Assistant provider</text>
+    <text x="1008" y="376" class="card-copy">Repository-aware tools, approved</text>
+    <text x="1008" y="398" class="card-copy">knowledge and workspace policy</text>
+
+    <rect x="976" y="438" width="300" height="204" rx="8" fill="#ffffff" stroke="#d8c4e7"/>
+    <rect x="976" y="438" width="8" height="204" rx="4" fill="#9860b6"/>
+    <text x="1008" y="475" class="card-title">Persisted result</text>
+    <text x="1008" y="504" class="card-copy">Draft text + owner-only attachments</text>
+    <line x1="1008" y1="527" x2="1244" y2="527" class="divider"/>
+    <text x="1008" y="558" class="small-title">Automatic send</text>
+    <text x="1008" y="581" class="small-copy">or review from the Case console</text>
+    <text x="1008" y="613" class="small-title">Progress &amp; usage</text>
+    <text x="1008" y="636" class="small-copy">status, tokens, cost and send outcome</text>
+  </g>
+
+  <!-- Delivery -->
+  <g filter="url(#shadow)">
+    <rect x="1310" y="266" width="218" height="148" rx="8" fill="#ffffff" stroke="#ebc3cb"/>
+    <rect x="1310" y="266" width="8" height="148" rx="4" fill="#c8586d"/>
+    <text x="1342" y="301" class="card-title">Origin transport</text>
+    <text x="1342" y="330" class="card-copy">Text, image, audio</text>
+    <text x="1342" y="352" class="card-copy">and file delivery</text>
+    <rect x="1342" y="374" width="138" height="24" rx="5" fill="#feecef"/>
+    <text x="1411" y="391" text-anchor="middle" class="pill" fill="#a94155">LIVE / DRY RUN</text>
+
+    <rect x="1310" y="438" width="218" height="204" rx="8" fill="#ffffff" stroke="#ebc3cb"/>
+    <text x="1342" y="476" class="small-title">Reply routing</text>
+    <text x="1342" y="501" class="small-copy">Uses the originating</text>
+    <text x="1342" y="521" class="small-copy">account and channel</text>
+    <line x1="1342" y1="546" x2="1496" y2="546" class="divider"/>
+    <text x="1342" y="577" class="small-title">Safety gates</text>
+    <text x="1342" y="602" class="small-copy">Outbound mode, write</text>
+    <text x="1342" y="622" class="small-copy">confirmation, send result</text>
+  </g>
+
+  <!-- Main flow arrows -->
+  <path d="M284 313 H300 V322 H318" class="flow"/>
+  <path d="M284 425 H300 V322 H318" class="flow"/>
+  <path d="M284 537 H300 V322 H318" class="flow"/>
+  <path d="M448 378 V398" class="flow"/>
+  <path d="M448 510 V530" class="flow"/>
+  <path d="M578 586 H596 V322 H612" class="flow"/>
+  <path d="M777 378 V398" class="flow"/>
+  <path d="M777 510 V530" class="flow"/>
+  <path d="M942 586 H958 V340 H976" class="flow"/>
+  <path d="M1126 414 V438" class="flow"/>
+  <path d="M1276 540 H1292 V340 H1310" class="flow"/>
+
+  <!-- Persistence layer -->
+  <text x="72" y="714" class="eyebrow">PERSISTENT STATE &amp; CONTROL PLANE</text>
+  <line x1="72" y1="730" x2="1528" y2="730" class="divider"/>
+
+  <g filter="url(#shadow)">
+    <rect x="72" y="762" width="330" height="150" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+    <circle cx="112" cy="803" r="19" fill="#172033"/>
+    <text x="112" y="809" text-anchor="middle" font-size="14" font-weight="800" class="inverse">DB</text>
+    <text x="145" y="810" class="small-title">SQLite Case store</text>
+    <text x="104" y="844" class="small-copy">Messages, identities, Cases, drafts,</text>
+    <text x="104" y="866" class="small-copy">worker sessions, progress and settings</text>
+    <rect x="104" y="880" width="120" height="22" rx="5" fill="#eef1f5"/>
+    <text x="164" y="896" text-anchor="middle" class="pill" fill="#46546a">webot.sqlite</text>
+
+    <rect x="426" y="762" width="330" height="150" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+    <circle cx="466" cy="803" r="19" fill="#d38b2c"/>
+    <text x="466" y="809" text-anchor="middle" font-size="14" font-weight="800" class="inverse">S</text>
+    <text x="499" y="810" class="small-title">Session history</text>
+    <text x="458" y="844" class="small-copy">Bounded assistant context and Codex</text>
+    <text x="458" y="866" class="small-copy">thread continuation, isolated by Case</text>
+
+    <rect x="780" y="762" width="330" height="150" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+    <circle cx="820" cy="803" r="19" fill="#9860b6"/>
+    <text x="820" y="809" text-anchor="middle" font-size="14" font-weight="800" class="inverse">K</text>
+    <text x="853" y="810" class="small-title">Policy &amp; knowledge</text>
+    <text x="812" y="844" class="small-copy">Private workspace policy plus approved</text>
+    <text x="812" y="866" class="small-copy">public and owner-only knowledge</text>
+
+    <rect x="1134" y="762" width="394" height="150" rx="8" fill="#ffffff" stroke="#cdd5df"/>
+    <circle cx="1174" cy="803" r="19" fill="#16a085"/>
+    <text x="1174" y="809" text-anchor="middle" font-size="14" font-weight="800" class="inverse">O</text>
+    <text x="1207" y="810" class="small-title">Operations</text>
+    <text x="1166" y="844" class="small-copy">Loopback admin console, connector health,</text>
+    <text x="1166" y="866" class="small-copy">guarded drain and external activation broker</text>
+  </g>
+
+  <!-- Data/control relationships -->
+  <path d="M448 642 V744 H237 V762" class="flow-dashed"/>
+  <path d="M777 642 V744 H591 V762" class="flow-dashed"/>
+  <path d="M1050 762 V690 H958 V365 H976" class="flow-dashed"/>
+  <path d="M1331 762 V690 H1292 V586 H1310" class="flow-dashed"/>
+
+  <rect x="72" y="956" width="1456" height="44" rx="8" fill="#172033"/>
+  <text x="96" y="984" font-size="14" font-weight="650" class="inverse">Security boundary:</text>
+  <text x="240" y="984" font-size="14" font-weight="450" class="inverse-muted">credentials, runtime data, message history and instance identity stay outside the public source tree.</text>
+</svg>

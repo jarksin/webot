@@ -1,5 +1,7 @@
 # Architecture
 
+![Webot architecture](assets/webot-architecture.svg)
+
 ## Message Flow
 
 ```text
