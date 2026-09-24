@@ -119,6 +119,7 @@ test("Pad transport mentions the triggering sender in group replies", async (con
     chatType: "group",
     chatId: "room@chatroom",
     senderId: "wxid_member",
+    senderName: "群昵称",
   }, "group reply");
   await transport.send({
     chatType: "group",
@@ -131,6 +132,38 @@ test("Pad transport mentions the triggering sender in group replies", async (con
   assert.equal(calls[0].body.at, "wxid_member");
   assert.equal(calls[1].body.content, "self reply");
   assert.equal(calls[1].body.at, "");
+});
+
+test("Pad transport mention aliases override transient group nicknames", async (context) => {
+  let call;
+  context.mock.method(globalThis, "fetch", async (url, options) => {
+    call = { url, body: JSON.parse(options.body) };
+    return Response.json({ Code: 0 });
+  });
+  const transport = new PadTransport(
+    {
+      apiUrl: "http://pad.local",
+      accessToken: "test-token",
+      requireWriteConfirmation: true,
+      selfId: "wxid_small",
+    },
+    "live",
+    console,
+    globalThis.fetch,
+    {
+      resolveMentionDisplayName: () => "大号",
+    },
+  );
+
+  await transport.send({
+    chatType: "group",
+    chatId: "room@chatroom",
+    senderId: "huwatermelon",
+    senderName: "大西瓜",
+  }, "group reply");
+
+  assert.equal(call.body.content, "@大号\u2005 group reply");
+  assert.equal(call.body.at, "huwatermelon");
 });
 
 test("Pad mention labels prefer safe sender names and never expose raw IDs", () => {

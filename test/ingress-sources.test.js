@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig } from "../src/config.js";
+import { configuredPadMentionDisplayName } from "../src/ingress-sources.js";
 
 test("loads source-scoped Pad policies and credentials", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "webot-sources-"));
@@ -23,6 +24,9 @@ test("loads source-scoped Pad policies and credentials", () => {
         self_wxid: "wxid_small",
         access_token_env: "SMALL_TOKEN",
         accept_self_chat_peer_messages: true,
+        mention_display_names: {
+          owner_wxid: "大号",
+        },
         ignore_allowlist: true,
         group_chat_ids: ["one@chatroom", "two@chatroom"],
         blocked_chat_ids: ["blocked@chatroom"],
@@ -44,6 +48,13 @@ test("loads source-scoped Pad policies and credentials", () => {
   assert.equal(config.pad.sources[0].acceptSelfChatPeerMessages, false);
   assert.equal(config.pad.sources[0].ignoreAllowlist, false);
   assert.equal(config.pad.sources[1].acceptSelfChatPeerMessages, true);
+  assert.equal(
+    configuredPadMentionDisplayName(config, {
+      sourceId: "small",
+      senderId: "owner_wxid",
+    }),
+    "大号",
+  );
   assert.equal(config.pad.sources[1].ignoreAllowlist, true);
   assert.deepEqual([...config.pad.sources[1].allowedChatIds], [
     "one@chatroom",
@@ -60,6 +71,33 @@ test("loads source-scoped Pad policies and credentials", () => {
   assert.deepEqual(
     [...config.pad.sources[1].privateNicknameAllowlist],
     ["家人"],
+  );
+});
+
+test("uses another configured Pad account name when no explicit mention alias exists", () => {
+  const config = loadConfig({}, {
+    pad: {
+      sources: [
+        {
+          id: "main",
+          displayName: "大号",
+          selfId: "owner_wxid",
+        },
+        {
+          id: "small",
+          displayName: "小号",
+          selfId: "wxid_small",
+        },
+      ],
+    },
+  });
+
+  assert.equal(
+    configuredPadMentionDisplayName(config, {
+      sourceId: "small",
+      senderId: "owner_wxid",
+    }),
+    "大号",
   );
 });
 

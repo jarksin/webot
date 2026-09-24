@@ -370,8 +370,8 @@ export class PadTransport {
     const source = this.source(message);
     const at = replyMention(message, source);
     const replyText = formatPadReplyText(text, message, source);
-    let displayName = cleanPadMentionDisplayName(message.senderName, at);
-    if (at && !displayName) {
+    let displayName = "";
+    if (at) {
       try {
         displayName = cleanPadMentionDisplayName(
           this.resolveMentionDisplayName(message),
@@ -384,6 +384,9 @@ export class PadTransport {
           error: error.message,
         });
       }
+    }
+    if (!displayName) {
+      displayName = cleanPadMentionDisplayName(message.senderName, at);
     }
     const content = at
       ? formatPadMentionText(replyText, displayName, at)

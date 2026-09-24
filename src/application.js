@@ -8,6 +8,7 @@ import {
   isDirectoryContactId,
 } from "./contact-directory.js";
 import { loadConfig } from "./config.js";
+import { configuredPadMentionDisplayName } from "./ingress-sources.js";
 import { KnowledgeBaseCloud } from "./kb-cloud.js";
 import { probeOptSource } from "./opt-status.js";
 import { PadSenderClassifier } from "./pad-sender-classifier.js";
@@ -192,7 +193,8 @@ export class WebotApplication {
         this.fetch,
         {
           resolveMentionDisplayName: (message) =>
-            this.caseStore.directoryDisplayName(
+            configuredPadMentionDisplayName(this.config, message)
+            || this.caseStore.directoryDisplayName(
               message.sourceId,
               message.senderId,
             ),
