@@ -59,6 +59,14 @@ test("parses structured replies and attachment aliases", () => {
     text: "普通回复",
     artifacts: [],
   });
+  assert.deepEqual(
+    parseAssistantResult('{"reply_text":"","attachments":[]}'),
+    {
+      text: "",
+      artifacts: [],
+      noReply: true,
+    },
+  );
 });
 
 test("builds new and resume commands with editable Codex settings", async () => {

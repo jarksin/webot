@@ -200,6 +200,77 @@ test("retries one transient provider failure without failing the case", async ()
   caseStore.close();
 });
 
+test("completes an explicit structured no-reply without sending protocol JSON", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-no-reply-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const sent = [];
+  const manager = new CaseManager({
+    config: {
+      assistant: { mode: "codex", codexModel: "gpt-test" },
+      caseManagement: {
+        autoRun: true,
+        autoSend: true,
+        workerConcurrency: 1,
+      },
+      pad: {
+        sources: [{
+          id: "small",
+          strictPolicy: true,
+          allowSelf: false,
+          selfChatPeers: new Set(["owner_wxid"]),
+          acceptSelfChatPeerMessages: true,
+          allowedChatIds: new Set(),
+          allowedSenderIds: new Set(),
+          privateNicknameAllowlist: new Set(),
+          triggerKeywords: new Set(["webot"]),
+          botNames: new Set(["Webot"]),
+        }],
+      },
+      policy: {
+        blockedSenderIds: new Set(),
+        allowSelf: false,
+        allowedChatIds: new Set(),
+        allowedSenderIds: new Set(),
+        groupTriggers: new Set(["webot"]),
+      },
+      identity: { botNames: new Set(["Webot"]) },
+    },
+    provider: {
+      async reply() {
+        return {
+          text: "",
+          artifacts: [],
+          noReply: true,
+          sessionId: "silent-session",
+          model: "gpt-test",
+        };
+      },
+    },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: {
+      pad: {
+        async send(target, text) {
+          sent.push({ target, text });
+          return { ok: true, dryRun: false };
+        },
+      },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  const received = await manager.receive(message("silent-message"));
+  await waitFor(() => manager.status().active === 0);
+  const detail = caseStore.detail(received.caseId);
+  assert.equal(detail.status, "replied");
+  assert.equal(detail.workerSession.status, "replied");
+  assert.equal(detail.workerSession.codex_session_id, "silent-session");
+  assert.equal(detail.drafts.length, 0);
+  assert.equal(sent.length, 0);
+  assert.ok(detail.progress.some((item) => /明确选择静默/.test(item.message)));
+  caseStore.close();
+});
+
 test("persists a WeChat case, worker session, draft, and send result", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-case-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));

@@ -517,11 +517,17 @@ export class CaseManager {
         ? { text: providerResult }
         : providerResult;
       const reply = String(result?.text || "").trim();
-      if (!reply) throw new Error("assistant returned no text");
       const owner = this.requesterAccess(trigger.message) === "owner";
       const artifacts = owner && Array.isArray(result?.artifacts)
         ? result.artifacts
         : [];
+      const explicitNoReply =
+        result?.noReply === true &&
+        !reply &&
+        artifacts.length === 0;
+      if (!reply && !explicitNoReply) {
+        throw new Error("assistant returned no text");
+      }
       if (!owner && result?.artifacts?.length) {
         this.caseStore.addProgress(
           caseId,
@@ -532,47 +538,61 @@ export class CaseManager {
       }
       if (controller.signal.aborted) throw new Error("worker stopped");
       this.caseStore.recordProviderResult(caseId, result);
-      const draftId = this.caseStore.addDraft(
-        caseId,
-        reply,
-        result.model ||
-          assistantConfigForMessage(
-            this.config.assistant,
-            currentMessage,
-          ).codexModel ||
-          this.config.assistant.llmModel ||
-          this.config.assistant.mode,
-        {
-          triggerMessageId: replyTargetMessageId,
-          inputCutoffMessageId: completionCutoffMessageId,
-          artifacts,
-        },
-      );
-      await this.sessionStore.append(caseId, "assistant", reply);
-      this.caseStore.addProgress(caseId, session.run_count, `draft #${draftId} 已生成`);
-      this.caseStore.finishRun(
-        caseId,
-        "draft_ready",
-        "",
-        completionCutoffMessageId,
-      );
-      if (this.caseSettings().autoSend !== false) {
-        try {
-          await this.sendDraft(caseId, draftId);
-        } catch (error) {
-          this.caseStore.markDraftError(caseId, draftId, error.message);
-          this.caseStore.finishRun(
-            caseId,
-            "draft_ready",
-            error.message,
-            completionCutoffMessageId,
-          );
-          this.caseStore.addProgress(
-            caseId,
-            session.run_count,
-            `draft #${draftId} 自动发送失败，已保留待重试：${error.message}`,
-            "warn",
-          );
+      if (explicitNoReply) {
+        this.caseStore.addProgress(
+          caseId,
+          session.run_count,
+          "assistant 明确选择静默，本轮不生成或发送回复",
+        );
+        this.caseStore.finishRun(
+          caseId,
+          "replied",
+          "",
+          completionCutoffMessageId,
+        );
+      } else {
+        const draftId = this.caseStore.addDraft(
+          caseId,
+          reply,
+          result.model ||
+            assistantConfigForMessage(
+              this.config.assistant,
+              currentMessage,
+            ).codexModel ||
+            this.config.assistant.llmModel ||
+            this.config.assistant.mode,
+          {
+            triggerMessageId: replyTargetMessageId,
+            inputCutoffMessageId: completionCutoffMessageId,
+            artifacts,
+          },
+        );
+        await this.sessionStore.append(caseId, "assistant", reply);
+        this.caseStore.addProgress(caseId, session.run_count, `draft #${draftId} 已生成`);
+        this.caseStore.finishRun(
+          caseId,
+          "draft_ready",
+          "",
+          completionCutoffMessageId,
+        );
+        if (this.caseSettings().autoSend !== false) {
+          try {
+            await this.sendDraft(caseId, draftId);
+          } catch (error) {
+            this.caseStore.markDraftError(caseId, draftId, error.message);
+            this.caseStore.finishRun(
+              caseId,
+              "draft_ready",
+              error.message,
+              completionCutoffMessageId,
+            );
+            this.caseStore.addProgress(
+              caseId,
+              session.run_count,
+              `draft #${draftId} 自动发送失败，已保留待重试：${error.message}`,
+              "warn",
+            );
+          }
         }
       }
       if (owner && this.afterOwnerRun) {
