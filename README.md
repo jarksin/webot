@@ -16,6 +16,18 @@ It provides:
 - A local knowledge base with public and owner-only audiences.
 - A loopback-only administration console.
 
+## Architecture
+
+![Webot architecture](docs/assets/webot-architecture.svg)
+
+Messages from each configured channel are normalized, archived, checked against
+stable identity and access policy, then routed into an isolated persistent
+Case. A worker produces a stored draft that can be reviewed or sent
+automatically through the originating account and transport.
+
+See [docs/architecture.md](docs/architecture.md) for the detailed message,
+storage, worker, and runtime-control flow.
+
 ## Run
 
 Webot requires Node.js 22 or newer.
@@ -77,11 +89,6 @@ Saved Messages can be trusted as the owner channel when
 `trustSelfAsOwner` is explicitly enabled. Other private chats and groups are
 rejected unless their stable Telegram IDs are placed in the source allowlists.
 See [docs/telegram.md](docs/telegram.md).
-
-## Architecture
-
-See [docs/architecture.md](docs/architecture.md) for the message, case, worker,
-draft, and outbound flow.
 
 ## Release
 
