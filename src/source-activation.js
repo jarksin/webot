@@ -17,6 +17,7 @@ export async function sourceCandidate({
   repoDir = env.WEBOT_REPO_DIR || process.cwd(),
   run = execFileAsync,
   readFile = fs.readFile,
+  includeCurrent = false,
 } = {}) {
   if (String(env.WEBOT_RUNTIME_MODE || "") !== "source") return null;
   const currentRevision = String(env.WEBOT_SOURCE_REVISION || "").trim();
@@ -26,7 +27,7 @@ export async function sourceCandidate({
     { encoding: "utf8" },
   );
   const revision = String(stdout || "").trim().toLowerCase();
-  if (!/^[a-f0-9]{40,64}$/.test(revision) || revision === currentRevision) {
+  if (!/^[a-f0-9]{40,64}$/.test(revision) || (!includeCurrent && revision === currentRevision)) {
     return null;
   }
   const packageJson = JSON.parse(
@@ -56,23 +57,31 @@ export function createSourceActivator({
   ).replace(/\/+$/, "");
   const pending = new Map();
   async function submit(next, { caseId, sourceId }) {
-    const response = await fetchImpl(
-      `${brokerUrl}/api/webot_source_activation`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          case_id: String(caseId || ""),
-          requester_access: "owner",
-          service: "com.huwatermelon.webot",
-          action: "restart",
-          expected_version: next.version,
-          expected_source_revision: next.revision,
-          expected_source_id: String(sourceId || ""),
-        }),
-      },
-    );
-    const body = await response.json().catch(() => ({}));
+    let response;
+    let body;
+    try {
+      response = await fetchImpl(
+        `${brokerUrl}/api/webot_source_activation`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            case_id: String(caseId || ""),
+            requester_access: "owner",
+            service: "com.huwatermelon.webot",
+            action: "restart",
+            expected_version: next.version,
+            expected_source_revision: next.revision,
+            expected_source_id: String(sourceId || ""),
+          }),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      body = await response.json();
+    } catch (error) {
+      error.activationUncertain = true;
+      throw error;
+    }
     if (!response.ok || body.ok !== true) {
       throw new Error(
         `Webot activation broker rejected the candidate: ${
@@ -88,6 +97,17 @@ export function createSourceActivator({
     };
   }
   return {
+    async restartFromConsole({ sourceId }) {
+      if (!ready()) {
+        throw new Error("连接或配置尚未就绪，暂不能提交受控重载；请查看账号连接状态。");
+      }
+      const next = await candidate({ env, includeCurrent: true });
+      if (!next) throw new Error("当前运行模式不支持源码重载");
+      return submit(next, {
+        caseId: `console-restart-${now()}`,
+        sourceId,
+      });
+    },
     async activate(context) {
       const { caseId, message } = context;
       if (activationSuppressed(message?.text)) {

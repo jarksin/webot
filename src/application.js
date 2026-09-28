@@ -91,7 +91,6 @@ export class WebotApplication {
     this.transports = null;
     this.padMediaRequestTails = new Map();
     this.padMediaLastRequestAt = new Map();
-    this.padTimer = null;
     this.caseStore = null;
     this.caseManager = null;
     this.workspacePolicy = null;
@@ -100,6 +99,8 @@ export class WebotApplication {
     this.settingsApplying = false;
     this.settingsApplyTimer = null;
     this.startedAt = Date.now();
+    this.restartResult = null;
+    this.restartOperation = null;
     this.sourceActivator = createSourceActivator({
       env,
       ready: () => !this.pendingSettings && !this.settingsApplying &&
@@ -120,6 +121,37 @@ export class WebotApplication {
       },
     });
     this.fetch = fetchImpl;
+  }
+
+  async requestRestart() {
+    if (this.restartOperation) return this.restartOperation;
+    if (this.restartResult) return this.restartResult;
+    if (this.env.WEBOT_RUNTIME_MODE !== "source") {
+      throw new Error("当前运行模式不支持源码重载");
+    }
+    const source = this.config.pad.sources.find((item) => item.enabled);
+    if (!source) throw new Error("受控重载需要已配置的 Pad 账号");
+    if (this.pendingSettings || this.settingsApplying || this.status().ok !== true) {
+      throw new Error("连接或配置尚未就绪，暂不能提交受控重载；请查看账号连接状态。");
+    }
+    this.restartOperation = (async () => {
+      try {
+        const result = await this.sourceActivator.restartFromConsole({ sourceId: source.id });
+        this.restartResult = {
+          ...result,
+          message: "重启已受理，等待当前任务结束。",
+        };
+        return this.restartResult;
+      } catch (error) {
+        if (!error.activationUncertain) throw error;
+        // A lost acknowledgement must not trigger a duplicate restart.
+        this.restartResult = { requested: false, message: "重启结果未确认，请检查外部重载服务，勿重复提交。" };
+        return this.restartResult;
+      } finally {
+        this.restartOperation = null;
+      }
+    })();
+    return this.restartOperation;
   }
 
   async initialize() {
@@ -426,40 +458,20 @@ export class WebotApplication {
     return { ...message, attachments, ...(reference ? { reference } : {}) };
   }
 
-  async probePads() {
-    const sources = this.config.channels.has("pad")
-      ? this.config.pad.sources
-      : [];
-    const statuses = await Promise.all(sources.map(probeOptSource));
-    for (const status of statuses) {
-      this.padStatuses.set(status.id, status);
-    }
-    return statuses;
-  }
-
   async startConnectors() {
     this.connectorsStarted = true;
     this.knowledgeBase.start();
     for (const client of this.padClients) client.start();
     for (const client of this.telegramClients) client.start();
-    await this.probePads();
     const recovered = this.caseManager.resumePending();
     if (recovered.queued) {
       this.logger.info("pending cases restored", recovered);
     }
-    clearInterval(this.padTimer);
-    this.padTimer = setInterval(
-      () => void this.probePads(),
-      30_000,
-    );
-    this.padTimer.unref?.();
   }
 
   async stopConnectors() {
     clearTimeout(this.settingsApplyTimer);
     this.settingsApplyTimer = null;
-    clearInterval(this.padTimer);
-    this.padTimer = null;
     this.knowledgeBase?.stop();
     for (const client of this.padClients) client.stop();
     for (const client of this.telegramClients) client.stop();
@@ -782,9 +794,7 @@ export class WebotApplication {
     const padSources = this.config.pad.sources.map((source) => {
       const websocket = websocketStatuses.get(source.id) || null;
       const health = this.padStatuses.get(source.id) || null;
-      const ready = !source.enabled || Boolean(
-        websocket?.connected && health?.ready,
-      );
+      const ready = !source.enabled || Boolean(websocket?.connected);
       return {
         id: source.id,
         displayName: source.displayName,
@@ -856,6 +866,12 @@ export class WebotApplication {
       runtime: {
         mode: runtimeMode,
         sourceRevision: process.env.WEBOT_SOURCE_REVISION || "",
+        startedAt: this.startedAt,
+      },
+      restart: {
+        pending: Boolean(this.restartOperation || this.restartResult),
+        supported: this.env.WEBOT_RUNTIME_MODE === "source" &&
+          this.config.pad.sources.some((source) => source.enabled),
       },
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       channels: [...this.config.channels],

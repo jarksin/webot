@@ -57,6 +57,20 @@ active. It records a timeout or broker failure and does not retry an uncertain
 submission. The broker still verifies actual health and the exact revision;
 an accepted request is not proof that the new runtime is active.
 
+The local console has a power-icon **Restart** button next to Refresh. It
+requires confirmation and an origin-bound, per-process console token. The
+Webot parent submits the committed source revision to the external broker;
+workers never invoke process controls. The broker waits for active tasks to
+finish. The page only reports completion after it observes a new runtime,
+including when the source revision is unchanged. Ambiguous submissions are not
+automatically retried. This control is available in source mode with a configured
+Pad account; it does not replace the external installation procedure needed to
+load the button into an older running version.
+
+Pad readiness reflects Webot's own WebSocket subscription, including its
+existing heartbeat check. Other accounts' aggregate status and manual API
+diagnostics do not gate readiness. Startup does not wait for an API probe.
+
 Runtime settings, messages, sessions, credentials, and knowledge are stored
 outside the source tree in the local Webot data directory. Configure gateway
 accounts, assistant providers, reply policy, and knowledge from the console.

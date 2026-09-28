@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Play,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Save,
@@ -33,6 +34,7 @@ const iconSet = {
   MessageSquare,
   Play,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Save,
@@ -74,6 +76,8 @@ const caseResizerWidth = 8;
 const pageRuntimeRevision =
   document.querySelector('meta[name="webot-runtime-revision"]')?.content || "";
 let runtimeUpdateNoticeRevision = "";
+let restartStartedAt = null;
+let restartExpectedRevision = "";
 const caseHistoryExpanded = new Map();
 const caseViewStates = new Map();
 const caseSessionSelections = new Map();
@@ -645,7 +649,7 @@ function accountEditor(source) {
   })();
   return `
     <div class="form-section">
-      <div class="section-head"><div><h2>账号信息</h2><p>${current?.health?.lastError ? escapeHtml(current.health.lastError) : current?.health?.ready ? "连接正常" : "等待检测"}</p></div>
+      <div class="section-head"><div><h2>账号信息</h2><p>${current?.websocket?.connected ? "WS 连接正常" : "WS 未连接"}</p></div>
         <div class="inline-actions"><button class="button secondary" data-action="test-source"><i data-lucide="activity"></i><span>检测连接</span></button><button class="button danger icon-only" data-action="delete-source" title="删除账号"><i data-lucide="trash-2"></i></button></div>
       </div>
       <div class="form-grid">
@@ -991,6 +995,12 @@ function renderRuntimeIdentity() {
   build.title = revision
     ? `v${status.version}\n${revision}`
     : `v${status.version || "unknown"}`;
+  const restartButton = document.querySelector("#restart-button");
+  if (restartButton) {
+    restartButton.disabled = status.restart?.supported !== true ||
+      status.restart?.pending === true ||
+      restartStartedAt !== null;
+  }
 }
 
 function renderHeaderControls() {
@@ -1628,7 +1638,19 @@ async function reloadForRuntimeRevisionChange() {
   const nextStatus = await api("/api/admin/status");
   const revision = String(nextStatus.runtime?.sourceRevision || "");
   status = nextStatus;
+  if (restartStartedAt !== null && nextStatus.ok === true &&
+      nextStatus.runtime?.startedAt &&
+      nextStatus.runtime.startedAt !== restartStartedAt &&
+      (!restartExpectedRevision || revision === restartExpectedRevision)) {
+    restartStartedAt = null;
+    if (!dirty && !knowledgeDirty && !agentDirty) {
+      window.location.reload();
+      return;
+    }
+    showNotice("Webot 已重载，请保存当前编辑后刷新页面");
+  }
   renderRuntimeIdentity();
+  if (restartStartedAt !== null) return;
   if (!pageRuntimeRevision || !revision || revision === pageRuntimeRevision) return;
   if (dirty || knowledgeDirty || agentDirty) {
     if (runtimeUpdateNoticeRevision !== revision) {
@@ -1683,6 +1705,33 @@ document.querySelector("#refresh-button").addEventListener("click", () => {
     return;
   }
   load().catch((error) => showNotice(error.message, true));
+});
+
+document.querySelector("#restart-button").addEventListener("click", async () => {
+  readCurrentForm();
+  if (dirty || knowledgeDirty || agentDirty) {
+    showNotice("请先保存当前编辑，再重载 Webot", true);
+    return;
+  }
+  if (!window.confirm("等待正在执行的任务结束后重载 Webot？账号、配置和聊天记录会保留。")) return;
+  const button = document.querySelector("#restart-button");
+  button.disabled = true;
+  try {
+    const body = await api("/api/admin/service/restart", {
+      method: "POST",
+      headers: {
+        "X-Webot-Restart-Token": document.querySelector('meta[name="webot-restart-token"]').content,
+      },
+      body: JSON.stringify({ confirm: true }),
+    });
+    restartStartedAt = status.runtime.startedAt;
+    restartExpectedRevision = body.restart.revision || "";
+    status.restart.pending = true;
+    showNotice(body.restart.message, !body.restart.requested);
+    renderRuntimeIdentity();
+  } catch (error) {
+    showNotice(`未确认重载结果：${error.message}。请刷新状态后检查，勿重复提交。`, true);
+  }
 });
 
 load().catch((error) => {

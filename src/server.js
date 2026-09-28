@@ -1,4 +1,5 @@
 import http from "node:http";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { normalizeHookEvent } from "./normalize.js";
 import { validSignature } from "./security.js";
 import {
@@ -38,7 +39,7 @@ function localRequest(request) {
   );
 }
 
-function adminHtml(application) {
+function adminHtml(application, restartToken) {
   let revision = "";
   try {
     revision = String(application?.status()?.runtime?.sourceRevision || "");
@@ -50,7 +51,8 @@ function adminHtml(application) {
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-  return ADMIN_HTML.replace("__WEBOT_RUNTIME_REVISION__", escaped);
+  return ADMIN_HTML.replace("__WEBOT_RUNTIME_REVISION__", escaped)
+    .replace("__WEBOT_RESTART_TOKEN__", restartToken);
 }
 
 export function createServer({
@@ -62,6 +64,7 @@ export function createServer({
   logger = console,
 }) {
   const startedAt = Date.now();
+  const restartToken = randomBytes(32).toString("hex");
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url, "http://127.0.0.1");
@@ -86,7 +89,7 @@ export function createServer({
         respond(
           response,
           200,
-          adminHtml(application),
+          adminHtml(application, restartToken),
           "text/html; charset=utf-8",
         );
         return;
@@ -112,6 +115,28 @@ export function createServer({
         }
         if (!localRequest(request)) {
           respond(response, 403, { ok: false, error: "local access only" });
+          return;
+        }
+        if (request.method === "POST" && url.pathname === "/api/admin/service/restart") {
+          const token = Buffer.from(String(request.headers["x-webot-restart-token"] || ""));
+          const expected = Buffer.from(restartToken);
+          let sameOrigin = false;
+          try {
+            const origin = new URL(String(request.headers.origin || ""));
+            sameOrigin = ["127.0.0.1", "localhost", "[::1]"].includes(origin.hostname) &&
+              origin.protocol === "http:" && origin.host === request.headers.host;
+          } catch {}
+          if (!sameOrigin || token.length !== expected.length || !timingSafeEqual(token, expected)) {
+            respond(response, 403, { ok: false, error: "请从本机 Webot 控制台提交重载" });
+            return;
+          }
+          const body = JSON.parse((await readBody(request)).toString("utf8"));
+          if (body.confirm !== true) {
+            respond(response, 400, { ok: false, error: "请确认重载" });
+            return;
+          }
+          const restart = await application.requestRestart();
+          respond(response, 202, { ok: true, restart });
           return;
         }
         if (
