@@ -349,7 +349,7 @@ test("Pad transport caches a complete inbound image from its structured context"
     section: { start_pos: 0, data_len: 65536 },
   });
   assert.equal(result.mime, "image/png");
-  assert.equal(result.filename, "image_1.png");
+  assert.match(result.filename, /^[a-f0-9]{64}\.png$/);
   assert.deepEqual(await fs.readFile(result.localPath), png);
 });
 

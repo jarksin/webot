@@ -111,7 +111,7 @@ function inboundImageType(data) {
   ) {
     return { extension: ".webp", mime: "image/webp" };
   }
-  return { extension: ".img", mime: "application/octet-stream" };
+  throw new Error("Pad image download is not a supported image");
 }
 
 function safeFileSegment(value, fallback) {
@@ -316,9 +316,30 @@ export class PadTransport {
     const endpoint = String(context?.endpoint || "");
     if (
       attachment?.kind !== "image" ||
-      !endpoint.startsWith("/api/v1/media/download-img-binary")
+      endpoint !== "/api/v1/media/download-img-binary"
     ) {
       throw new Error("attachment does not expose the complete image endpoint");
+    }
+    const directory = path.join(
+      path.resolve(dataDir),
+      "inbound-media",
+      safeFileSegment(source.id, "default"),
+    );
+    const base = crypto.createHash("sha256").update(JSON.stringify([
+      source.id, message.chatId, message.messageId, context,
+    ])).digest("hex");
+    for (const extension of [".jpg", ".png", ".gif", ".webp"]) {
+      const filePath = path.join(directory, `${base}${extension}`);
+      try {
+        const info = fs.lstatSync(filePath);
+        if (info.isFile() && info.size > 0 && info.size <= MAX_INBOUND_IMAGE_BYTES) {
+          const type = inboundImageType(fs.readFileSync(filePath));
+          return {
+            localPath: filePath, filename: `${base}${type.extension}`,
+            mime: type.mime, size: info.size,
+          };
+        }
+      } catch {}
     }
     const response = await this.fetch(padEndpointURL(source, endpoint), {
       method: "POST",
@@ -331,12 +352,7 @@ export class PadTransport {
       signal: AbortSignal.timeout(180_000),
     });
     if (!response.ok) {
-      const detail = (await response.text()).trim().slice(0, 300);
-      throw new Error(
-        `Pad image download failed (${response.status})${
-          detail ? `: ${detail}` : ""
-        }`,
-      );
+      throw new Error(`Pad image download failed (${response.status})`);
     }
     const declared = Number(response.headers.get("content-length") || 0);
     if (declared > MAX_INBOUND_IMAGE_BYTES) {
@@ -347,20 +363,14 @@ export class PadTransport {
       throw new Error("Pad image download returned an invalid size");
     }
     const type = inboundImageType(data);
-    const directory = path.join(
-      path.resolve(dataDir),
-      "inbound-media",
-      safeFileSegment(source.id, "default"),
-    );
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const base = safeFileSegment(message.messageId, crypto.randomUUID());
     const filePath = path.join(directory, `${base}${type.extension}`);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const temporary = `${filePath}.${process.pid}.tmp`;
     fs.writeFileSync(temporary, data, { mode: 0o600 });
     fs.renameSync(temporary, filePath);
     return {
       localPath: filePath,
-      filename: path.basename(filePath),
+      filename: `${base}${type.extension}`,
       mime: type.mime,
       size: data.length,
     };

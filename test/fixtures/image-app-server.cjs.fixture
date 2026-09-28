@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+const readline = require("node:readline");
+const lines = readline.createInterface({ input: process.stdin });
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
+lines.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  let result = {};
+  if (request.method === "thread/start" || request.method === "thread/resume") {
+    result = { thread: { id: "image-test-thread" } };
+  }
+  if (request.method === "turn/start") {
+    const input = request.params.input;
+    if (input[0]?.type !== "text" || input[1]?.type !== "localImage" ||
+        input[1]?.path !== "/test/image.png") {
+      send({ id: request.id, error: { message: "native image missing" } });
+      return;
+    }
+    result = { turn: { id: "image-test-turn" } };
+    setTimeout(() => send({
+      method: "turn/completed",
+      params: {
+        threadId: "image-test-thread",
+        turn: {
+          id: "image-test-turn", status: "completed",
+          items: [{ type: "agentMessage", text: "native image received" }],
+        },
+      },
+    }), 20);
+  }
+  send({ id: request.id, result });
+});

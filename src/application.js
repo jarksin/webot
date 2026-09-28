@@ -1,4 +1,5 @@
 import path from "node:path";
+import { markHydratedImage, MAX_MODEL_IMAGES } from "./inbound-images.js";
 import { CaseManager } from "./case-manager.js";
 import { CaseStore } from "./case-store.js";
 import {
@@ -220,6 +221,7 @@ export class WebotApplication {
       caseStore: this.caseStore,
       transports,
       requesterAccess: accessForMessage,
+      hydratePadMedia: (message) => this.hydratePadMedia(message),
       afterOwnerRun: (context) => this.sourceActivator.activate(context),
       logger: this.logger,
     });
@@ -305,11 +307,6 @@ export class WebotApplication {
         this.caseStore.markSyncedMessageResult(message, result);
         return result;
       }
-      if (
-        requesterAccess(message, this.config.policy.ownerSenderIds) === "owner"
-      ) {
-        message = await this.hydratePadMedia(message);
-      }
     }
     try {
       const result = await this.caseManager.receive(message);
@@ -334,7 +331,7 @@ export class WebotApplication {
       message.sourceId,
       referenceId,
     );
-    if (!stored) return message;
+    if (!stored || stored.chat_id !== message.chatId) return message;
     const metadata = stored.metadata || {};
     return {
       ...message,
@@ -383,14 +380,17 @@ export class WebotApplication {
     const attachments = Array.isArray(message.attachments)
       ? [...message.attachments]
       : [];
+    let imageCount = 0;
     for (let index = 0; index < attachments.length; index += 1) {
       const attachment = attachments[index];
       if (
         attachment?.kind !== "image" ||
-        !attachment?.downloadContext?.endpoint
+        !attachment?.downloadContext?.endpoint ||
+        imageCount >= MAX_MODEL_IMAGES
       ) {
         continue;
       }
+      imageCount += 1;
       try {
         const cached = await this.serializePadMediaRequest(
           message.sourceId,
@@ -400,11 +400,11 @@ export class WebotApplication {
             this.config.dataDir,
           ),
         );
-        attachments[index] = { ...attachment, ...cached };
+        attachments[index] = markHydratedImage(attachment, cached);
       } catch (error) {
         attachments[index] = {
           ...attachment,
-          error: String(error.message || error),
+          error: "image_download_failed",
         };
         this.logger.warn("pad inbound image cache failed", {
           sourceId: message.sourceId,

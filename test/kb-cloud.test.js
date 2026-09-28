@@ -11,6 +11,25 @@ const productMetadata = (version = "0.0.18") => async () => ({
   json: async () => ({ version }),
 });
 
+test("specific API knowledge outranks general deployment mentions without leaking owner notes", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-ranking-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const header = "---\napproved: true\naudience: public\n---\n";
+  await fs.writeFile(path.join(directory, "a-install.md"),
+    header + "# Installation\nCloud login. API runs on localhost.");
+  await fs.writeFile(path.join(directory, "b-api.md"),
+    header + "# Cloud API\nCall the hosted API with an account code.");
+  await fs.writeFile(path.join(directory, "private.md"),
+    "---\napproved: true\naudience: owner\n---\n# Cloud API\nPrivate secret.");
+  const kb = new KnowledgeBaseCloud({
+    enabled: true, localDir: directory, maxNotes: 1,
+    maxCharsPerNote: 4000, requireApproved: true,
+  });
+  await kb.refreshLocalState();
+  const result = await kb.search("cloud api", { access: "public" });
+  assert.deepEqual(result.map((note) => note.path), ["b-api.md"]);
+});
+
 test("indexes approved markdown and returns bounded relevant notes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-"));
   await fs.writeFile(

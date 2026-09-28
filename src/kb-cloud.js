@@ -383,7 +383,9 @@ export class KnowledgeBaseCloud {
       const content = this.renderKnowledge(source);
       const haystack = `${path.basename(file)}\n${content}`.toLowerCase();
       const score = queryTerms.reduce(
-        (total, term) => total + (haystack.includes(term) ? 1 : 0),
+        (total, term) => total +
+          (haystack.includes(term) ? 1 : 0) +
+          (title(content, file).toLowerCase().includes(term) ? 2 : 0),
         0,
       );
       if (!score) continue;

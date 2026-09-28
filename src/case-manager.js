@@ -1,4 +1,5 @@
 import path from "node:path";
+import { markHydratedImage } from "./inbound-images.js";
 import { acceptedMessage } from "./runtime.js";
 import {
   applyControlCommand,
@@ -92,6 +93,7 @@ export class CaseManager {
     caseStore,
     transports,
     requesterAccess = () => "public",
+    hydratePadMedia = async (message) => message,
     afterOwnerRun = null,
     logger = console,
   }) {
@@ -101,6 +103,7 @@ export class CaseManager {
     this.caseStore = caseStore;
     this.transports = transports;
     this.requesterAccess = requesterAccess;
+    this.hydratePadMedia = hydratePadMedia;
     this.afterOwnerRun =
       typeof afterOwnerRun === "function" ? afterOwnerRun : null;
     this.logger = logger;
@@ -142,6 +145,8 @@ export class CaseManager {
   }
 
   async hydrateTelegramMedia(message) {
+    if (message?.transport === "pad") return this.hydratePadMedia(message);
+    if (message?.transport !== "telegram") return message;
     const attachments = Array.isArray(message?.attachments)
       ? [...message.attachments]
       : [];
@@ -161,7 +166,7 @@ export class CaseManager {
           attachment,
           this.config.dataDir,
         );
-        attachments[index] = { ...attachment, ...cached };
+        attachments[index] = markHydratedImage(attachment, cached);
       } catch (error) {
         attachments[index] = {
           ...attachment,
@@ -189,12 +194,14 @@ export class CaseManager {
   }
 
   async hydrateTelegramMediaContext(entries) {
-    return Promise.all(
-      (entries || []).map(async (entry) => ({
+    const result = [];
+    for (const entry of entries || []) {
+      result.push({
         ...entry,
         message: await this.hydrateTelegramMedia(entry.message || {}),
-      })),
-    );
+      });
+    }
+    return result;
   }
 
   async receive(message) {
@@ -285,7 +292,10 @@ export class CaseManager {
       let steered = false;
       if (
         activeRun &&
+        !this.rerun.has(ingested.caseId) &&
         !clean.deferToNextRun &&
+        !clean.attachments?.length &&
+        !clean.reference &&
         typeof this.provider.steer === "function"
       ) {
         const result = await this.provider.steer({
@@ -468,16 +478,17 @@ export class CaseManager {
           excludeMessageIds: pending.map((item) => item.message_id),
         }),
       );
-      const pendingAttachments = pending.flatMap((item) =>
+      const hydratedPending = await this.hydrateTelegramMediaContext(pending);
+      const pendingAttachments = hydratedPending.flatMap((item) =>
         Array.isArray(item.message?.attachments) ? item.message.attachments : []
       );
-      const currentMessage = await this.hydrateTelegramMedia({
-        ...trigger.message,
+      const currentMessage = {
+        ...hydratedPending.at(-1).message,
         text: currentText || trigger.message.text,
         attachments: pendingAttachments.length
           ? pendingAttachments
           : trigger.message.attachments,
-      });
+      };
       const conversationContext = this.caseStore.groupContextBefore(
         trigger.message,
         {

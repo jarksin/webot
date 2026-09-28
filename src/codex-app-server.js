@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { codexImageInput } from "./inbound-images.js";
 import {
   codexRuntimeStatus,
   parseAssistantResult,
@@ -248,7 +249,7 @@ export async function runCodexAppServer(config, request) {
     if (!threadId) throw new Error("Codex app-server returned no thread id");
     const started = await client.request("turn/start", {
       threadId,
-      input: [{ type: "text", text: request.prompt }],
+      input: codexImageInput(request.prompt, request.images),
       model: runtime.effective.model || null,
       effort: runtime.effective.reasoningEffort || null,
       approvalPolicy: "never",
