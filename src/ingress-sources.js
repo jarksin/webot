@@ -10,6 +10,18 @@ function stringList(value) {
   ];
 }
 
+function stringMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, displayName]) => [
+        String(key || "").trim().toLowerCase(),
+        String(displayName || "").trim(),
+      ])
+      .filter(([key, displayName]) => key && displayName),
+  );
+}
+
 function boolean(value, fallback = false) {
   if (value == null || value === "") return fallback;
   return /^(1|true|yes|on)$/i.test(String(value));
@@ -70,6 +82,9 @@ export function normalizeSource(value, env, defaults) {
     selfChatPeers: new Set(
       stringList(value.self_chat_peers ?? value.selfChatPeers),
     ),
+    mentionDisplayNames: stringMap(
+      value.mention_display_names ?? value.mentionDisplayNames,
+    ),
     acceptSelfChatPeerMessages: boolean(
       value.accept_self_chat_peer_messages ??
         value.acceptSelfChatPeerMessages,
@@ -126,6 +141,7 @@ export function loadPadSources(env, defaults, configuredSources) {
         credentialSource: defaults.accessToken ? "legacy_default" : "",
         allowSelf: defaults.allowSelf,
         selfChatPeers: new Set(),
+        mentionDisplayNames: {},
         acceptSelfChatPeerMessages: false,
         ignoreAllowlist: false,
         allowedChatIds: defaults.allowedChatIds,
@@ -176,4 +192,21 @@ export function sourceForMessage(config, message) {
     sources[0] ||
     config.pad
   );
+}
+
+export function configuredPadMentionDisplayName(config, message = {}) {
+  const target = String(message.senderId || "").trim().toLowerCase();
+  if (!target) return "";
+  const sources = config?.pad?.sources || config?.sources || [];
+  const source = sourceForMessage(
+    config?.pad ? config : { pad: config },
+    message,
+  );
+  const explicit = String(source?.mentionDisplayNames?.[target] || "").trim();
+  if (explicit) return explicit;
+  const account = sources.find(
+    (candidate) =>
+      String(candidate.selfId || "").trim().toLowerCase() === target,
+  );
+  return String(account?.displayName || "").trim();
 }

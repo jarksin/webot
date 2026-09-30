@@ -16,6 +16,19 @@ const css = fs.readFileSync(
   "utf8",
 );
 
+test("Codex config file setting round-trips through the existing home setting", () => {
+  const source = javascript.slice(javascript.indexOf("function codexConfigFile("), javascript.indexOf("function readAssistantForm("));
+  const helpers = vm.runInNewContext(`${source}; ({codexConfigFile, codexHomeFromConfigFile})`);
+  for (const home of ["/tmp/bot home", "/", "C:/bot", "C:/"]) {
+    assert.equal(helpers.codexHomeFromConfigFile(helpers.codexConfigFile(home)), home);
+  }
+  assert.equal(helpers.codexHomeFromConfigFile(""), "");
+  assert.throws(() => helpers.codexHomeFromConfigFile("config.toml"), /config.toml/);
+  assert.throws(() => helpers.codexHomeFromConfigFile("/tmp/auth.json"), /config.toml/);
+  assert.match(javascript, /assistant-codex-config-file/);
+  assert.match(javascript, /escapeHtml\(codex\.configFile/);
+});
+
 function adminRequest(status, body) {
   const source = javascript.slice(
     javascript.indexOf("async function api("),

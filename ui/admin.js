@@ -10,6 +10,7 @@ import {
   MessageSquare,
   Play,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Save,
@@ -33,6 +34,7 @@ const iconSet = {
   MessageSquare,
   Play,
   Plus,
+  Power,
   RefreshCw,
   Search,
   Save,
@@ -74,6 +76,8 @@ const caseResizerWidth = 8;
 const pageRuntimeRevision =
   document.querySelector('meta[name="webot-runtime-revision"]')?.content || "";
 let runtimeUpdateNoticeRevision = "";
+let restartStartedAt = null;
+let restartExpectedRevision = "";
 const caseHistoryExpanded = new Map();
 const caseViewStates = new Map();
 const caseSessionSelections = new Map();
@@ -645,7 +649,7 @@ function accountEditor(source) {
   })();
   return `
     <div class="form-section">
-      <div class="section-head"><div><h2>账号信息</h2><p>${current?.health?.lastError ? escapeHtml(current.health.lastError) : current?.health?.ready ? "连接正常" : "等待检测"}</p></div>
+      <div class="section-head"><div><h2>账号信息</h2><p>${current?.websocket?.connected ? "WS 连接正常" : "WS 未连接"}</p></div>
         <div class="inline-actions"><button class="button secondary" data-action="test-source"><i data-lucide="activity"></i><span>检测连接</span></button><button class="button danger icon-only" data-action="delete-source" title="删除账号"><i data-lucide="trash-2"></i></button></div>
       </div>
       <div class="form-grid">
@@ -881,7 +885,7 @@ function assistantMarkup() {
           ${field("历史轮数", "assistant-history", assistant.historyTurns, { type: "number" })}
           ${field("Worker 超时（毫秒）", "assistant-timeout", assistant.timeoutMs, { type: "number", note: "0 表示不限制" })}
           ${field("Codex 可执行文件", "assistant-codex-bin", assistant.codexBin || codex.binary, { full: true })}
-          ${field("CODEX_HOME", "assistant-codex-home", assistant.codexHome || codex.home, { full: true })}
+          ${field("Codex 配置文件路径", "assistant-codex-config-file", codexConfigFile(assistant.codexHome || codex.home), { full: true })}
           ${field("工作目录", "assistant-working-directory", assistant.workingDirectory || effective.workingDirectory, { full: true })}
           ${field("自聊默认模型", "assistant-self-codex-model", assistant.selfCodexModel || assistant.codexModel || effective.model, { note: "账号自聊及关联本人账号私聊" })}
           ${field("自聊默认 Effort", "assistant-self-reasoning-effort", assistant.selfReasoningEffort || assistant.reasoningEffort || effective.reasoningEffort, { note: "low / medium / high / xhigh" })}
@@ -896,6 +900,7 @@ function assistantMarkup() {
           ${field("System Prompt", "assistant-prompt", assistant.systemPrompt, { textarea: true, full: true, note: "Codex 模式下作为 developer_instructions 生效" })}
         </div>
         <div class="release-row"><span>本机配置</span><strong>${codex.configPresent ? "已读取" : "未找到"} · ${codex.authPresent ? "认证已就绪" : "认证未就绪"}</strong></div>
+        <div class="release-row"><span>生效配置文件</span><code>${escapeHtml(codex.configFile || "未设置")}</code></div>
         <div class="release-row"><span>配置更新时间</span><code>${escapeHtml(codex.configMtime || "未知")}</code></div>
       </div>
     </details>
@@ -991,6 +996,12 @@ function renderRuntimeIdentity() {
   build.title = revision
     ? `v${status.version}\n${revision}`
     : `v${status.version || "unknown"}`;
+  const restartButton = document.querySelector("#restart-button");
+  if (restartButton) {
+    restartButton.disabled = status.restart?.supported !== true ||
+      status.restart?.pending === true ||
+      restartStartedAt !== null;
+  }
 }
 
 function renderHeaderControls() {
@@ -1069,6 +1080,21 @@ function readAccountForm() {
   });
 }
 
+function codexConfigFile(home) {
+  const value = String(home || "");
+  return value ? `${value.replace(/[\\/]+$/, "")}/config.toml` : "";
+}
+
+function codexHomeFromConfigFile(value) {
+  const file = String(value || "").trim();
+  if (!file) return "";
+  if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(file) || !/[\\/]config\.toml$/.test(file)) {
+    throw new Error("Codex 配置文件必须是以 config.toml 结尾的绝对路径");
+  }
+  const home = file.slice(0, -"config.toml".length);
+  return /^(?:\/|[A-Za-z]:[\\/])$/.test(home) ? home : home.slice(0, -1);
+}
+
 function readAssistantForm() {
   if (!document.querySelector("#assistant-mode")) return;
   Object.assign(settings.assistant, {
@@ -1082,7 +1108,7 @@ function readAssistantForm() {
     webhookToken: document.querySelector("#assistant-webhook-token").value,
     systemPrompt: document.querySelector("#assistant-prompt").value,
     codexBin: document.querySelector("#assistant-codex-bin").value.trim(),
-    codexHome: document.querySelector("#assistant-codex-home").value.trim(),
+    codexHome: codexHomeFromConfigFile(document.querySelector("#assistant-codex-config-file").value),
     workingDirectory: document.querySelector("#assistant-working-directory").value.trim(),
     selfCodexModel: document.querySelector("#assistant-self-codex-model").value.trim(),
     selfReasoningEffort: document.querySelector("#assistant-self-reasoning-effort").value.trim(),
@@ -1628,7 +1654,19 @@ async function reloadForRuntimeRevisionChange() {
   const nextStatus = await api("/api/admin/status");
   const revision = String(nextStatus.runtime?.sourceRevision || "");
   status = nextStatus;
+  if (restartStartedAt !== null && nextStatus.ok === true &&
+      nextStatus.runtime?.startedAt &&
+      nextStatus.runtime.startedAt !== restartStartedAt &&
+      (!restartExpectedRevision || revision === restartExpectedRevision)) {
+    restartStartedAt = null;
+    if (!dirty && !knowledgeDirty && !agentDirty) {
+      window.location.reload();
+      return;
+    }
+    showNotice("Webot 已重载，请保存当前编辑后刷新页面");
+  }
   renderRuntimeIdentity();
+  if (restartStartedAt !== null) return;
   if (!pageRuntimeRevision || !revision || revision === pageRuntimeRevision) return;
   if (dirty || knowledgeDirty || agentDirty) {
     if (runtimeUpdateNoticeRevision !== revision) {
@@ -1683,6 +1721,33 @@ document.querySelector("#refresh-button").addEventListener("click", () => {
     return;
   }
   load().catch((error) => showNotice(error.message, true));
+});
+
+document.querySelector("#restart-button").addEventListener("click", async () => {
+  readCurrentForm();
+  if (dirty || knowledgeDirty || agentDirty) {
+    showNotice("请先保存当前编辑，再重载 Webot", true);
+    return;
+  }
+  if (!window.confirm("等待正在执行的任务结束后重载 Webot？账号、配置和聊天记录会保留。")) return;
+  const button = document.querySelector("#restart-button");
+  button.disabled = true;
+  try {
+    const body = await api("/api/admin/service/restart", {
+      method: "POST",
+      headers: {
+        "X-Webot-Restart-Token": document.querySelector('meta[name="webot-restart-token"]').content,
+      },
+      body: JSON.stringify({ confirm: true }),
+    });
+    restartStartedAt = status.runtime.startedAt;
+    restartExpectedRevision = body.restart.revision || "";
+    status.restart.pending = true;
+    showNotice(body.restart.message, !body.restart.requested);
+    renderRuntimeIdentity();
+  } catch (error) {
+    showNotice(`未确认重载结果：${error.message}。请刷新状态后检查，勿重复提交。`, true);
+  }
 });
 
 load().catch((error) => {

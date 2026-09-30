@@ -1015,8 +1015,9 @@ export class CaseStore {
   }
 
   mediaContextBefore(message, options = {}) {
-    if (message?.transport !== "telegram") return [];
-    const limit = Math.min(Math.max(Number(options.limit) || 20, 1), 100);
+    if (!["telegram", "pad"].includes(message?.transport)) return [];
+    const pad = message.transport === "pad";
+    const limit = Math.min(Math.max(Number(options.limit) || (pad ? 2 : 20), 1), 100);
     const rows = this.syncedMessages({
       sourceId: message.sourceId,
       conversationId: conversationIdFor(message),
@@ -1028,6 +1029,11 @@ export class CaseStore {
     return rows
       .filter((row) =>
         Number(row.timestamp || 0) <= Number(message.timestamp || now()) &&
+        (!pad || (
+          row.direction === "incoming" &&
+          row.sender_id === message.senderId &&
+          Number(row.timestamp || 0) >= Number(message.timestamp || now()) - 10 * 60_000
+        )) &&
         !excluded.has(String(row.message_id)) &&
         Array.isArray(row.attachments) &&
         row.attachments.some((attachment) => attachment?.kind === "image")
@@ -1036,9 +1042,9 @@ export class CaseStore {
       .map((row) => ({
         ...row,
         message: {
-          transport: "telegram",
+          transport: message.transport,
           sourceId: row.source_id,
-          sourceName: row.metadata?.sourceName || "Telegram",
+          sourceName: row.metadata?.sourceName || message.sourceName || message.transport,
           messageId: row.message_id,
           telegramMessageId: Number(row.metadata?.telegramMessageId || 0) || undefined,
           timestamp: row.timestamp,

@@ -31,6 +31,7 @@ class SelfSummonTests(unittest.IsolatedAsyncioTestCase):
         self.bridge.args = SimpleNamespace(listen_self=True)
         self.bridge.pending_outbound = Counter()
         self.bridge.self_command_prefixes = ["Webot", "助手"]
+        self.bridge.client = SimpleNamespace(is_connected=lambda: True)
 
     def event(self, text="@webot help", chat=99, sender=42, private=True, out=True):
         async def get_sender():
@@ -96,6 +97,15 @@ class SelfSummonTests(unittest.IsolatedAsyncioTestCase):
         await self.bridge.on_message(event)
         self.assertEqual(self.emitted[0]["reference"]["text"], "context")
         self.assertEqual(self.emitted[0]["reference"]["sender_id"], "tg:99")
+
+    async def test_health_reports_the_live_client_state_without_a_chat(self):
+        await self.bridge.handle_command({"id": "health-1", "action": "health"})
+        self.assertEqual(self.emitted, [{
+            "type": "response",
+            "id": "health-1",
+            "ok": True,
+            "connected": True,
+        }])
 
 
 if __name__ == "__main__":

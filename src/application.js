@@ -1,4 +1,5 @@
 import path from "node:path";
+import { markHydratedImage, MAX_MODEL_IMAGES } from "./inbound-images.js";
 import { CaseManager } from "./case-manager.js";
 import { CaseStore } from "./case-store.js";
 import {
@@ -8,6 +9,7 @@ import {
   isDirectoryContactId,
 } from "./contact-directory.js";
 import { loadConfig } from "./config.js";
+import { configuredPadMentionDisplayName } from "./ingress-sources.js";
 import { KnowledgeBaseCloud } from "./kb-cloud.js";
 import { probeOptSource } from "./opt-status.js";
 import { PadSenderClassifier } from "./pad-sender-classifier.js";
@@ -89,16 +91,67 @@ export class WebotApplication {
     this.transports = null;
     this.padMediaRequestTails = new Map();
     this.padMediaLastRequestAt = new Map();
-    this.padTimer = null;
     this.caseStore = null;
     this.caseManager = null;
     this.workspacePolicy = null;
     this.connectorsStarted = false;
     this.pendingSettings = null;
+    this.settingsApplying = false;
     this.settingsApplyTimer = null;
     this.startedAt = Date.now();
-    this.sourceActivator = createSourceActivator({ env });
+    this.restartResult = null;
+    this.restartOperation = null;
+    this.sourceActivator = createSourceActivator({
+      env,
+      ready: () => !this.pendingSettings && !this.settingsApplying &&
+        this.status().ok === true,
+      onDeferredResult: (context, result, error) => {
+        const detail = this.caseStore.detail(context.caseId);
+        const message = error
+          ? `Webot 延后激活失败：${error.message}`
+          : result?.requested
+            ? `已提交 Webot v${result.version} 延后受控激活请求`
+            : "Webot 运行版本已更新，无需再次激活";
+        this.caseStore.addProgress(
+          context.caseId,
+          detail?.run_count || 0,
+          message,
+          error ? "warn" : "info",
+        );
+      },
+    });
     this.fetch = fetchImpl;
+  }
+
+  async requestRestart() {
+    if (this.restartOperation) return this.restartOperation;
+    if (this.restartResult) return this.restartResult;
+    if (this.env.WEBOT_RUNTIME_MODE !== "source") {
+      throw new Error("当前运行模式不支持源码重载");
+    }
+    const source = this.config.pad.sources.find((item) => item.enabled);
+    if (!source) throw new Error("受控重载需要已配置的 Pad 账号");
+    if (this.pendingSettings || this.settingsApplying || this.status().ok !== true) {
+      throw new Error("连接或配置尚未就绪，暂不能提交受控重载；请查看账号连接状态。");
+    }
+    this.restartOperation = (async () => {
+      try {
+        const result = await this.sourceActivator.restartFromConsole({ sourceId: source.id });
+        this.restartResult = {
+          ...result,
+          message: "重启已受理，等待当前任务结束。",
+        };
+        return this.restartResult;
+      } catch (error) {
+        if (!error.activationUncertain) throw error;
+        // A lost acknowledgement must not trigger a duplicate restart.
+        this.restartResult = { requested: false, message: "重启结果未确认，请检查外部重载服务，勿重复提交。" };
+        return this.restartResult;
+      } finally {
+        this.restartOperation = null;
+      }
+    })();
+    return this.restartOperation;
   }
 
   async initialize() {
@@ -173,7 +226,8 @@ export class WebotApplication {
         this.fetch,
         {
           resolveMentionDisplayName: (message) =>
-            this.caseStore.directoryDisplayName(
+            configuredPadMentionDisplayName(this.config, message)
+            || this.caseStore.directoryDisplayName(
               message.sourceId,
               message.senderId,
             ),
@@ -199,6 +253,7 @@ export class WebotApplication {
       caseStore: this.caseStore,
       transports,
       requesterAccess: accessForMessage,
+      hydratePadMedia: (message) => this.hydratePadMedia(message),
       afterOwnerRun: (context) => this.sourceActivator.activate(context),
       logger: this.logger,
     });
@@ -284,11 +339,6 @@ export class WebotApplication {
         this.caseStore.markSyncedMessageResult(message, result);
         return result;
       }
-      if (
-        requesterAccess(message, this.config.policy.ownerSenderIds) === "owner"
-      ) {
-        message = await this.hydratePadMedia(message);
-      }
     }
     try {
       const result = await this.caseManager.receive(message);
@@ -313,7 +363,7 @@ export class WebotApplication {
       message.sourceId,
       referenceId,
     );
-    if (!stored) return message;
+    if (!stored || stored.chat_id !== message.chatId) return message;
     const metadata = stored.metadata || {};
     return {
       ...message,
@@ -362,14 +412,17 @@ export class WebotApplication {
     const attachments = Array.isArray(message.attachments)
       ? [...message.attachments]
       : [];
+    let imageCount = 0;
     for (let index = 0; index < attachments.length; index += 1) {
       const attachment = attachments[index];
       if (
         attachment?.kind !== "image" ||
-        !attachment?.downloadContext?.endpoint
+        !attachment?.downloadContext?.endpoint ||
+        imageCount >= MAX_MODEL_IMAGES
       ) {
         continue;
       }
+      imageCount += 1;
       try {
         const cached = await this.serializePadMediaRequest(
           message.sourceId,
@@ -379,11 +432,11 @@ export class WebotApplication {
             this.config.dataDir,
           ),
         );
-        attachments[index] = { ...attachment, ...cached };
+        attachments[index] = markHydratedImage(attachment, cached);
       } catch (error) {
         attachments[index] = {
           ...attachment,
-          error: String(error.message || error),
+          error: "image_download_failed",
         };
         this.logger.warn("pad inbound image cache failed", {
           sourceId: message.sourceId,
@@ -405,40 +458,20 @@ export class WebotApplication {
     return { ...message, attachments, ...(reference ? { reference } : {}) };
   }
 
-  async probePads() {
-    const sources = this.config.channels.has("pad")
-      ? this.config.pad.sources
-      : [];
-    const statuses = await Promise.all(sources.map(probeOptSource));
-    for (const status of statuses) {
-      this.padStatuses.set(status.id, status);
-    }
-    return statuses;
-  }
-
   async startConnectors() {
     this.connectorsStarted = true;
     this.knowledgeBase.start();
     for (const client of this.padClients) client.start();
     for (const client of this.telegramClients) client.start();
-    await this.probePads();
     const recovered = this.caseManager.resumePending();
     if (recovered.queued) {
       this.logger.info("pending cases restored", recovered);
     }
-    clearInterval(this.padTimer);
-    this.padTimer = setInterval(
-      () => void this.probePads(),
-      30_000,
-    );
-    this.padTimer.unref?.();
   }
 
   async stopConnectors() {
     clearTimeout(this.settingsApplyTimer);
     this.settingsApplyTimer = null;
-    clearInterval(this.padTimer);
-    this.padTimer = null;
     this.knowledgeBase?.stop();
     for (const client of this.padClients) client.stop();
     for (const client of this.telegramClients) client.stop();
@@ -679,6 +712,7 @@ export class WebotApplication {
       }
       const pending = this.pendingSettings;
       this.pendingSettings = null;
+      this.settingsApplying = true;
       try {
         await this.applySettings(pending);
         this.logger.info("deferred settings applied after workers drained");
@@ -687,6 +721,8 @@ export class WebotApplication {
         this.logger.error("deferred settings apply failed", {
           error: error.message,
         });
+      } finally {
+        this.settingsApplying = false;
       }
     };
     this.settingsApplyTimer = setTimeout(applyWhenIdle, 0);
@@ -758,9 +794,7 @@ export class WebotApplication {
     const padSources = this.config.pad.sources.map((source) => {
       const websocket = websocketStatuses.get(source.id) || null;
       const health = this.padStatuses.get(source.id) || null;
-      const ready = !source.enabled || Boolean(
-        websocket?.connected && health?.ready,
-      );
+      const ready = !source.enabled || Boolean(websocket?.connected);
       return {
         id: source.id,
         displayName: source.displayName,
@@ -832,6 +866,12 @@ export class WebotApplication {
       runtime: {
         mode: runtimeMode,
         sourceRevision: process.env.WEBOT_SOURCE_REVISION || "",
+        startedAt: this.startedAt,
+      },
+      restart: {
+        pending: Boolean(this.restartOperation || this.restartResult),
+        supported: this.env.WEBOT_RUNTIME_MODE === "source" &&
+          this.config.pad.sources.some((source) => source.enabled),
       },
       uptimeSeconds: Math.floor((Date.now() - this.startedAt) / 1000),
       channels: [...this.config.channels],

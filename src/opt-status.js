@@ -10,11 +10,14 @@ function serviceOrigin(source) {
   return url.toString().replace(/\/+$/, "");
 }
 
-async function request(source, route) {
+async function request(source, route, method = "GET") {
   const response = await fetch(`${apiBase(source)}${route}`, {
+    method,
     headers: {
       "X-Access-Token": source.accessToken,
+      ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
     },
+    ...(method === "POST" ? { body: "{}" } : {}),
     signal: AbortSignal.timeout(15_000),
   });
   const body = await response.json().catch(() => ({}));
@@ -24,12 +27,14 @@ async function request(source, route) {
     body.success === false ||
     Number(body.Code ?? body.code ?? 0) !== 0
   ) {
-    throw new Error(
+    const error = new Error(
       String(body.Message || body.message || `HTTP ${response.status}`).slice(
         0,
         300,
       ),
     );
+    error.status = response.status;
+    throw error;
   }
   return body;
 }
@@ -76,15 +81,22 @@ export async function probeOptSource(source) {
     let data;
     let online = null;
     try {
-      data = await health(source);
-    } catch {
-      const body = await request(source, "/Login/LongLinkStatus");
+      // Aggregate /health can be degraded by an unrelated installed account.
+      const body = await request(source, "/v1/session/connection-status", "POST");
       data = body.Data ?? body.data ?? {};
+    } catch (error) {
+      if (![404, 405].includes(error.status)) throw error;
       try {
-        const onlineBody = await request(source, "/User/GetOnlineInfo");
-        online = Boolean((onlineBody.Data ?? onlineBody.data ?? {}).online);
+        data = await health(source);
       } catch {
-        // OnlineInfo is optional; LongLinkStatus remains authoritative.
+        const body = await request(source, "/Login/LongLinkStatus");
+        data = body.Data ?? body.data ?? {};
+        try {
+          const onlineBody = await request(source, "/User/GetOnlineInfo");
+          online = Boolean((onlineBody.Data ?? onlineBody.data ?? {}).online);
+        } catch {
+          // OnlineInfo is optional on legacy gateways.
+        }
       }
     }
     const state = String(data.stage || "unknown");

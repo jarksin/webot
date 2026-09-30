@@ -28,6 +28,7 @@ const AUDIO_FORMATS = new Map([
   [".silk", 4],
 ]);
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
+const DEFAULT_WEBSOCKET_HEALTH_INTERVAL_MS = 30_000;
 const WEBSOCKET_OPEN = 1;
 const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
 const WECHAT_MENTION_SEPARATOR = "\u2005";
@@ -110,7 +111,7 @@ function inboundImageType(data) {
   ) {
     return { extension: ".webp", mime: "image/webp" };
   }
-  return { extension: ".img", mime: "application/octet-stream" };
+  throw new Error("Pad image download is not a supported image");
 }
 
 function safeFileSegment(value, fallback) {
@@ -315,9 +316,30 @@ export class PadTransport {
     const endpoint = String(context?.endpoint || "");
     if (
       attachment?.kind !== "image" ||
-      !endpoint.startsWith("/api/v1/media/download-img-binary")
+      endpoint !== "/api/v1/media/download-img-binary"
     ) {
       throw new Error("attachment does not expose the complete image endpoint");
+    }
+    const directory = path.join(
+      path.resolve(dataDir),
+      "inbound-media",
+      safeFileSegment(source.id, "default"),
+    );
+    const base = crypto.createHash("sha256").update(JSON.stringify([
+      source.id, message.chatId, message.messageId, context,
+    ])).digest("hex");
+    for (const extension of [".jpg", ".png", ".gif", ".webp"]) {
+      const filePath = path.join(directory, `${base}${extension}`);
+      try {
+        const info = fs.lstatSync(filePath);
+        if (info.isFile() && info.size > 0 && info.size <= MAX_INBOUND_IMAGE_BYTES) {
+          const type = inboundImageType(fs.readFileSync(filePath));
+          return {
+            localPath: filePath, filename: `${base}${type.extension}`,
+            mime: type.mime, size: info.size,
+          };
+        }
+      } catch {}
     }
     const response = await this.fetch(padEndpointURL(source, endpoint), {
       method: "POST",
@@ -330,12 +352,7 @@ export class PadTransport {
       signal: AbortSignal.timeout(180_000),
     });
     if (!response.ok) {
-      const detail = (await response.text()).trim().slice(0, 300);
-      throw new Error(
-        `Pad image download failed (${response.status})${
-          detail ? `: ${detail}` : ""
-        }`,
-      );
+      throw new Error(`Pad image download failed (${response.status})`);
     }
     const declared = Number(response.headers.get("content-length") || 0);
     if (declared > MAX_INBOUND_IMAGE_BYTES) {
@@ -346,20 +363,14 @@ export class PadTransport {
       throw new Error("Pad image download returned an invalid size");
     }
     const type = inboundImageType(data);
-    const directory = path.join(
-      path.resolve(dataDir),
-      "inbound-media",
-      safeFileSegment(source.id, "default"),
-    );
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const base = safeFileSegment(message.messageId, crypto.randomUUID());
     const filePath = path.join(directory, `${base}${type.extension}`);
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const temporary = `${filePath}.${process.pid}.tmp`;
     fs.writeFileSync(temporary, data, { mode: 0o600 });
     fs.renameSync(temporary, filePath);
     return {
       localPath: filePath,
-      filename: path.basename(filePath),
+      filename: `${base}${type.extension}`,
       mime: type.mime,
       size: data.length,
     };
@@ -369,8 +380,8 @@ export class PadTransport {
     const source = this.source(message);
     const at = replyMention(message, source);
     const replyText = formatPadReplyText(text, message, source);
-    let displayName = cleanPadMentionDisplayName(message.senderName, at);
-    if (at && !displayName) {
+    let displayName = "";
+    if (at) {
       try {
         displayName = cleanPadMentionDisplayName(
           this.resolveMentionDisplayName(message),
@@ -383,6 +394,9 @@ export class PadTransport {
           error: error.message,
         });
       }
+    }
+    if (!displayName) {
+      displayName = cleanPadMentionDisplayName(message.senderName, at);
     }
     const content = at
       ? formatPadMentionText(replyText, displayName, at)
@@ -480,7 +494,7 @@ export class PadTransport {
 }
 
 export class PadWebSocketClient {
-  constructor(config, sourceValue, onMessage, logger = console) {
+  constructor(config, sourceValue, onMessage, logger = console, options = {}) {
     this.config = config;
     this.source =
       typeof sourceValue === "string"
@@ -493,6 +507,9 @@ export class PadWebSocketClient {
     this.attempt = 0;
     this.timer = null;
     this.connectTimer = null;
+    this.healthTimer = null;
+    this.healthTimeout = null;
+    this.healthNonce = "";
     this.connectTimeoutMs = Math.max(
       1_000,
       Number(
@@ -500,6 +517,13 @@ export class PadWebSocketClient {
           DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS,
       ),
     );
+    this.healthIntervalMs = Math.max(
+      1,
+      Number(
+        options.healthIntervalMs || DEFAULT_WEBSOCKET_HEALTH_INTERVAL_MS,
+      ),
+    );
+    this.healthTimeoutMs = Math.max(1, Number(options.healthTimeoutMs || 5_000));
     this.state = {
       connected: false,
       connectionState: "idle",
@@ -508,6 +532,8 @@ export class PadWebSocketClient {
       lastMessageAt: "",
       lastError: "",
       reconnects: 0,
+      healthSupported: false,
+      lastHealthCheckAt: "",
     };
   }
 
@@ -525,14 +551,52 @@ export class PadWebSocketClient {
     this.connectTimer = null;
   }
 
+  clearHealthTimer() {
+    clearTimeout(this.healthTimer);
+    clearTimeout(this.healthTimeout);
+    this.healthTimer = null;
+    this.healthTimeout = null;
+    this.healthNonce = "";
+  }
+
+  scheduleHealthCheck(socket) {
+    this.clearHealthTimer();
+    if (this.stopped || this.socket !== socket || !this.state.connected) return;
+    this.healthTimer = setTimeout(() => {
+      this.healthTimer = null;
+      this.checkHealth(socket);
+    }, this.healthIntervalMs);
+    this.healthTimer.unref?.();
+  }
+
+  checkHealth(socket) {
+    if (this.stopped || this.socket !== socket) return;
+    if (!this.state.healthSupported || this.healthNonce) return;
+    this.healthNonce = crypto.randomUUID();
+    this.healthTimeout = setTimeout(() => {
+      if (this.socket === socket) {
+        this.disconnect(socket, "websocket health response timed out");
+      }
+    }, this.healthTimeoutMs);
+    this.healthTimeout.unref?.();
+    try {
+      socket.send(JSON.stringify({ type: "health-ping", nonce: this.healthNonce }));
+    } catch (error) {
+      this.disconnect(socket, `websocket health send failed: ${error.message}`);
+    }
+  }
+
   disconnect(socket, error = "") {
     if (this.socket !== socket) return;
     this.clearConnectTimer();
+    this.clearHealthTimer();
     this.socket = null;
+    this.state.healthSupported = false;
     this.state.connected = false;
     this.state.connectionState = this.stopped ? "stopped" : "disconnected";
     this.state.lastDisconnectedAt = new Date().toISOString();
     if (error) this.state.lastError = error;
+    try { socket.close(); } catch { /* Detached; reconnect owns recovery. */ }
     if (!this.stopped) this.reconnect();
   }
 
@@ -578,15 +642,29 @@ export class PadWebSocketClient {
     socket.addEventListener("message", async (event) => {
       if (this.socket !== socket) return;
       try {
-        this.state.lastMessageAt = new Date().toISOString();
         const raw =
           typeof event.data === "string"
             ? event.data
             : event.data instanceof Blob
               ? await event.data.text()
               : Buffer.from(event.data).toString("utf8");
+        if (this.socket !== socket) return;
         const envelope = JSON.parse(raw);
+        if (envelope.type === "connected") {
+          this.state.healthSupported = Array.isArray(envelope.capabilities) &&
+            envelope.capabilities.includes("health-v1");
+          if (this.state.healthSupported) this.scheduleHealthCheck(socket);
+          return;
+        }
+        if (envelope.type === "health-pong") {
+          if (this.healthNonce && envelope.nonce === this.healthNonce) {
+            this.state.lastHealthCheckAt = new Date().toISOString();
+            this.scheduleHealthCheck(socket);
+          }
+          return;
+        }
         for (const message of normalizePadEnvelope(envelope, this.source)) {
+          this.state.lastMessageAt = new Date().toISOString();
           await this.onMessage(message);
         }
       } catch (error) {
@@ -629,6 +707,7 @@ export class PadWebSocketClient {
     clearTimeout(this.timer);
     this.timer = null;
     this.clearConnectTimer();
+    this.clearHealthTimer();
     const socket = this.socket;
     this.socket = null;
     this.state.connected = false;

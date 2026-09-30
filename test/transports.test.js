@@ -119,6 +119,7 @@ test("Pad transport mentions the triggering sender in group replies", async (con
     chatType: "group",
     chatId: "room@chatroom",
     senderId: "wxid_member",
+    senderName: "群昵称",
   }, "group reply");
   await transport.send({
     chatType: "group",
@@ -131,6 +132,38 @@ test("Pad transport mentions the triggering sender in group replies", async (con
   assert.equal(calls[0].body.at, "wxid_member");
   assert.equal(calls[1].body.content, "self reply");
   assert.equal(calls[1].body.at, "");
+});
+
+test("Pad transport mention aliases override transient group nicknames", async (context) => {
+  let call;
+  context.mock.method(globalThis, "fetch", async (url, options) => {
+    call = { url, body: JSON.parse(options.body) };
+    return Response.json({ Code: 0 });
+  });
+  const transport = new PadTransport(
+    {
+      apiUrl: "http://pad.local",
+      accessToken: "test-token",
+      requireWriteConfirmation: true,
+      selfId: "wxid_small",
+    },
+    "live",
+    console,
+    globalThis.fetch,
+    {
+      resolveMentionDisplayName: () => "示例账号",
+    },
+  );
+
+  await transport.send({
+    chatType: "group",
+    chatId: "room@chatroom",
+    senderId: "wxid_account_a",
+    senderName: "示例账号",
+  }, "group reply");
+
+  assert.equal(call.body.content, "@示例账号\u2005 group reply");
+  assert.equal(call.body.at, "wxid_account_a");
 });
 
 test("Pad mention labels prefer safe sender names and never expose raw IDs", () => {
@@ -316,7 +349,7 @@ test("Pad transport caches a complete inbound image from its structured context"
     section: { start_pos: 0, data_len: 65536 },
   });
   assert.equal(result.mime, "image/png");
-  assert.equal(result.filename, "image_1.png");
+  assert.match(result.filename, /^[a-f0-9]{64}\.png$/);
   assert.deepEqual(await fs.readFile(result.localPath), png);
 });
 
@@ -477,9 +510,9 @@ test("Pad WebSocket error does not recursively close the failing socket", (conte
   assert.equal(client.status().connectionState, "reconnecting");
   assert.ok(client.timer);
   assert.equal(client.socket, null);
-  assert.equal(socket.closeCalls, 0);
+  assert.equal(socket.closeCalls, 1);
   client.stop();
-  assert.equal(socket.closeCalls, 0);
+  assert.equal(socket.closeCalls, 1);
 });
 
 test("Pad WebSocket ignores stale socket events after reconnect", (context) => {
@@ -598,4 +631,59 @@ test("Pad WebSocket closes an open socket during a clean stop", (context) => {
 
   assert.equal(socket.closeCalls, 1);
   assert.equal(client.status().connectionState, "stopped");
+});
+
+function healthClient(context) {
+  class Socket extends EventTarget {
+    static instances = [];
+    constructor() { super(); this.readyState = 1; this.closeCalls = 0; this.sent = []; Socket.instances.push(this); }
+    close() { this.closeCalls++; this.dispatchEvent(new Event("close")); }
+    send(raw) { this.sent.push(JSON.parse(raw)); }
+  }
+  replaceWebSocket(context, Socket);
+  const client = new PadWebSocketClient(
+    { id: "fixture", selfId: "wxid_test", wsUrl: "ws://localhost/ws/wxid_test" },
+    "wxid_test", async () => {}, { info() {}, warn() {}, error() {} },
+    { healthIntervalMs: 60_000, healthTimeoutMs: 20 },
+  );
+  context.after(() => client.stop());
+  client.start();
+  const socket = Socket.instances[0]; socket.dispatchEvent(new Event("open"));
+  const receive = (data) => socket.dispatchEvent(new MessageEvent("message", { data: JSON.stringify(data) }));
+  return { client, socket, receive };
+}
+
+test("Pad health uses a nonce and preserves a healthy subscription", (context) => {
+  const { client, socket, receive } = healthClient(context);
+  receive({ type: "connected", capabilities: ["health-v1"] });
+  client.checkHealth(socket);
+  const nonce = socket.sent[0].nonce;
+  receive({ type: "health-pong", nonce: "wrong" });
+  assert.equal(client.healthNonce, nonce);
+  receive({ type: "health-pong", nonce });
+  assert.equal(client.healthNonce, "");
+  assert.ok(client.status().lastHealthCheckAt);
+  assert.equal(client.status().lastMessageAt, "");
+  assert.equal(client.socket, socket);
+  assert.equal(socket.closeCalls, 0);
+});
+
+test("Pad missing health response closes the failed socket and backs off", async (context) => {
+  const { client, socket, receive } = healthClient(context);
+  receive({ type: "connected", capabilities: ["health-v1"] });
+  client.checkHealth(socket);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.equal(socket.closeCalls, 1);
+  assert.equal(client.socket, null);
+  assert.ok(client.timer);
+  assert.match(client.status().lastError, /health response timed out/);
+});
+
+test("Pad legacy gateway is not periodically disconnected without health capability", (context) => {
+  const { client, socket, receive } = healthClient(context);
+  receive({ type: "connected" });
+  client.checkHealth(socket);
+  assert.equal(client.healthTimer, null);
+  assert.equal(socket.sent.length, 0);
+  assert.equal(socket.closeCalls, 0);
 });

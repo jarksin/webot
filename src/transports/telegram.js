@@ -7,6 +7,8 @@ import { telegramSourceForMessage } from "../telegram-sources.js";
 
 const MAX_LINE_BYTES = 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_HEALTH_CHECK_INTERVAL_MS = 15_000;
+const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5_000;
 const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
 
 function safeFileSegment(value, fallback) {
@@ -195,13 +197,27 @@ export class TelegramBridgeClient {
     this.buffer = "";
     this.pending = new Map();
     this.reconnectTimer = null;
+    this.healthTimer = null;
     this.stopped = true;
     this.ready = false;
     this.connectedAt = 0;
     this.lastMessageAt = 0;
+    this.lastHealthCheckAt = 0;
     this.lastError = "";
     this.reconnects = 0;
     this.selfId = "";
+    this.healthCheckIntervalMs = Math.max(
+      1,
+      Number(
+        options.healthCheckIntervalMs || DEFAULT_HEALTH_CHECK_INTERVAL_MS,
+      ),
+    );
+    this.healthCheckTimeoutMs = Math.max(
+      1,
+      Number(
+        options.healthCheckTimeoutMs || DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
+      ),
+    );
   }
 
   start() {
@@ -234,8 +250,9 @@ export class TelegramBridgeClient {
     this.child = child;
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => this.consume(chunk));
+    child.stdout.on("data", (chunk) => this.consume(child, chunk));
     child.stderr.on("data", (chunk) => {
+      if (this.child !== child) return;
       const detail = String(chunk || "").trim().slice(-1000);
       if (detail) {
         this.logger.warn("telegram bridge stderr", {
@@ -244,9 +261,10 @@ export class TelegramBridgeClient {
         });
       }
     });
-    child.once("error", (error) => this.disconnected(error));
+    child.once("error", (error) => this.disconnected(child, error));
     child.once("close", (code, signal) => {
       this.disconnected(
+        child,
         new Error(
           `Telegram bridge exited (${code ?? "null"}${
             signal ? `, ${signal}` : ""
@@ -256,12 +274,14 @@ export class TelegramBridgeClient {
     });
   }
 
-  consume(chunk) {
+  consume(child, chunk) {
+    if (this.child !== child) return;
     this.buffer += String(chunk || "");
     if (Buffer.byteLength(this.buffer) > MAX_LINE_BYTES) {
-      const child = this.child;
-      this.disconnected(new Error("Telegram bridge line exceeds 1 MiB"));
-      child?.kill("SIGTERM");
+      this.recycle(
+        child,
+        new Error("Telegram bridge line exceeds 1 MiB"),
+      );
       return;
     }
     const lines = this.buffer.split(/\r?\n/);
@@ -269,7 +289,7 @@ export class TelegramBridgeClient {
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
-        this.handle(JSON.parse(line));
+        this.handle(child, JSON.parse(line));
       } catch (error) {
         this.logger.warn("invalid telegram bridge event", {
           sourceId: this.source.id,
@@ -279,7 +299,8 @@ export class TelegramBridgeClient {
     }
   }
 
-  handle(event) {
+  handle(child, event) {
+    if (this.child !== child) return;
     if (event?.type === "ready") {
       this.ready = true;
       this.connectedAt = Date.now();
@@ -289,11 +310,12 @@ export class TelegramBridgeClient {
         sourceId: this.source.id,
         accountType: event.account_type || "unknown",
       });
+      this.scheduleHealthCheck(child);
       return;
     }
     if (event?.type === "response") {
       const pending = this.pending.get(String(event.id || ""));
-      if (!pending) return;
+      if (!pending || pending.child !== child) return;
       this.pending.delete(String(event.id));
       clearTimeout(pending.timer);
       if (event.ok) pending.resolve(event);
@@ -301,7 +323,10 @@ export class TelegramBridgeClient {
       return;
     }
     if (event?.type === "fatal") {
-      this.lastError = String(event.error || "Telegram bridge failed");
+      this.recycle(
+        child,
+        new Error(event.error || "Telegram bridge failed"),
+      );
       return;
     }
     if (event?.type !== "message") return;
@@ -317,7 +342,16 @@ export class TelegramBridgeClient {
   }
 
   request(payload, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
-    if (!this.child || !this.ready || !this.child.stdin.writable) {
+    return this.requestForChild(this.child, payload, timeoutMs);
+  }
+
+  requestForChild(child, payload, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
+    if (
+      !child ||
+      child !== this.child ||
+      !this.ready ||
+      !child.stdin.writable
+    ) {
       return Promise.reject(new Error("Telegram bridge is not ready"));
     }
     const id = crypto.randomUUID();
@@ -327,8 +361,8 @@ export class TelegramBridgeClient {
         reject(new Error("Telegram request timed out"));
       }, timeoutMs);
       timer.unref?.();
-      this.pending.set(id, { resolve, reject, timer });
-      this.child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
+      this.pending.set(id, { child, action: payload.action, resolve, reject, timer });
+      child.stdin.write(`${JSON.stringify({ id, ...payload })}\n`, (error) => {
         if (!error) return;
         clearTimeout(timer);
         this.pending.delete(id);
@@ -337,17 +371,74 @@ export class TelegramBridgeClient {
     });
   }
 
-  disconnected(error) {
-    if (!this.child && this.stopped) return;
+  clearHealthTimer() {
+    clearTimeout(this.healthTimer);
+    this.healthTimer = null;
+  }
+
+  scheduleHealthCheck(child) {
+    this.clearHealthTimer();
+    if (this.stopped || this.child !== child || !this.ready) return;
+    this.healthTimer = setTimeout(() => {
+      this.healthTimer = null;
+      void this.checkHealth(child);
+    }, this.healthCheckIntervalMs);
+    this.healthTimer.unref?.();
+  }
+
+  async checkHealth(child) {
+    if (this.stopped || this.child !== child || !this.ready) return;
+    // Python processes commands serially. A probe queued behind a valid
+    // upload/send must not terminate that operation after only five seconds.
+    if ([...this.pending.values()].some((request) =>
+      request.child === child && request.action !== "health"
+    )) {
+      this.scheduleHealthCheck(child);
+      return;
+    }
+    try {
+      const response = await this.requestForChild(
+        child,
+        { action: "health" },
+        this.healthCheckTimeoutMs,
+      );
+      if (response.connected !== true) {
+        throw new Error("Telegram bridge reported a disconnected client");
+      }
+      this.lastHealthCheckAt = Date.now();
+      this.scheduleHealthCheck(child);
+    } catch (error) {
+      if (this.child !== child) return;
+      this.recycle(
+        child,
+        new Error(`Telegram health check failed: ${error.message}`),
+      );
+    }
+  }
+
+  recycle(child, error) {
+    if (this.child !== child) return;
+    this.disconnected(child, error);
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // The bridge is already exiting.
+    }
+  }
+
+  disconnected(child, error) {
+    if (this.child !== child) return;
+    this.clearHealthTimer();
     this.child = null;
     this.ready = false;
     this.buffer = "";
     this.lastError = String(error?.message || error || "");
-    for (const pending of this.pending.values()) {
+    for (const [id, pending] of this.pending) {
+      if (pending.child !== child) continue;
       clearTimeout(pending.timer);
       pending.reject(new Error("Telegram bridge disconnected"));
+      this.pending.delete(id);
     }
-    this.pending.clear();
     if (this.stopped || this.reconnectTimer) return;
     this.reconnects += 1;
     const delay = Math.min(30_000, 1000 * 2 ** Math.min(this.reconnects, 5));
@@ -362,6 +453,7 @@ export class TelegramBridgeClient {
     this.stopped = true;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
+    this.clearHealthTimer();
     const child = this.child;
     this.child = null;
     this.ready = false;
@@ -387,6 +479,7 @@ export class TelegramBridgeClient {
           : "connecting",
       connectedAt: this.connectedAt || null,
       lastMessageAt: this.lastMessageAt || null,
+      lastHealthCheckAt: this.lastHealthCheckAt || null,
       lastError: this.lastError,
       reconnects: this.reconnects,
       selfId: this.selfId,

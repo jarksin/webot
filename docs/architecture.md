@@ -75,6 +75,12 @@ source repository.
 - A Case never runs two workers concurrently. New inbound during a Codex run is
   steered into the active turn when direct input is available; otherwise Webot
   schedules one follow-up pass over the latest persisted context.
+- Active-turn follow-ups carry the initiating request as context and explicitly
+  preserve unfinished objectives, while allowing cancellation or replacement.
+  The worker policy requires checking all active outcomes before a final reply.
+  These are model instructions, not a semantic completion validator: the
+  processed-message cursor records delivery/handling, not verified task completion.
+  Do not automatically replay business writes to compensate for an incomplete reply.
 - Every accepted message updates a stable account-scoped Case. Owner-created
   named sessions route subsequent messages into independent child Cases.
 - Named sessions isolate bounded history, Codex continuation, model selection,
@@ -123,3 +129,15 @@ risk. They connect to Webot through explicit HTTP/WebSocket contracts.
 4. Validate inbound events with `WEBOT_OUTBOUND_MODE=dry-run`.
 5. Back up the state directory.
 6. Enable `live` outbound only after account-side verification.
+# Connector health review
+
+Pad gateways advertising `health-v1` receive nonce-bound local health probes
+every 30 seconds. A matching response is due within five seconds; failures use
+normal backoff. Healthy subscriptions remain open, avoiding periodic gaps in
+gateways without replay. Legacy gateways do not receive unsupported probes.
+Health control frames do not update the inbound-message timestamp.
+
+Telegram bridge probes are deferred while a business request is pending,
+because the Python command loop is serial. This avoids killing a legitimate
+upload/send on the probe's shorter timeout. Existing business timeouts and
+uncertain-write handling remain unchanged.

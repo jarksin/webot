@@ -1,4 +1,5 @@
 import path from "node:path";
+import { markHydratedImage } from "./inbound-images.js";
 import { acceptedMessage } from "./runtime.js";
 import {
   applyControlCommand,
@@ -6,6 +7,7 @@ import {
   runtimeOverrides,
 } from "./control-commands.js";
 import { assistantConfigForMessage } from "./assistant-routing.js";
+import { parseAssistantResult } from "./codex-provider.js";
 
 function acceptsOwnerIntermediateItems(message) {
   return Boolean(
@@ -38,6 +40,23 @@ function commandNeedsIdleWorker(command) {
 function completedDraftText(text) {
   const value = String(text || "").trim();
   return /^\[done\](?:\s|$)/i.test(value) ? value : `[done] ${value}`;
+}
+
+function normalizedProviderResult(value) {
+  const result = typeof value === "string"
+    ? { text: value }
+    : value && typeof value === "object"
+      ? value
+      : {};
+  const parsed = parseAssistantResult(result.text);
+  return {
+    ...result,
+    text: parsed.text,
+    artifacts: Array.isArray(result.artifacts)
+      ? result.artifacts
+      : parsed.artifacts,
+    noReply: result.noReply === true || parsed.noReply === true,
+  };
 }
 
 export function transientProviderFailure(error) {
@@ -74,6 +93,7 @@ export class CaseManager {
     caseStore,
     transports,
     requesterAccess = () => "public",
+    hydratePadMedia = async (message) => message,
     afterOwnerRun = null,
     logger = console,
   }) {
@@ -83,6 +103,7 @@ export class CaseManager {
     this.caseStore = caseStore;
     this.transports = transports;
     this.requesterAccess = requesterAccess;
+    this.hydratePadMedia = hydratePadMedia;
     this.afterOwnerRun =
       typeof afterOwnerRun === "function" ? afterOwnerRun : null;
     this.logger = logger;
@@ -124,6 +145,8 @@ export class CaseManager {
   }
 
   async hydrateTelegramMedia(message) {
+    if (message?.transport === "pad") return this.hydratePadMedia(message);
+    if (message?.transport !== "telegram") return message;
     const attachments = Array.isArray(message?.attachments)
       ? [...message.attachments]
       : [];
@@ -143,7 +166,7 @@ export class CaseManager {
           attachment,
           this.config.dataDir,
         );
-        attachments[index] = { ...attachment, ...cached };
+        attachments[index] = markHydratedImage(attachment, cached);
       } catch (error) {
         attachments[index] = {
           ...attachment,
@@ -171,12 +194,14 @@ export class CaseManager {
   }
 
   async hydrateTelegramMediaContext(entries) {
-    return Promise.all(
-      (entries || []).map(async (entry) => ({
+    const result = [];
+    for (const entry of entries || []) {
+      result.push({
         ...entry,
         message: await this.hydrateTelegramMedia(entry.message || {}),
-      })),
-    );
+      });
+    }
+    return result;
   }
 
   async receive(message) {
@@ -267,7 +292,10 @@ export class CaseManager {
       let steered = false;
       if (
         activeRun &&
+        !this.rerun.has(ingested.caseId) &&
         !clean.deferToNextRun &&
+        !clean.attachments?.length &&
+        !clean.reference &&
         typeof this.provider.steer === "function"
       ) {
         const result = await this.provider.steer({
@@ -450,16 +478,17 @@ export class CaseManager {
           excludeMessageIds: pending.map((item) => item.message_id),
         }),
       );
-      const pendingAttachments = pending.flatMap((item) =>
+      const hydratedPending = await this.hydrateTelegramMediaContext(pending);
+      const pendingAttachments = hydratedPending.flatMap((item) =>
         Array.isArray(item.message?.attachments) ? item.message.attachments : []
       );
-      const currentMessage = await this.hydrateTelegramMedia({
-        ...trigger.message,
+      const currentMessage = {
+        ...hydratedPending.at(-1).message,
         text: currentText || trigger.message.text,
         attachments: pendingAttachments.length
           ? pendingAttachments
           : trigger.message.attachments,
-      });
+      };
       const conversationContext = this.caseStore.groupContextBefore(
         trigger.message,
         {
@@ -513,15 +542,19 @@ export class CaseManager {
           await waitForRetry(delayMs, controller.signal);
         }
       }
-      const result = typeof providerResult === "string"
-        ? { text: providerResult }
-        : providerResult;
+      const result = normalizedProviderResult(providerResult);
       const reply = String(result?.text || "").trim();
-      if (!reply) throw new Error("assistant returned no text");
       const owner = this.requesterAccess(trigger.message) === "owner";
       const artifacts = owner && Array.isArray(result?.artifacts)
         ? result.artifacts
         : [];
+      const explicitNoReply =
+        result?.noReply === true &&
+        !reply &&
+        artifacts.length === 0;
+      if (!reply && !explicitNoReply) {
+        throw new Error("assistant returned no text");
+      }
       if (!owner && result?.artifacts?.length) {
         this.caseStore.addProgress(
           caseId,
@@ -532,47 +565,61 @@ export class CaseManager {
       }
       if (controller.signal.aborted) throw new Error("worker stopped");
       this.caseStore.recordProviderResult(caseId, result);
-      const draftId = this.caseStore.addDraft(
-        caseId,
-        reply,
-        result.model ||
-          assistantConfigForMessage(
-            this.config.assistant,
-            currentMessage,
-          ).codexModel ||
-          this.config.assistant.llmModel ||
-          this.config.assistant.mode,
-        {
-          triggerMessageId: replyTargetMessageId,
-          inputCutoffMessageId: completionCutoffMessageId,
-          artifacts,
-        },
-      );
-      await this.sessionStore.append(caseId, "assistant", reply);
-      this.caseStore.addProgress(caseId, session.run_count, `draft #${draftId} 已生成`);
-      this.caseStore.finishRun(
-        caseId,
-        "draft_ready",
-        "",
-        completionCutoffMessageId,
-      );
-      if (this.caseSettings().autoSend !== false) {
-        try {
-          await this.sendDraft(caseId, draftId);
-        } catch (error) {
-          this.caseStore.markDraftError(caseId, draftId, error.message);
-          this.caseStore.finishRun(
-            caseId,
-            "draft_ready",
-            error.message,
-            completionCutoffMessageId,
-          );
-          this.caseStore.addProgress(
-            caseId,
-            session.run_count,
-            `draft #${draftId} 自动发送失败，已保留待重试：${error.message}`,
-            "warn",
-          );
+      if (explicitNoReply) {
+        this.caseStore.addProgress(
+          caseId,
+          session.run_count,
+          "assistant 明确选择静默，本轮不生成或发送回复",
+        );
+        this.caseStore.finishRun(
+          caseId,
+          "replied",
+          "",
+          completionCutoffMessageId,
+        );
+      } else {
+        const draftId = this.caseStore.addDraft(
+          caseId,
+          reply,
+          result.model ||
+            assistantConfigForMessage(
+              this.config.assistant,
+              currentMessage,
+            ).codexModel ||
+            this.config.assistant.llmModel ||
+            this.config.assistant.mode,
+          {
+            triggerMessageId: replyTargetMessageId,
+            inputCutoffMessageId: completionCutoffMessageId,
+            artifacts,
+          },
+        );
+        await this.sessionStore.append(caseId, "assistant", reply);
+        this.caseStore.addProgress(caseId, session.run_count, `draft #${draftId} 已生成`);
+        this.caseStore.finishRun(
+          caseId,
+          "draft_ready",
+          "",
+          completionCutoffMessageId,
+        );
+        if (this.caseSettings().autoSend !== false) {
+          try {
+            await this.sendDraft(caseId, draftId);
+          } catch (error) {
+            this.caseStore.markDraftError(caseId, draftId, error.message);
+            this.caseStore.finishRun(
+              caseId,
+              "draft_ready",
+              error.message,
+              completionCutoffMessageId,
+            );
+            this.caseStore.addProgress(
+              caseId,
+              session.run_count,
+              `draft #${draftId} 自动发送失败，已保留待重试：${error.message}`,
+              "warn",
+            );
+          }
         }
       }
       if (owner && this.afterOwnerRun) {
@@ -587,6 +634,12 @@ export class CaseManager {
               caseId,
               session.run_count,
               `已提交 Webot v${activation.version} 受控激活请求`,
+            );
+          } else if (activation?.reason === "waiting-for-ingress") {
+            this.caseStore.addProgress(
+              caseId,
+              session.run_count,
+              "Webot 激活等待连接配置应用和入站健康恢复",
             );
           }
         } catch (error) {

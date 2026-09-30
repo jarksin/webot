@@ -235,9 +235,19 @@ class Bridge:
     async def handle_command(self, command: dict[str, Any]) -> None:
         command_id = str(command.get("id", ""))
         action = str(command.get("action", ""))
+        if not command_id:
+            raise ValueError("command id is required")
+        if action == "health":
+            emit({
+                "type": "response",
+                "id": command_id,
+                "ok": True,
+                "connected": bool(self.client.is_connected()),
+            })
+            return
         chat_id = raw_peer_id(str(command.get("chat_id", "")))
-        if not command_id or not chat_id:
-            raise ValueError("command id and chat_id are required")
+        if not chat_id:
+            raise ValueError("chat_id is required")
         entity: Any = "me" if chat_id == self.self_id else chat_id
         if action == "send_message":
             text = str(command.get("text", ""))

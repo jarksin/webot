@@ -27,6 +27,10 @@ in the local Webot data directory and must never be committed.
 
 - Only the configured owner may authorize access to private files, credentials,
   chat history, source repositories, logs, sessions, or personal services.
+- An explicit instruction from the authenticated owner can authorize a scoped
+  operation on another service or its workers. Use that service's verified
+  control interface and check the result; do not treat the worker's own
+  process-restart restriction as a ban on cross-service operations.
 - Other requesters receive public information and general assistance only.
 - Read current state before any write and preserve a rollback path.
 - Require explicit confirmation for high-impact or irreversible operations.

@@ -59,6 +59,23 @@ test("requires a trigger in group chats", () => {
   );
 });
 
+test("drops empty assistant envelopes before they can trigger a case", () => {
+  const message = {
+    transport: "hook",
+    messageId: "empty-envelope",
+    chatType: "group",
+    chatId: "room",
+    senderId: "peer",
+    selfId: "wxid_bot",
+    text: '{"reply_text":"","attachments":[]}',
+    mentions: ["wxid_bot"],
+  };
+  assert.deepEqual(acceptedMessage(message, config()), {
+    accepted: false,
+    reason: "empty-assistant-payload",
+  });
+});
+
 test("serializes, persists, deduplicates, and dry-runs replies", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-test-"));
   const sent = [];

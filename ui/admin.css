@@ -515,3 +515,9 @@ body.case-resizing { cursor: col-resize; user-select: none; }
 @media (prefers-reduced-motion: reduce) {
   .directory-toolbar .syncing svg, .directory-sync-status.running svg { animation: none; }
 }
+
+@media (max-width: 380px) {
+  .brand { flex-shrink: 0; }
+  .service-state code { display: none; }
+  .nav-item { min-width: 32px; padding: 0 5px; }
+}
