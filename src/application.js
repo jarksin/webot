@@ -15,6 +15,7 @@ import { probeOptSource } from "./opt-status.js";
 import { PadSenderClassifier } from "./pad-sender-classifier.js";
 import { createProvider } from "./providers.js";
 import { codexRuntimeStatus } from "./codex-provider.js";
+import { createModelCatalogSync } from "./model-catalog-sync.js";
 import { WebotRuntime } from "./runtime.js";
 import { SessionStore } from "./session-store.js";
 import { serializeConfig } from "./settings-store.js";
@@ -94,6 +95,7 @@ export class WebotApplication {
     this.caseStore = null;
     this.caseManager = null;
     this.workspacePolicy = null;
+    this.modelCatalogSync = null;
     this.connectorsStarted = false;
     this.pendingSettings = null;
     this.settingsApplying = false;
@@ -180,6 +182,12 @@ export class WebotApplication {
   async applySettings(settings) {
     await this.stopConnectors();
     this.config = loadConfig(this.env, settings);
+    this.modelCatalogSync = createModelCatalogSync(
+      this.config.assistant,
+      this.env,
+      { fetch: this.fetch, logger: this.logger },
+    );
+    this.modelCatalogSync.start();
     if (!this.caseStore) {
       this.caseStore = new CaseStore(
         path.join(this.config.dataDir, "webot.sqlite"),
@@ -473,6 +481,8 @@ export class WebotApplication {
     clearTimeout(this.settingsApplyTimer);
     this.settingsApplyTimer = null;
     this.knowledgeBase?.stop();
+    this.modelCatalogSync?.stop();
+    this.modelCatalogSync = null;
     for (const client of this.padClients) client.stop();
     for (const client of this.telegramClients) client.stop();
     this.padClients = [];
@@ -878,6 +888,7 @@ export class WebotApplication {
       outboundMode: this.config.outboundMode,
       assistantMode: this.config.assistant.mode,
       codex: codexRuntimeStatus(this.config.assistant, this.env),
+      modelCatalog: this.modelCatalogSync?.status() || { enabled: false },
       dataDir: this.config.dataDir,
       settingsFile: path.resolve(this.settingsStore.file),
       agentFile: this.workspacePolicy.file,
