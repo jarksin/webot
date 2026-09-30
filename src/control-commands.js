@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { codexRuntimeStatus } from "./codex-provider.js";
+import { probeAndAddModel } from "./model-catalog-probe.js";
 import {
   normalizeSessionName,
   parseSessionCommand,
@@ -129,6 +130,7 @@ export async function applyControlCommand({
   config,
   env = process.env,
   stopped = false,
+  modelProbe = probeAndAddModel,
 }) {
   const runtime = effectiveRuntime(caseStore, caseId, config, env);
   if (command.type === "session") {
@@ -224,14 +226,28 @@ export async function applyControlCommand({
       }
       return { text: `已清除会话模型覆盖，恢复为：${restored.model}` };
     }
-    const models = availableModels(config, env);
-    const canonical = models.find(
+    let models = availableModels(config, env);
+    let canonical = models.find(
       (model) => model.toLowerCase() === clean(command.model).toLowerCase(),
     );
     if (!canonical) {
-      return {
-        text: `模型 ${clean(command.model) || "参数"} 不可用。可选：${models.join("、") || "未读取到本地模型目录"}`,
-      };
+      let probe;
+      try {
+        probe = await modelProbe(command.model, config, env);
+      } catch (error) {
+        return {
+          text: `模型 ${clean(command.model) || "参数"} 探测失败：${clean(error?.message || error).slice(0, 300)}`,
+        };
+      }
+      models = availableModels(config, env);
+      canonical = models.find(
+        (model) => model.toLowerCase() === clean(probe.selected_model).toLowerCase(),
+      );
+      if (!canonical) {
+        return {
+          text: `模型 ${clean(command.model) || "参数"} 已通过上游探测，但没有写入本地模型目录。`,
+        };
+      }
     }
     caseStore.setRuntimeSetting(modelRuntimeKey(caseId), canonical);
     if (command.task) return { continueText: command.task, model: canonical };

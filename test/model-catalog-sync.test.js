@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  addModelCatalogEntries,
   catalogForModelIds,
   refreshModelCatalog,
   visibleTextModelIds,
@@ -95,5 +96,51 @@ test("refreshes the configured catalog from the provider model endpoint", async 
     JSON.parse(await fs.readFile(catalogFile, "utf8")).models
       .map((entry) => entry.slug),
     ["gpt-6.1-sol"],
+  );
+});
+
+test("adds requested available models without replacing existing entries", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "webot-model-add-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const codexHome = path.join(root, "codex");
+  const catalogFile = path.join(codexHome, "catalog.json");
+  await fs.mkdir(codexHome, { recursive: true });
+  await fs.writeFile(path.join(codexHome, "config.toml"), [
+    'openai_base_url = "http://provider.test/v1"',
+    `model_catalog_json = ${JSON.stringify(catalogFile)}`,
+  ].join("\n"));
+  await fs.writeFile(path.join(codexHome, "auth.json"), JSON.stringify({
+    OPENAI_API_KEY: "secret",
+  }));
+  await fs.writeFile(catalogFile, JSON.stringify({
+    models: [template("gpt-6-sol")],
+  }));
+
+  const result = await addModelCatalogEntries(
+    ["gpt-6.1-sol", "company-gpt-6.1-sol"],
+    { codexHome },
+    {},
+    {
+      fetch: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [
+            { id: "gpt-6.1-sol" },
+            { id: "company-gpt-6.1-sol" },
+          ],
+        }),
+      }),
+    },
+  );
+
+  assert.deepEqual(result.addedModels, [
+    "gpt-6.1-sol",
+    "company-gpt-6.1-sol",
+  ]);
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(catalogFile, "utf8")).models
+      .map((entry) => entry.slug),
+    ["gpt-6-sol", "company-gpt-6.1-sol", "gpt-6.1-sol"],
   );
 });

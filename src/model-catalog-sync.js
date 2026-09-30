@@ -1,8 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
-
 function clean(value) {
   return String(value || "").trim();
 }
@@ -181,74 +179,52 @@ export async function refreshModelCatalog(
   };
 }
 
-export function createModelCatalogSync(
+export async function addModelCatalogEntries(
+  modelIds = [],
   config = {},
   env = process.env,
   options = {},
 ) {
-  const intervalMs = Math.max(
-    60_000,
-    Number(options.intervalMs || env.WEBOT_MODEL_CATALOG_SYNC_INTERVAL_MS
-      || DEFAULT_INTERVAL_MS),
+  const runtime = modelCatalogRuntime(config, env);
+  if (!runtime.catalogFile || !runtime.baseUrl) {
+    throw new Error("custom catalog or provider URL is not configured");
+  }
+  const auth = readJson(runtime.authFile);
+  const apiKey = clean(env.OPENAI_API_KEY || auth.OPENAI_API_KEY);
+  if (!apiKey) throw new Error("custom provider model probe has no API key");
+  const requested = [...new Set(modelIds
+    .map(clean)
+    .filter(visibleTextModelId))];
+  if (!requested.length) throw new Error("no valid model ids requested");
+  const response = await (options.fetch || globalThis.fetch)(
+    `${runtime.baseUrl.replace(/\/+$/, "")}/models`,
+    {
+      headers: { authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(Number(options.timeoutMs || 10_000)),
+    },
   );
-  const state = {
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(`custom provider model probe returned HTTP ${response.status}`);
+  }
+  const available = new Set(visibleTextModelIds(body));
+  const missing = requested.filter((model) => !available.has(model));
+  if (missing.length) {
+    throw new Error(`custom provider did not expose model: ${missing.join(", ")}`);
+  }
+  const current = readJson(runtime.catalogFile);
+  const currentIds = (Array.isArray(current?.models) ? current.models : [])
+    .map((entry) => clean(entry?.slug))
+    .filter(visibleTextModelId);
+  const nextIds = [...new Set([...currentIds, ...requested])];
+  const catalog = catalogForModelIds(current, nextIds);
+  writeJsonAtomic(runtime.catalogFile, catalog);
+  return {
     enabled: true,
-    running: false,
-    lastSuccessAt: "",
-    lastErrorAt: "",
-    lastError: "",
-    modelCount: 0,
-    models: [],
+    catalogFile: runtime.catalogFile,
+    addedModels: requested.filter((model) => !currentIds.includes(model)),
+    modelCount: nextIds.length,
+    models: nextIds,
+    fetchedAt: catalog.fetched_at,
   };
-  let timer = null;
-  let inFlight = null;
-
-  async function refresh() {
-    if (inFlight) return inFlight;
-    state.running = true;
-    inFlight = refreshModelCatalog(config, env, options).then((result) => {
-      state.enabled = result.enabled;
-      if (!result.enabled) {
-        state.lastError = "";
-        return status();
-      }
-      state.lastSuccessAt = result.fetchedAt;
-      state.lastError = "";
-      state.modelCount = result.modelCount;
-      state.models = result.models;
-      options.logger?.info?.("custom model catalog synced", {
-        modelCount: result.modelCount,
-      });
-      return status();
-    }).catch((error) => {
-      state.lastErrorAt = new Date().toISOString();
-      state.lastError = clean(error?.message || error).slice(0, 500);
-      options.logger?.warn?.("custom model catalog sync failed", {
-        error: state.lastError,
-      });
-      return status();
-    }).finally(() => {
-      state.running = false;
-      inFlight = null;
-    });
-    return inFlight;
-  }
-
-  function start() {
-    if (timer || env.WEBOT_MODEL_CATALOG_SYNC === "0") return;
-    void refresh();
-    timer = setInterval(() => void refresh(), intervalMs);
-    timer.unref?.();
-  }
-
-  function stop() {
-    if (timer) clearInterval(timer);
-    timer = null;
-  }
-
-  function status() {
-    return { ...state, models: [...state.models] };
-  }
-
-  return { refresh, start, stop, status };
 }

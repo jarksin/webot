@@ -108,6 +108,30 @@ test("applies model and effort overrides without invoking a provider", async () 
   assert.match(customModel.text, /claude-opus-5/);
   assert.equal(runtimeOverrides(caseStore, "case-1").model, "claude-opus-5");
 
+  const probedModel = await applyControlCommand({
+    command: parseControlCommand("/model company-gpt-6.1-sol"),
+    caseId: "case-1",
+    caseStore,
+    sessionStore,
+    config,
+    modelProbe: async () => {
+      const catalog = JSON.parse(
+        await fs.readFile(path.join(codexHome, "custom-models.json"), "utf8"),
+      );
+      catalog.models.push({ slug: "company-gpt-6.1-sol" });
+      await fs.writeFile(
+        path.join(codexHome, "custom-models.json"),
+        JSON.stringify(catalog),
+      );
+      return { selected_model: "company-gpt-6.1-sol" };
+    },
+  });
+  assert.match(probedModel.text, /company-gpt-6.1-sol/);
+  assert.equal(
+    runtimeOverrides(caseStore, "case-1").model,
+    "company-gpt-6.1-sol",
+  );
+
   const models = await applyControlCommand({
     command: parseControlCommand("/modes"),
     caseId: "case-1",
