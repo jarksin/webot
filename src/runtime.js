@@ -265,8 +265,7 @@ export function acceptedMessage(message, config) {
     const triggerText = message.chatType === "private"
       ? commandText
       : message.text.trim();
-    const triggered = !triggerText.startsWith("@") &&
-      hasBotNamePrefix(triggerText, triggerKeywords);
+    const triggered = hasBotNamePrefix(triggerText, triggerKeywords);
     if (!triggered) {
       return {
         accepted: false,

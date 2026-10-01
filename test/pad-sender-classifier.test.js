@@ -281,3 +281,40 @@ test("does not make owner self conversations depend on contact lookup", async ()
   );
   assert.equal(requests, 0);
 });
+
+test("does not query the source account for its outgoing private summons", async () => {
+  let requests = 0;
+  const classifier = new PadSenderClassifier(config(), {
+    fetchImpl: async () => {
+      requests += 1;
+      throw new Error("unexpected request");
+    },
+    logger: { warn() {} },
+  });
+  const outgoing = {
+    ...message("wxid_small"),
+    chatId: "wxid_friend",
+    direction: "outgoing",
+    text: "@webot hello",
+  };
+  assert.equal((await classifier.classify(outgoing)).blocked, false);
+  assert.equal(requests, 0);
+  assert.equal(
+    (await classifier.classify({ ...outgoing, chatId: "gh_official" })).reason,
+    "system-or-official-account",
+  );
+  assert.equal(requests, 0);
+  assert.equal(
+    (await classifier.classify({
+      ...outgoing, senderId: "wxid_unknown",
+    })).reason,
+    "sender-classification-unavailable",
+  );
+  assert.equal(
+    (await classifier.classify({
+      ...outgoing, direction: "incoming",
+    })).reason,
+    "sender-classification-unavailable",
+  );
+  assert.equal(requests, 2);
+});

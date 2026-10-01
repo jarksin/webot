@@ -167,6 +167,13 @@ export class PadSenderClassifier {
 
     const source = sourceForMessage({ pad: this.config }, message);
     if (!source?.ignoreAllowlist) return { blocked: false };
+    if (
+      message.direction === "outgoing" &&
+      String(message.senderId || "").trim().toLowerCase() ===
+        String(source.selfId || "").trim().toLowerCase()
+    ) {
+      return { blocked: false };
+    }
 
     const key = this.cacheKey(source, message.senderId);
     const cached = this.cached(key);

@@ -88,7 +88,8 @@ test("keyword-only Pad sources require both the allowlist and an explicit summon
     mentions: [],
   };
   assert.equal(acceptedMessage(message, sourceConfig).text, "hello");
-  for (const text of ["hello", "helper hello", "@Webot hello", "webotany hello"]) {
+  assert.equal(acceptedMessage({ ...message, text: "@Webot hello" }, sourceConfig).text, "hello");
+  for (const text of ["hello", "helper hello", "webotany hello", "@webotany hello", "ask @webot hello"]) {
     assert.equal(acceptedMessage({ ...message, text }, sourceConfig).reason, "private-not-triggered");
   }
   for (const text of ["webot hello", "@Webot hello"]) {
@@ -98,6 +99,7 @@ test("keyword-only Pad sources require both the allowlist and an explicit summon
   }
   const group = { ...message, chatType: "group", chatId: "allowed@chatroom" };
   assert.equal(acceptedMessage(group, sourceConfig).accepted, true);
+  assert.equal(acceptedMessage({ ...group, text: "@webot hello" }, sourceConfig).text, "hello");
   assert.equal(acceptedMessage({
     ...group, text: "hello", mentions: ["wxid_bot"],
   }, sourceConfig).reason, "group-not-triggered");
@@ -123,6 +125,51 @@ test("keyword-only Pad sources require both the allowlist and an explicit summon
   }, sourceConfig).reason, "sender-not-allowed");
   sourceConfig.pad.sources[0].enabled = false;
   assert.equal(acceptedMessage(message, sourceConfig).reason, "source-disabled");
+});
+
+test("keyword-only Pad sources can summon without an allowlist while retaining blocks", () => {
+  const sourceConfig = loadConfig({}, {
+    pad: { sources: [{
+      id: "main",
+      selfId: "wxid_bot",
+      enabled: true,
+      allowSelf: true,
+      keywordOnly: true,
+      ignoreAllowlist: true,
+      allowedChatIds: [],
+      allowedSenderIds: [],
+      blockedChatIds: ["blocked@chatroom", "wxid_blocked_chat"],
+      blockedSenderIds: ["wxid_blocked_sender"],
+      triggerKeywords: ["webot"],
+      botNames: ["Webot"],
+    }] },
+  });
+  const incoming = {
+    transport: "pad", sourceId: "main", chatType: "private",
+    chatId: "wxid_stranger", senderId: "wxid_stranger", selfId: "wxid_bot",
+    direction: "incoming", text: "@webot hello", mentions: [],
+  };
+  const outgoing = { ...incoming, senderId: "wxid_bot", direction: "outgoing" };
+  const group = { ...incoming, chatType: "group", chatId: "new@chatroom" };
+  for (const message of [incoming, outgoing, group]) {
+    assert.equal(acceptedMessage(message, sourceConfig).text, "hello");
+    assert.equal(acceptedMessage({ ...message, text: "webot hello" }, sourceConfig).text, "hello");
+    assert.equal(acceptedMessage({ ...message, text: "hello" }, sourceConfig).accepted, false);
+    assert.equal(acceptedMessage({ ...message, text: "@webotany hello" }, sourceConfig).accepted, false);
+    assert.equal(acceptedMessage({ ...message, text: "ask @webot hello" }, sourceConfig).accepted, false);
+  }
+  assert.equal(acceptedMessage({
+    ...incoming, chatId: "wxid_blocked_chat",
+  }, sourceConfig).reason, "chat-blocked");
+  assert.equal(acceptedMessage({
+    ...incoming, senderId: "wxid_blocked_sender",
+  }, sourceConfig).reason, "sender-blocked");
+  assert.equal(acceptedMessage({
+    ...group, chatId: "blocked@chatroom",
+  }, sourceConfig).reason, "chat-blocked");
+  assert.equal(acceptedMessage({
+    ...incoming, senderId: "gh_official", chatId: "gh_official",
+  }, sourceConfig).reason, "official-account");
 });
 
 test("strict private allowlists preserve one peer conversation without keyword bypass", () => {
