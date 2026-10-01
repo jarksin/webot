@@ -91,6 +91,23 @@ test("an abandoned restart lease releases scheduling and runs queued tasks", asy
   await finish(f, "telegram-task");
 });
 
+test("an abandoned manual stop lease restores scheduling without replaying tasks", async () => {
+  const f = fixture();
+  let expire;
+  f.manager.reserveStop({
+    schedule(callback) { expire = callback; return { unref() {} }; },
+    cancel() {},
+  });
+  f.manager.enqueue("new-message");
+  assert.equal(f.manager.reserveIdle(), null);
+  assert.equal(f.manager.draining, true);
+  assert.equal(f.starts.length, 0);
+  expire();
+  assert.equal(f.manager.draining, false);
+  assert.deepEqual(f.starts, ["new-message"]);
+  await finish(f, "new-message");
+});
+
 test("new queued work wins a race against the external broker's drain request", async () => {
   const f = fixture();
   const reservation = f.manager.reserveIdle();

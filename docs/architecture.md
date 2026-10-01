@@ -87,6 +87,14 @@ source repository.
   and reasoning effort while keeping all metadata in local SQLite state.
 - Worker execution and draft sending are separate persisted stages.
 - Workers can be paused globally, rerun per Case, or stopped while active.
+- Automatic source activation waits for running and queued work to finish
+  without blocking new tasks. A short, expiring reservation protects the
+  eventual idle handoff to the external controller.
+- The local console's confirmed manual restart cancels running tasks before
+  reloading, taking priority over a pending automatic activation. Cancellation
+  is persisted before aborting workers so stopped inputs are not replayed;
+  queued work and subsequent messages are retained. A failed cancellation
+  releases the scheduling reservation instead of leaving ingress stuck.
 - Drafts can be sent automatically or reviewed and sent from the Case console.
 - The Case console uses independently scrolling list and detail panes. Case
   summaries are paginated, while messages, drafts, and progress are loaded in a

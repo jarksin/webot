@@ -58,7 +58,8 @@ export function createSourceActivator({
       || DEFAULT_BROKER_URL,
   ).replace(/\/+$/, "");
   const pending = new Map();
-  async function submit(next, { caseId, sourceId }) {
+  let manualRestart = false;
+  async function submit(next, { caseId, sourceId, stopRunning = false }) {
     let response;
     let body;
     try {
@@ -75,6 +76,7 @@ export function createSourceActivator({
             expected_version: next.version,
             expected_source_revision: next.revision,
             expected_source_id: String(sourceId || ""),
+            ...(stopRunning ? { restart_mode: "stop_running" } : {}),
           }),
           signal: AbortSignal.timeout(10_000),
         },
@@ -117,6 +119,10 @@ export function createSourceActivator({
       pending.set(context.caseId, ticket);
       const poll = async () => {
         if (pending.get(context.caseId) !== ticket) return;
+        if (manualRestart) {
+          schedule(poll, 1000).unref?.();
+          return;
+        }
         try {
           // Busy workers are not a failed health check and never time out a reload.
           if (!idle()) {
@@ -158,7 +164,7 @@ export function createSourceActivator({
   }
 
   return {
-    async restartFromConsole({ sourceId }) {
+    async restartFromConsole({ sourceId, stopRunning = false }) {
       if (!ready()) {
         throw new Error("连接或配置尚未就绪，暂不能提交受控重载；请查看账号连接状态。");
       }
@@ -168,12 +174,25 @@ export function createSourceActivator({
         caseId: `console-restart-${now()}`,
         sourceId,
         console: true,
+        stopRunning,
       };
+      if (stopRunning) {
+        manualRestart = true;
+        try {
+          const result = await submit(next, context);
+          pending.clear();
+          return result;
+        } catch (error) {
+          if (!error.activationUncertain) manualRestart = false;
+          throw error;
+        }
+      }
       const result = await submitWhenIdle(next, context);
       return result || defer(context, true, next);
     },
     async activate(context) {
       const { caseId, message } = context;
+      if (manualRestart) return { requested: false, reason: "manual-restart-pending" };
       if (activationSuppressed(message?.text)) {
         pending.delete(caseId);
         return { requested: false, reason: "explicitly-suppressed" };

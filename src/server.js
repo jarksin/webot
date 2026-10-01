@@ -135,7 +135,13 @@ export function createServer({
             respond(response, 400, { ok: false, error: "请确认重载" });
             return;
           }
-          const restart = await application.requestRestart();
+          if (body.mode !== undefined && !["idle", "stop_running"].includes(body.mode)) {
+            respond(response, 400, { ok: false, error: "未知重载模式" });
+            return;
+          }
+          const restart = await application.requestRestart({
+            stopRunning: body.mode === "stop_running",
+          });
           respond(response, 202, { ok: true, restart });
           return;
         }

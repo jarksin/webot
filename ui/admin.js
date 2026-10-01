@@ -1001,8 +1001,8 @@ function renderRuntimeIdentity() {
   const restartButton = document.querySelector("#restart-button");
   if (restartButton) {
     restartButton.disabled = status.restart?.supported !== true ||
-      status.restart?.pending === true ||
-      restartStartedAt !== null;
+      ((status.restart?.pending === true || restartStartedAt !== null) &&
+        status.restart?.stopRunning !== false);
   }
 }
 
@@ -1759,7 +1759,7 @@ document.querySelector("#restart-button").addEventListener("click", async () => 
     showNotice("请先保存当前编辑，再重载 Webot", true);
     return;
   }
-  if (!window.confirm("任务空闲时重载 Webot？等待期间新任务照常运行，账号、配置和聊天记录会保留。")) return;
+  if (!window.confirm("停止正在运行的任务并立即重启 Webot？被停止的任务不会自动重跑，排队消息、账号、配置和聊天记录会保留。")) return;
   const button = document.querySelector("#restart-button");
   button.disabled = true;
   try {
@@ -1768,11 +1768,12 @@ document.querySelector("#restart-button").addEventListener("click", async () => 
       headers: {
         "X-Webot-Restart-Token": document.querySelector('meta[name="webot-restart-token"]').content,
       },
-      body: JSON.stringify({ confirm: true }),
+      body: JSON.stringify({ confirm: true, mode: "stop_running" }),
     });
     restartStartedAt = status.runtime.startedAt;
     restartExpectedRevision = body.restart.revision || "";
     status.restart.pending = true;
+    status.restart.stopRunning = true;
     showNotice(body.restart.message, !(body.restart.requested || body.restart.pending));
     renderRuntimeIdentity();
   } catch (error) {

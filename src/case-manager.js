@@ -140,6 +140,7 @@ export class CaseManager {
 
   reserveIdle({ leaseMs = 60_000, schedule = setTimeout, cancel = clearTimeout } = {}) {
     if (this.idleDrain) {
+      if (this.idleDrain.mode !== "idle") return null;
       if (this.active > 0 || this.queue.length || this.rerun.size) {
         this.idleDrain.release();
         return null;
@@ -148,8 +149,31 @@ export class CaseManager {
       return this.idleDrain;
     }
     if (!this.idle()) return null;
+    return this.reserveDrain({ leaseMs, schedule, cancel, mode: "idle" });
+  }
+
+  reserveStop(options = {}) {
+    if (this.idleDrain?.mode === "stop_running") {
+      this.idleDrain.renew();
+      return this.idleDrain;
+    }
+    this.idleDrain?.release(false);
+    const reservation = this.reserveDrain({ ...options, mode: "stop_running" });
+    for (const [caseId, run] of this.running) {
+      const cutoff = run.inputCutoffMessageId();
+      run.stopCutoffMessageId = cutoff;
+      // Persist cancellation before aborting; a reload must not replay this input.
+      this.caseStore.finishRun(caseId, "stopped", "manual restart", cutoff);
+      this.caseStore.addProgress(caseId, 0, "手动重启：停止当前 worker", "warn");
+      run.controller.abort();
+    }
+    return reservation;
+  }
+
+  reserveDrain({ leaseMs = 60_000, schedule = setTimeout, cancel = clearTimeout, mode }) {
     let timer;
     const reservation = {
+      mode,
       renew: () => {
         cancel(timer);
         timer = schedule(reservation.release, leaseMs);
@@ -340,6 +364,7 @@ export class CaseManager {
       let steered = false;
       if (
         activeRun &&
+        !activeRun.controller.signal.aborted &&
         !this.rerun.has(ingested.caseId) &&
         !clean.deferToNextRun &&
         !clean.attachments?.length &&
@@ -351,7 +376,7 @@ export class CaseManager {
           text: clean.text,
           messageId: String(ingested.messageRow),
         });
-        if (result?.accepted) {
+        if (result?.accepted && !activeRun.controller.signal.aborted) {
           activeRun.includeMessage(ingested.messageRow);
           steered = true;
           this.caseStore.addProgress(
@@ -474,6 +499,7 @@ export class CaseManager {
       sessionScopeCaseId: namedSession?.scope_case_id || caseId,
       sessionName: namedSession?.name || "main",
       labelOutputs: false,
+      inputCutoffMessageId: () => completionCutoffMessageId,
       includeMessage(messageRow) {
         const id = Number(messageRow || 0);
         if (!id) return;
@@ -495,6 +521,7 @@ export class CaseManager {
     this.caseStore.addProgress(caseId, session.run_count, "worker 开始处理");
     const liveProgressSeen = new Set();
     const onItem = async (item) => {
+      if (controller.signal.aborted) return;
       if (item?.type !== "agent_message") return;
       const text = String(item.text || "").trim();
       if (!text || liveProgressSeen.has(text)) return;
@@ -734,7 +761,9 @@ export class CaseManager {
         stopped ? "worker 已停止" : `worker 失败：${error.message}`,
         stopped ? "warn" : "error",
       );
-      this.caseStore.finishRun(caseId, status, error.message);
+      this.caseStore.finishRun(
+        caseId, status, error.message, currentRun.stopCutoffMessageId || 0,
+      );
       if (!stopped) throw error;
     } finally {
       this.running.delete(caseId);
@@ -866,6 +895,7 @@ export class CaseManager {
       active: this.active,
       queued: this.queue.length + this.rerun.size,
       runningCaseIds: [...this.running.keys()],
+      stopRunningSupported: true,
     };
   }
 }

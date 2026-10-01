@@ -35,6 +35,45 @@ test("console restart submits only the pinned revision and source through the pa
   assert.equal(payload.case_id, "console-restart-123");
   assert.equal(payload.expected_source_id, "fixture-source");
   assert.equal(payload.expected_source_revision, "a".repeat(40));
+  assert.equal(payload.restart_mode, undefined);
+});
+
+test("confirmed manual restart submits immediately while workers are busy", async () => {
+  let payload;
+  const activation = createSourceActivator({
+    idle: () => false,
+    reserveIdle: () => assert.fail("manual restart must not wait for idle"),
+    candidate: async () => ({ revision: "a".repeat(40), version: "0.6.42" }),
+    fetchImpl: async (_url, options) => {
+      payload = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+  const result = await activation.restartFromConsole({ sourceId: "fixture", stopRunning: true });
+  assert.equal(result.requested, true);
+  assert.equal(payload.restart_mode, "stop_running");
+  assert.match(payload.case_id, /^console-restart-\d+$/);
+  assert.equal((await activation.activate({ caseId: "auto" })).reason, "manual-restart-pending");
+});
+
+test("manual restart cancels deferred automatic submissions", async () => {
+  const scheduled = [];
+  let submissions = 0;
+  let idle = false;
+  const activation = createSourceActivator({
+    idle: () => idle,
+    candidate: async () => ({ revision: "a".repeat(40), version: "0.6.42" }),
+    schedule(callback) { scheduled.push(callback); return {}; },
+    fetchImpl: async () => {
+      submissions++;
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+  });
+  await activation.activate({ caseId: "auto" });
+  await activation.restartFromConsole({ sourceId: "fixture", stopRunning: true });
+  idle = true;
+  await scheduled.shift()();
+  assert.equal(submissions, 1);
 });
 
 function restartApplication(restartFromConsole) {
@@ -73,6 +112,20 @@ test("a known deferred reload failure permits a corrected console retry", async 
   assert.equal((await app.requestRestart()).requested, true);
 });
 
+test("manual console restart can supersede an accepted idle restart", async () => {
+  const modes = [];
+  const app = restartApplication(async ({ stopRunning }) => {
+    modes.push(stopRunning);
+    return { requested: true };
+  });
+  await app.requestRestart();
+  const result = await app.requestRestart({ stopRunning: true });
+  assert.deepEqual(modes, [false, true]);
+  assert.match(result.message, /停止运行任务/);
+  await app.requestRestart({ stopRunning: true });
+  assert.equal(modes.length, 2);
+});
+
 test("uncertain submissions never retry; known rejections can be corrected", async () => {
   for (const uncertain of [true, false]) {
     let calls = 0;
@@ -104,8 +157,9 @@ test("restart endpoint requires a local same-origin console nonce and explicit c
     startConnectors() {},
     stopConnectors() {},
     status: () => ({ ok: true, runtime: {} }),
-    requestRestart: async () => {
+    requestRestart: async ({ stopRunning }) => {
       calls++;
+      assert.equal(stopRunning, true);
       return { requested: true, message: "waiting" };
     },
   };
@@ -128,8 +182,9 @@ test("restart endpoint requires a local same-origin console nonce and explicit c
   assert.equal((await post({ ...correct, Origin: "http://evil.invalid" })).status, 403);
   assert.equal((await post({ ...correct, "X-Webot-Restart-Token": "wrong" })).status, 403);
   assert.equal((await post(correct, {})).status, 400);
+  assert.equal((await post(correct, { confirm: true, mode: "invalid" })).status, 400);
   assert.equal(calls, 0);
-  const response = await post(correct);
+  const response = await post(correct, { confirm: true, mode: "stop_running" });
   assert.equal(response.status, 202);
   assert.equal((await response.json()).restart.requested, true);
   assert.equal(calls, 1);

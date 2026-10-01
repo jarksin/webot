@@ -135,9 +135,13 @@ export class WebotApplication {
     this.fetch = fetchImpl;
   }
 
-  async requestRestart() {
+  async requestRestart({ stopRunning = false } = {}) {
     if (this.restartOperation) return this.restartOperation;
     if (this.restartResult?.failed) this.restartResult = null;
+    if (stopRunning && this.restartResult?.stopRunning === false &&
+        (this.restartResult.requested || this.restartResult.pending)) {
+      this.restartResult = null;
+    }
     if (this.restartResult) return this.restartResult;
     if (this.env.WEBOT_RUNTIME_MODE !== "source") {
       throw new Error("当前运行模式不支持源码重载");
@@ -149,10 +153,15 @@ export class WebotApplication {
     }
     this.restartOperation = (async () => {
       try {
-        const result = await this.sourceActivator.restartFromConsole({ sourceId: source.id });
+        const result = await this.sourceActivator.restartFromConsole({
+          sourceId: source.id, stopRunning,
+        });
         this.restartResult = {
           ...result,
-          message: "重启已受理，等待任务空闲；新任务继续正常运行。",
+          stopRunning,
+          message: stopRunning
+            ? "手动重启已受理，正在停止运行任务，随后重启；排队消息会保留。"
+            : "重启已受理，等待任务空闲；新任务继续正常运行。",
         };
         return this.restartResult;
       } catch (error) {
@@ -643,9 +652,11 @@ export class WebotApplication {
     return this.caseManager.setPaused(paused);
   }
 
-  beginWorkerDrain({ draining = true } = {}) {
+  beginWorkerDrain({ draining = true, stopRunning = false } = {}) {
     if (draining === false) {
       this.caseManager.idleDrain?.release();
+    } else if (stopRunning === true) {
+      this.caseManager.reserveStop();
     } else {
       this.caseManager.reserveIdle();
     }
@@ -923,6 +934,7 @@ export class WebotApplication {
         pending: Boolean(this.restartOperation ||
           (this.restartResult && !this.restartResult.failed)),
         error: this.restartResult?.failed ? this.restartResult.message : "",
+        stopRunning: this.restartResult?.stopRunning !== false,
         supported: this.env.WEBOT_RUNTIME_MODE === "source" &&
           this.config.pad.sources.some((source) => source.enabled),
       },
