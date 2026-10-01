@@ -135,6 +135,15 @@ export class CaseManager {
     return this.config.caseManagement || {};
   }
 
+  outputSessionName(caseId) {
+    const run = this.running.get(caseId);
+    return run?.labelOutputs ? run.sessionName : "";
+  }
+
+  sessionOutputText(caseId, text, name = this.outputSessionName(caseId)) {
+    return name ? `[${name}] ${text}` : text;
+  }
+
   groupContextSettings() {
     const settings = this.caseSettings();
     return {
@@ -268,6 +277,7 @@ export class CaseManager {
           {
             triggerMessageId: ingested.messageRow,
             inputCutoffMessageId: ingested.messageRow,
+            outputSessionName: this.outputSessionName(ingested.caseId),
           },
         );
         this.caseStore.addProgress(
@@ -420,8 +430,12 @@ export class CaseManager {
     let replyTargetMessageId = trigger.id;
     const session = this.caseStore.startRun(caseId, cutoffMessageId);
     const controller = new AbortController();
+    const namedSession = this.caseStore.sessionForTarget(caseId);
     this.running.set(caseId, {
       controller,
+      sessionScopeCaseId: namedSession?.scope_case_id || caseId,
+      sessionName: namedSession?.name || "main",
+      labelOutputs: false,
       includeMessage(messageRow) {
         const id = Number(messageRow || 0);
         if (!id) return;
@@ -429,6 +443,17 @@ export class CaseManager {
         replyTargetMessageId = Math.max(replyTargetMessageId, id);
       },
     });
+    const currentRun = this.running.get(caseId);
+    // Retain labels through completion, even after an overlapping run finishes.
+    for (const [otherCaseId, otherRun] of this.running) {
+      if (
+        otherCaseId !== caseId &&
+        otherRun.sessionScopeCaseId === currentRun.sessionScopeCaseId
+      ) {
+        currentRun.labelOutputs = true;
+        otherRun.labelOutputs = true;
+      }
+    }
     this.caseStore.addProgress(caseId, session.run_count, "worker 开始处理");
     const liveProgressSeen = new Set();
     const onItem = async (item) => {
@@ -448,7 +473,10 @@ export class CaseManager {
       const transport = this.transports[trigger.message.transport];
       if (!transport) return;
       try {
-        const outbound = await transport.send(trigger.message, text);
+        const outbound = await transport.send(
+          trigger.message,
+          this.sessionOutputText(caseId, text),
+        );
         this.caseStore.addProgress(
           caseId,
           session.run_count,
@@ -592,6 +620,7 @@ export class CaseManager {
             triggerMessageId: replyTargetMessageId,
             inputCutoffMessageId: completionCutoffMessageId,
             artifacts,
+            outputSessionName: this.outputSessionName(caseId),
           },
         );
         await this.sessionStore.append(caseId, "assistant", reply);
@@ -716,6 +745,8 @@ export class CaseManager {
               {
                 triggerMessageId: draft.trigger_message_id,
                 inputCutoffMessageId: draft.input_cutoff_message_id,
+                outputSessionName:
+                  draft.output_session_name || this.outputSessionName(caseId),
               },
             );
             await this.sendDraftWithOptions(caseId, fallbackDraftId, {
@@ -738,7 +769,11 @@ export class CaseManager {
     );
     const textOutbound = await transport.send(
       target.message,
-      markCompleted ? completedDraftText(draft.text) : draft.text,
+      this.sessionOutputText(
+        caseId,
+        markCompleted ? completedDraftText(draft.text) : draft.text,
+        draft.output_session_name || this.outputSessionName(caseId),
+      ),
     );
     const outbound = {
       ok: true,

@@ -393,6 +393,12 @@ export class CaseStore {
       "artifacts_json",
       "TEXT NOT NULL DEFAULT '[]'",
     );
+    ensureColumn(
+      this.db,
+      "drafts",
+      "output_session_name",
+      "TEXT NOT NULL DEFAULT ''",
+    );
     if (addedProcessedMessageCursor) {
       this.db.exec(`
         UPDATE worker_sessions
@@ -1812,9 +1818,9 @@ export class CaseStore {
     const result = this.db.prepare(`
       INSERT INTO drafts(
         case_id, text, status, model, trigger_message_id,
-        input_cutoff_message_id, artifacts_json, created_at
+        input_cutoff_message_id, artifacts_json, output_session_name, created_at
       )
-      VALUES (?, ?, 'draft', ?, ?, ?, ?, ?)
+      VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?)
     `).run(
       caseId,
       String(text),
@@ -1822,6 +1828,7 @@ export class CaseStore {
       triggerMessageId || null,
       inputCutoffMessageId,
       JSON.stringify(options.artifacts || []),
+      String(options.outputSessionName || ""),
       timestamp,
     );
     this.db.prepare(`

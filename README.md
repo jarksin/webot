@@ -85,6 +85,9 @@ Owner control commands include `/session`, `/session list`,
 `/session new <name>`, `/session <name>`, `/session delete <name>`,
 `/models` (`/modes` alias), `/model`, `/effort`, `/status`, `/clear`, and `/stop`. Named
 session metadata and conversation state remain in the local data directory.
+When sessions in the same chat run concurrently, progress and completion replies
+carry a `[session-name]` prefix. The label stays with that run's drafts for delayed
+sends and retries; independent chats and single-session runs remain unchanged.
 New owner messages can steer an active Codex turn. Control commands stay
 responsive independently, while `/clear` and `/stop` serialize with the active
 worker because they change or terminate its state.
