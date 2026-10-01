@@ -95,6 +95,75 @@ function imageDownloadContextPayload(context = {}) {
   );
 }
 
+function fileDownloadContextPayload(context = {}) {
+  const dataLen = Number(context.dataLen);
+  if (
+    !context.attachId || !context.userName ||
+    !Number.isSafeInteger(dataLen) || dataLen <= 0 || dataLen > MAX_FILE_BYTES ||
+    (context.section?.startPos && Number(context.section.startPos) !== 0) ||
+    (context.section && (
+      !Number.isSafeInteger(Number(context.section.dataLen)) ||
+      Number(context.section.dataLen) <= 0 ||
+      Number(context.section.dataLen) > 1024 * 1024
+    )) ||
+    (context.newMsgId && !/^[1-9]\d{0,19}$/.test(String(context.newMsgId)))
+  ) {
+    throw new Error("file download context is missing or invalid (maximum 64 MiB)");
+  }
+  return {
+    attach_id: String(context.attachId),
+    user_name: String(context.userName),
+    data_len: dataLen,
+    ...(context.appId ? { app_id: String(context.appId) } : {}),
+    ...(context.newMsgId ? { new_msg_id: String(context.newMsgId) } : {}),
+    ...(context.section ? { section: {
+      start_pos: 0,
+      data_len: Number(context.section.dataLen),
+    } } : {}),
+  };
+}
+
+function verifyInboundFile(data, attachment, context) {
+  if (data.length !== Number(context.dataLen)) {
+    throw new Error("Pad file download did not match its declared size");
+  }
+  if (
+    attachment.md5 &&
+    (!/^[a-f0-9]{32}$/i.test(String(attachment.md5)) ||
+      crypto.createHash("md5").update(data).digest("hex") !== String(attachment.md5).toLowerCase())
+  ) {
+    throw new Error("Pad file download did not match its declared digest");
+  }
+}
+
+async function inboundResponseBytes(response, limit) {
+  const declared = Number(response.headers.get("content-length") || 0);
+  if (declared > limit) {
+    await response.body?.cancel();
+    throw new Error("Pad media download exceeds its size limit");
+  }
+  const chunks = [];
+  let size = 0;
+  if (!response.body) throw new Error("Pad media download returned no body");
+  const reader = response.body.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > limit) {
+        await reader.cancel();
+        throw new Error("Pad media download exceeds its size limit");
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!size) throw new Error("Pad media download returned an invalid size");
+  return Buffer.concat(chunks, size);
+}
+
 function inboundImageType(data) {
   if (data.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff]))) {
     return { extension: ".jpg", mime: "image/jpeg" };
@@ -310,16 +379,22 @@ export class PadTransport {
     return { ok: true, result };
   }
 
-  async downloadInboundAttachment(message, attachment, dataDir) {
+  async downloadInboundAttachment(message, attachment, dataDir, options = {}) {
     const source = this.source(message);
     const context = attachment?.downloadContext;
     const endpoint = String(context?.endpoint || "");
+    const isFile = attachment?.kind === "file";
     if (
-      attachment?.kind !== "image" ||
-      endpoint !== "/api/v1/media/download-img-binary"
+      !(isFile
+        ? endpoint === "/api/v1/media/download-file-binary"
+        : attachment?.kind === "image" && endpoint === "/api/v1/media/download-img-binary")
     ) {
-      throw new Error("attachment does not expose the complete image endpoint");
+      throw new Error(`attachment does not expose the complete ${isFile ? "file" : "image"} endpoint`);
     }
+    const payload = isFile ? fileDownloadContextPayload(context) : imageDownloadContextPayload(context);
+    const limit = isFile ? Number(context.dataLen) : MAX_INBOUND_IMAGE_BYTES;
+    const fileExtension = path.extname(String(attachment.filename || "")).toLowerCase();
+    const extension = /^\.[a-z0-9]{1,12}$/.test(fileExtension) ? fileExtension : ".bin";
     const directory = path.join(
       path.resolve(dataDir),
       "inbound-media",
@@ -327,53 +402,62 @@ export class PadTransport {
     );
     const base = crypto.createHash("sha256").update(JSON.stringify([
       source.id, message.chatId, message.messageId, context,
+      ...(isFile ? [attachment.md5 || ""] : []),
     ])).digest("hex");
-    for (const extension of [".jpg", ".png", ".gif", ".webp"]) {
-      const filePath = path.join(directory, `${base}${extension}`);
+    for (const suffix of isFile ? [extension] : [".jpg", ".png", ".gif", ".webp"]) {
+      const filePath = path.join(directory, `${base}${suffix}`);
       try {
         const info = fs.lstatSync(filePath);
-        if (info.isFile() && info.size > 0 && info.size <= MAX_INBOUND_IMAGE_BYTES) {
-          const type = inboundImageType(fs.readFileSync(filePath));
+        if (info.isFile() && info.size > 0 && info.size <= limit) {
+          const data = fs.readFileSync(filePath);
+          if (isFile) verifyInboundFile(data, attachment, context);
+          const type = isFile
+            ? { extension, mime: "application/octet-stream" }
+            : inboundImageType(data);
           return {
-            localPath: filePath, filename: `${base}${type.extension}`,
+            localPath: filePath,
+            filename: isFile ? attachment.filename || `${base}${extension}` : `${base}${type.extension}`,
             mime: type.mime, size: info.size,
           };
         }
       } catch {}
     }
-    const response = await this.fetch(padEndpointURL(source, endpoint), {
-      method: "POST",
-      headers: tokenHeaders(source.accessToken),
-      body: JSON.stringify({
-        image: {
-          download_context: imageDownloadContextPayload(context),
-        },
-      }),
-      signal: AbortSignal.timeout(180_000),
-    });
-    if (!response.ok) {
-      throw new Error(`Pad image download failed (${response.status})`);
-    }
-    const declared = Number(response.headers.get("content-length") || 0);
-    if (declared > MAX_INBOUND_IMAGE_BYTES) {
-      throw new Error("Pad image download exceeds 32 MiB");
-    }
-    const data = Buffer.from(await response.arrayBuffer());
-    if (!data.length || data.length > MAX_INBOUND_IMAGE_BYTES) {
-      throw new Error("Pad image download returned an invalid size");
-    }
-    const type = inboundImageType(data);
-    const filePath = path.join(directory, `${base}${type.extension}`);
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const temporary = `${filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, data, { mode: 0o600 });
-    fs.renameSync(temporary, filePath);
-    return {
-      localPath: filePath,
-      filename: `${base}${type.extension}`,
-      mime: type.mime,
-      size: data.length,
+    const download = async () => {
+      const response = await this.fetch(padEndpointURL(source, endpoint), {
+        method: "POST",
+        headers: tokenHeaders(source.accessToken),
+        body: JSON.stringify(isFile ? {
+          file: { name: attachment.filename, download_context: payload },
+        } : {
+          image: { download_context: payload },
+        }),
+        signal: AbortSignal.timeout(180_000),
+      });
+      if (!response.ok) {
+        throw new Error(`Pad ${isFile ? "file" : "image"} download failed (${response.status})`);
+      }
+      const data = await inboundResponseBytes(response, limit);
+      if (isFile) verifyInboundFile(data, attachment, context);
+      const type = isFile
+        ? { extension, mime: "application/octet-stream" }
+        : inboundImageType(data);
+      const filePath = path.join(directory, `${base}${type.extension}`);
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      const temporary = `${filePath}.${crypto.randomUUID()}.tmp`;
+      try {
+        fs.writeFileSync(temporary, data, { mode: 0o600, flag: "wx" });
+        fs.renameSync(temporary, filePath);
+      } finally {
+        try { fs.unlinkSync(temporary); } catch {}
+      }
+      return {
+        localPath: filePath,
+        filename: isFile ? attachment.filename || `${base}${extension}` : `${base}${type.extension}`,
+        mime: type.mime,
+        size: data.length,
+      };
     };
+    return options.request ? options.request(download) : download();
   }
 
   send(message, text) {

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { markHydratedImage, MAX_MODEL_IMAGES } from "./inbound-images.js";
+import { markHydratedFile, MAX_MODEL_FILES } from "./inbound-files.js";
 import { CaseManager } from "./case-manager.js";
 import { CaseStore } from "./case-store.js";
 import {
@@ -435,32 +436,38 @@ export class WebotApplication {
       ? [...message.attachments]
       : [];
     let imageCount = 0;
+    let fileCount = 0;
     for (let index = 0; index < attachments.length; index += 1) {
       const attachment = attachments[index];
+      const isFile = attachment?.kind === "file";
       if (
-        attachment?.kind !== "image" ||
-        !attachment?.downloadContext?.endpoint ||
-        imageCount >= MAX_MODEL_IMAGES
+        (!isFile && attachment?.kind !== "image") ||
+        (isFile ? fileCount >= MAX_MODEL_FILES : imageCount >= MAX_MODEL_IMAGES)
       ) {
         continue;
       }
-      imageCount += 1;
+      if (!attachment?.downloadContext?.endpoint) {
+        if (isFile) attachments[index] = { ...attachment, error: "file_download_context_missing" };
+        continue;
+      }
+      if (isFile) fileCount += 1;
+      else imageCount += 1;
       try {
-        const cached = await this.serializePadMediaRequest(
-          message.sourceId,
-          () => this.transports.pad.downloadInboundAttachment(
-            message,
-            attachment,
-            this.config.dataDir,
-          ),
+        const cached = await this.transports.pad.downloadInboundAttachment(
+          message,
+          attachment,
+          this.config.dataDir,
+          { request: (operation) => this.serializePadMediaRequest(message.sourceId, operation) },
         );
-        attachments[index] = markHydratedImage(attachment, cached);
+        attachments[index] = isFile
+          ? await markHydratedFile(attachment, cached)
+          : markHydratedImage(attachment, cached);
       } catch (error) {
         attachments[index] = {
           ...attachment,
-          error: "image_download_failed",
+          error: isFile ? "file_download_failed" : "image_download_failed",
         };
-        this.logger.warn("pad inbound image cache failed", {
+        this.logger.warn("pad inbound media cache failed", {
           sourceId: message.sourceId,
           messageId: message.messageId,
           error: error.message,

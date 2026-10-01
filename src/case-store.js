@@ -1042,7 +1042,9 @@ export class CaseStore {
         )) &&
         !excluded.has(String(row.message_id)) &&
         Array.isArray(row.attachments) &&
-        row.attachments.some((attachment) => attachment?.kind === "image")
+        row.attachments.some((attachment) =>
+          attachment?.kind === "image" || (pad && attachment?.kind === "file")
+        )
       )
       .slice(-limit)
       .map((row) => ({
