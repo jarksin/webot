@@ -10,15 +10,15 @@
     </marker>
     <style>
       text { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #172033; }
-      .eyebrow { font-size: 15px; font-weight: 700; letter-spacing: 1.8px; fill: #587084; }
+      .eyebrow { font-size: 15px; font-weight: 700; letter-spacing: 0; fill: #587084; }
       .title { font-size: 44px; font-weight: 750; letter-spacing: 0; }
       .subtitle { font-size: 19px; font-weight: 450; fill: #526071; }
-      .lane { font-size: 15px; font-weight: 750; letter-spacing: 1.2px; }
+      .lane { font-size: 15px; font-weight: 750; letter-spacing: 0; }
       .card-title { font-size: 20px; font-weight: 700; }
       .card-copy { font-size: 15px; font-weight: 450; fill: #586576; }
       .small-title { font-size: 17px; font-weight: 700; }
       .small-copy { font-size: 13px; font-weight: 450; fill: #607082; }
-      .pill { font-size: 12px; font-weight: 700; letter-spacing: .5px; }
+      .pill { font-size: 12px; font-weight: 700; letter-spacing: 0; }
       .inverse { fill: #ffffff; }
       .inverse-muted { fill: #dce3ec; }
       .flow { stroke: #526071; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
@@ -50,8 +50,8 @@
     <rect x="72" y="266" width="212" height="94" rx="8" fill="#ffffff" stroke="#b9ddd2"/>
     <circle cx="108" cy="313" r="21" fill="#16a085"/>
     <text x="108" y="319" text-anchor="middle" font-size="16" font-weight="800" class="inverse">W</text>
-    <text x="140" y="304" class="small-title">WeChatPad</text>
-    <text x="140" y="329" class="small-copy">HTTP + WebSocket</text>
+    <text x="140" y="304" class="small-title">WeChat</text>
+    <text x="140" y="329" class="small-copy">vxUltra / Pad gateway</text>
 
     <rect x="72" y="378" width="212" height="94" rx="8" fill="#ffffff" stroke="#b9ddd2"/>
     <circle cx="108" cy="425" r="21" fill="#2581c4"/>
@@ -71,19 +71,19 @@
     <rect x="318" y="266" width="260" height="112" rx="8" fill="#ffffff" stroke="#c4d4e8"/>
     <rect x="318" y="266" width="8" height="112" rx="4" fill="#4b82c3"/>
     <text x="350" y="301" class="card-title">Connector adapters</text>
-    <text x="350" y="330" class="card-copy">Protocol clients and source-aware</text>
-    <text x="350" y="352" class="card-copy">transport boundaries</text>
+    <text x="350" y="330" class="card-copy">Account-aware protocol clients</text>
+    <text x="350" y="352" class="card-copy">and transport boundaries</text>
 
     <rect x="318" y="398" width="260" height="112" rx="8" fill="#ffffff" stroke="#c4d4e8"/>
     <rect x="318" y="398" width="8" height="112" rx="4" fill="#4b82c3"/>
     <text x="350" y="433" class="card-title">Normalize &amp; archive</text>
-    <text x="350" y="462" class="card-copy">Canonical events, deduplication,</text>
+    <text x="350" y="462" class="card-copy">Canonical events and dedup;</text>
     <text x="350" y="484" class="card-copy">message and identity capture</text>
 
     <rect x="318" y="530" width="260" height="112" rx="8" fill="#ffffff" stroke="#c4d4e8"/>
     <rect x="318" y="530" width="8" height="112" rx="4" fill="#4b82c3"/>
     <text x="350" y="565" class="card-title">Access policy</text>
-    <text x="350" y="594" class="card-copy">Stable sender identity, allowlists,</text>
+    <text x="350" y="594" class="card-copy">Sender IDs and allowlists;</text>
     <text x="350" y="616" class="card-copy">triggers, owner/public scope</text>
   </g>
 
@@ -92,20 +92,20 @@
     <rect x="612" y="266" width="330" height="112" rx="8" fill="#ffffff" stroke="#ead4ae"/>
     <rect x="612" y="266" width="8" height="112" rx="4" fill="#d38b2c"/>
     <text x="646" y="301" class="card-title">Case router</text>
-    <text x="646" y="330" class="card-copy">One stable Case per account-scoped chat</text>
+    <text x="646" y="330" class="card-copy">One stable Case per source and chat</text>
     <text x="646" y="352" class="card-copy">with independent namespace and state</text>
 
     <rect x="612" y="398" width="330" height="112" rx="8" fill="#ffffff" stroke="#ead4ae"/>
     <rect x="612" y="398" width="8" height="112" rx="4" fill="#d38b2c"/>
     <text x="646" y="433" class="card-title">Persistent conversation</text>
     <text x="646" y="462" class="card-copy">Bounded history, Codex continuation,</text>
-    <text x="646" y="484" class="card-copy">named owner sessions and model settings</text>
+    <text x="646" y="484" class="card-copy">named sessions and model overrides</text>
 
     <rect x="612" y="530" width="330" height="112" rx="8" fill="#ffffff" stroke="#ead4ae"/>
     <rect x="612" y="530" width="8" height="112" rx="4" fill="#d38b2c"/>
     <text x="646" y="565" class="card-title">Worker queue &amp; steering</text>
-    <text x="646" y="594" class="card-copy">Serialized per Case; new messages steer</text>
-    <text x="646" y="616" class="card-copy">the active turn or schedule a follow-up</text>
+    <text x="646" y="594" class="card-copy">Per-Case queue; follow-ups steer</text>
+    <text x="646" y="616" class="card-copy">the active turn or queue another run</text>
   </g>
 
   <!-- Assistant -->
@@ -115,13 +115,13 @@
     <rect x="1008" y="292" width="88" height="24" rx="5" fill="#f2eafa"/>
     <text x="1052" y="309" text-anchor="middle" class="pill" fill="#7c479f">CODEX</text>
     <text x="1008" y="347" class="card-title">Assistant provider</text>
-    <text x="1008" y="376" class="card-copy">Repository-aware tools, approved</text>
-    <text x="1008" y="398" class="card-copy">knowledge and workspace policy</text>
+    <text x="1008" y="376" class="card-copy">Authorized tools and knowledge;</text>
+    <text x="1008" y="398" class="card-copy">Codex, LLM API or webhook</text>
 
     <rect x="976" y="438" width="300" height="204" rx="8" fill="#ffffff" stroke="#d8c4e7"/>
     <rect x="976" y="438" width="8" height="204" rx="4" fill="#9860b6"/>
     <text x="1008" y="475" class="card-title">Persisted result</text>
-    <text x="1008" y="504" class="card-copy">Draft text + owner-only attachments</text>
+    <text x="1008" y="504" class="card-copy">Draft text + permitted attachments</text>
     <line x1="1008" y1="527" x2="1244" y2="527" class="divider"/>
     <text x="1008" y="558" class="small-title">Automatic send</text>
     <text x="1008" y="581" class="small-copy">or review from the Case console</text>
@@ -194,8 +194,8 @@
     <circle cx="1174" cy="803" r="19" fill="#16a085"/>
     <text x="1174" y="809" text-anchor="middle" font-size="14" font-weight="800" class="inverse">O</text>
     <text x="1207" y="810" class="small-title">Operations</text>
-    <text x="1166" y="844" class="small-copy">Loopback admin console, connector health,</text>
-    <text x="1166" y="866" class="small-copy">guarded drain and external activation broker</text>
+    <text x="1166" y="844" class="small-copy">Owner change: verify, commit, reply, drain</text>
+    <text x="1166" y="866" class="small-copy">Parent submits; external broker reloads + verifies</text>
   </g>
 
   <!-- Data/control relationships -->

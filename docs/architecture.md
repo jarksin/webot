@@ -90,6 +90,11 @@ source repository.
 - Automatic source activation waits for running and queued work to finish
   without blocking new tasks. A short, expiring reservation protects the
   eventual idle handoff to the external controller.
+- Owner-authorized source updates are verified and committed before the parent
+  submits the exact candidate revision to the configured external activation
+  broker. Workers do not invoke that broker or stop their own service. An
+  explicit `do not restart` request suppresses automatic source activation.
+  Broker acceptance alone is not confirmation of a new running revision.
 - The local console's confirmed manual restart cancels running tasks before
   reloading, taking priority over a pending automatic activation. Cancellation
   is persisted before aborting workers so stopped inputs are not replayed;
