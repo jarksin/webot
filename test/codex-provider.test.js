@@ -69,6 +69,20 @@ test("parses structured replies and attachment aliases", () => {
   );
 });
 
+test("attachment read envelopes are internal and reject mixed or malformed replies", () => {
+  assert.deepEqual(parseAssistantResult('{"read_files":["file-1"]}'), {
+    text: "", artifacts: [], fileReadRequests: ["file-1"],
+  });
+  for (const value of [
+    { read_files: [] },
+    { read_files: "/tmp/file.md" },
+    { read_files: [1] },
+    { read_files: ["file-1"], reply_text: "mixed reply" },
+  ]) {
+    assert.throws(() => parseAssistantResult(JSON.stringify(value)), /invalid attachment read response/);
+  }
+});
+
 test("builds new and resume commands with editable Codex settings", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-codex-"));
   const binary = path.join(directory, "codex");

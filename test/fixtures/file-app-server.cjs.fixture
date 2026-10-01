@@ -1,0 +1,41 @@
+#!/usr/bin/env node
+const readline = require("node:readline");
+const lines = readline.createInterface({ input: process.stdin });
+const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
+lines.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  let result = {};
+  if (request.method === "thread/start" || request.method === "thread/resume") {
+    result = { thread: { id: "file-test-thread" } };
+  }
+  if (request.method === "turn/start") {
+    const prompt = request.params.input[0]?.text || "";
+    const continuation = prompt.includes("Framework attachment read results, requested by you.");
+    if (!continuation && prompt.includes("Read this Markdown attachment")) {
+      send({ id: request.id, error: { message: "file text was eagerly inserted" } });
+      return;
+    }
+    if (continuation && !prompt.includes("Read this Markdown attachment")) {
+      send({ id: request.id, error: { message: "selected text preview missing" } });
+      return;
+    }
+    result = { turn: { id: "file-test-turn" } };
+    setTimeout(() => send({
+      method: "turn/completed",
+      params: {
+        threadId: "file-test-thread",
+        turn: {
+          id: "file-test-turn", status: "completed",
+          items: [{
+            type: "agentMessage",
+            text: JSON.stringify(continuation
+              ? { reply_text: "selected file read successfully", attachments: [] }
+              : { read_files: ["file-1"] }),
+          }],
+        },
+      },
+    }), 20);
+  }
+  send({ id: request.id, result });
+});

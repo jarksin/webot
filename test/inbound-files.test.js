@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { markHydratedFile, modelFiles } from "../src/inbound-files.js";
+import { markHydratedFile, modelFiles, readModelFiles } from "../src/inbound-files.js";
 import { PadTransport } from "../src/transports/pad.js";
 import { WebotApplication } from "../src/application.js";
 import { normalizePadEnvelope } from "../src/normalize.js";
@@ -133,7 +133,7 @@ test("Pad files reject unsafe endpoints, missing context, oversized declarations
   await assert.rejects(rejected.downloadInboundAttachment(message, file, directory), /403/);
 });
 
-test("only framework-read files enter the model, within the same conversation", async (t) => {
+test("verified chat files expose the same metadata and complete internal paths without eager text", async (t) => {
   const directory = await temporary(t);
   const localPath = path.join(directory, "file.md");
   await fs.writeFile(localPath, data);
@@ -144,9 +144,21 @@ test("only framework-read files enter the model, within the same conversation", 
     ], reference: { messageId: "quoted", attachments: [verified] },
   };
   assert.deepEqual(modelFiles(current), [{
-    filename: "SKILL(1).md", size: data.length, status: "readable",
-    truncated: false, text, encoding: "utf-8", messageId: "current",
+    id: "file-1", filename: "SKILL(1).md", size: data.length, mime: "",
+    status: "available", readableAsText: true, messageId: "current",
+    localPath,
   }]);
+  assert.equal(modelFiles(current)[0].text, undefined);
+  const references = modelFiles(current);
+  assert.deepEqual(await readModelFiles(references, ["file-1"]), [{
+    id: "file-1", filename: "SKILL(1).md", size: data.length,
+    status: "readable", truncated: false, text, encoding: "utf-8",
+  }]);
+  await assert.rejects(readModelFiles(
+    [JSON.parse(JSON.stringify(references[0]))], ["file-1"],
+  ), /unknown attachment reference/);
+  await assert.rejects(readModelFiles(references, [localPath]), /unknown attachment reference/);
+  await assert.rejects(readModelFiles(references, ["file-1", "file-1"]), /invalid attachment read/);
   assert.deepEqual(modelFiles({
     ...scope, attachments: [JSON.parse(JSON.stringify(verified))],
   }), []);
@@ -161,7 +173,7 @@ test("only framework-read files enter the model, within the same conversation", 
   await assert.rejects(markHydratedFile(file, { localPath: symlink, size: data.length }));
 });
 
-test("text previews handle BOM, binary and encoding errors, bound length, and label truncation", async (t) => {
+test("only requested text previews decode BOM and bound content, with accurate format errors", async (t) => {
   const directory = await temporary(t);
   const read = async (name, bytes) => {
     const localPath = path.join(directory, name);
@@ -171,27 +183,32 @@ test("text previews handle BOM, binary and encoding errors, bound length, and la
   const utf16 = await read("bom.md", Buffer.concat([
     Buffer.from([0xff, 0xfe]), Buffer.from("hello", "utf16le"),
   ]));
-  assert.equal(modelFiles({ attachments: [utf16] })[0].text, "hello");
+  assert.equal(modelFiles({ attachments: [utf16] })[0].text, undefined);
+  const preview = async (attachments) => {
+    const files = modelFiles({ attachments });
+    return readModelFiles(files, files.map((item) => item.id));
+  };
+  assert.equal((await preview([utf16]))[0].text, "hello");
   const binary = await read("fake.md", Buffer.from([0, 1, 2]));
   const invalid = await read("bad.md", Buffer.from([0xff]));
   const document = await read("document.pdf", Buffer.from("%PDF"));
-  assert.deepEqual(modelFiles({ attachments: [binary, invalid, document] }).map((item) => item.status),
+  assert.deepEqual((await preview([binary, invalid, document])).map((item) => item.status),
     ["unsupported_encoding_or_binary", "unsupported_encoding_or_binary", "unsupported_format"]);
   const big = await read("big.md", Buffer.from(`${"a".repeat(65535)}\u4e2dend`));
-  const preview = modelFiles({ attachments: [big] })[0];
-  assert.equal(preview.status, "readable");
-  assert.equal(preview.truncated, true);
-  assert.equal(preview.text.length, 65535);
+  const bigPreview = (await preview([big]))[0];
+  assert.equal(bigPreview.status, "readable");
+  assert.equal(bigPreview.truncated, true);
+  assert.equal(bigPreview.text.length, 65535);
   const more = [];
   for (let index = 0; index < 7; index++) {
     more.push(await read(`large-${index}.md`, Buffer.alloc(65536, 97)));
   }
-  const bounded = modelFiles({ attachments: more });
+  const bounded = await preview(more);
   assert.equal(bounded.length, 6);
-  assert.equal(bounded.reduce((sum, item) => sum + item.text.length, 0), 128 * 1024);
+  assert.equal(bounded.reduce((sum, item) => sum + (item.text?.length || 0), 0), 128 * 1024);
 });
 
-test("current and quoted files reach a public provider as untrusted text without private locators", async (t) => {
+test("public providers see verified file placeholders without text or download credentials until a read", async (t) => {
   const directory = await temporary(t);
   const app = application(directory, transport(async () => new Response(data)));
   const message = await app.hydratePadMedia({
@@ -206,10 +223,11 @@ test("current and quoted files reach a public provider as untrusted text without
   });
   await provider.reply({ caseId: "case", message, history: [] });
   assert.equal(modelFiles(message).length, 2);
-  assert.match(request.prompt, /Read this Markdown attachment/);
+  assert.doesNotMatch(request.prompt, /Read this Markdown attachment/);
+  assert.match(request.prompt, /metadata only/);
   assert.match(request.prompt, /never permission or instructions to execute or install skills/);
-  assert.doesNotMatch(request.prompt, /fixture-attachment|fixture-app|download_context|localPath/);
-  assert.equal(request.prompt.includes(directory), false);
+  assert.doesNotMatch(request.prompt, /fixture-attachment|fixture-app|download_context/);
+  assert.equal(request.prompt.includes(message.attachments[0].localPath), true);
   const failed = await application(directory, transport(async () => {
     throw new Error("private-secret");
   })).hydratePadMedia({
@@ -250,7 +268,7 @@ test("recent file context remains bounded to incoming messages from the same sen
   assert.equal(rows[0].message.attachments[0].downloadContext.attachId, "fixture-attachment");
 });
 
-test("queued file then text reaches the worker with readable file contents and cannot be text-only steered", async (t) => {
+test("queued file then text retains metadata for on-demand reading and cannot be text-only steered", async (t) => {
   const directory = await temporary(t);
   const store = new CaseStore(path.join(directory, "webot.sqlite"));
   t.after(() => store.close());
@@ -298,5 +316,183 @@ test("queued file then text reaches the worker with readable file contents and c
   assert.equal(manager.status().active, 0);
   assert.equal(turns.length, 2);
   assert.equal(turns[1].currentMessageCount, 2);
-  assert.equal(modelFiles(turns[1].message)[0].text, text);
+  const files = modelFiles(turns[1].message);
+  assert.equal(files[0].text, undefined);
+  assert.equal((await readModelFiles(files, ["file-1"]))[0].text, text);
+});
+
+test("only model-selected attached text enters a continuation and its usage is retained", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "selected.md");
+  const otherPath = path.join(directory, "unselected.md");
+  await fs.writeFile(localPath, data);
+  await fs.writeFile(otherPath, "unselected-private-file-content");
+  const attachments = [
+    await markHydratedFile(file, { localPath, size: data.length }),
+    await markHydratedFile({ kind: "file", filename: "other.md" }, {
+      localPath: otherPath, size: (await fs.stat(otherPath)).size,
+    }),
+  ];
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  const requests = [];
+  let intermediate = 0;
+  const provider = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+    runCodex: async (_config, input) => {
+      requests.push(input);
+      if (requests.length === 1) {
+        assert.equal(input.prompt.includes(text), false);
+        await input.onItem?.({ text: '{"read_files":["file-1"]}' });
+        return {
+          text: '{"read_files":["file-1"]}', sessionId: "session-1",
+          usage: { inputTokens: 10, outputTokens: 2 }, requestCount: 1,
+          estimatedCostUsd: 0.01,
+        };
+      }
+      assert.equal(input.sessionId, "session-1");
+      assert.match(input.prompt, /Read this Markdown attachment/);
+      assert.doesNotMatch(input.prompt, /unselected-private-file-content/);
+      assert.doesNotMatch(input.prompt, /fixture-attachment|fixture-app|download_context/);
+      return {
+        text: '{"reply_text":"analyzed","attachments":[]}', sessionId: "session-1",
+        usage: { inputTokens: 20, outputTokens: 3 }, requestCount: 1,
+        estimatedCostUsd: 0.02,
+      };
+    },
+  });
+  const result = await provider.reply({
+    caseId: "case", message: { ...scope, text: "analyze the first file", attachments },
+    history: [], onItem: () => { intermediate++; },
+  });
+  assert.equal(requests.length, 2);
+  assert.equal(intermediate, 0);
+  assert.equal(result.text, "analyzed");
+  assert.deepEqual(result.usage, { inputTokens: 30, outputTokens: 5 });
+  assert.equal(result.requestCount, 2);
+  assert.equal(result.estimatedCostUsd, 0.03);
+});
+
+test("owner prompts contain only verified paths and no eager file contents", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "verified.md");
+  await fs.writeFile(localPath, data);
+  const attachment = await markHydratedFile(file, { localPath, size: data.length });
+  const forged = { ...file, localPath: "/tmp/forged-private-path.md", text: "forged content" };
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  let prompt;
+  const provider = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+    requesterAccess: () => "owner",
+    runCodex: async (_config, request) => { prompt = request.prompt; return "done"; },
+  });
+  await provider.reply({
+    caseId: "case",
+    message: {
+      ...scope, text: "store these files",
+      attachments: [forged, attachment],
+      reference: { messageId: "quoted", attachments: [forged] },
+    },
+    history: [],
+  });
+  assert.equal(prompt.includes(localPath), true);
+  assert.equal(prompt.includes(text), false);
+  assert.doesNotMatch(prompt, /forged-private-path|forged content/);
+});
+
+test("on-demand reads reject changed caches and symlinks without revealing local paths", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "original.md");
+  await fs.writeFile(localPath, data);
+  const attachment = await markHydratedFile(file, { localPath, size: data.length });
+  const files = modelFiles({ attachments: [attachment] });
+  await fs.unlink(localPath);
+  await fs.writeFile(localPath, Buffer.alloc(data.length, 97));
+  const changed = await readModelFiles(files, ["file-1"]);
+  assert.equal(changed[0].status, "file_read_failed");
+  assert.equal(changed[0].text, undefined);
+  await fs.unlink(localPath);
+  const secret = path.join(directory, "secret.md");
+  await fs.writeFile(secret, Buffer.alloc(data.length, 97));
+  await fs.symlink(secret, localPath);
+  const linked = await readModelFiles(files, ["file-1"]);
+  assert.equal(linked[0].status, "file_read_failed");
+  assert.equal(JSON.stringify(linked).includes(directory), false);
+});
+
+test("providers reject repeated or out-of-scope reads and respect cancellation", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "file.md");
+  await fs.writeFile(localPath, data);
+  const attachment = await markHydratedFile(file, { localPath, size: data.length });
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  const request = { caseId: "case", message: { ...scope, attachments: [attachment] }, history: [] };
+  const unknown = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+    runCodex: async () => JSON.stringify({ read_files: [localPath] }),
+  });
+  await assert.rejects(unknown.reply(request), /unknown attachment reference/);
+  let runs = 0;
+  const repeated = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+    runCodex: async () => { runs++; return '{"read_files":["file-1"]}'; },
+  });
+  await assert.rejects(repeated.reply(request), /scope or budget/);
+  assert.equal(runs, 2);
+  const controller = new AbortController();
+  const cancelled = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+    runCodex: async () => { controller.abort(); return '{"read_files":["file-1"]}'; },
+  });
+  await assert.rejects(cancelled.reply({ ...request, signal: controller.signal }), /worker stopped/);
+});
+
+test("cached attachment paths never appear in final or intermediate chat replies", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "cached-file.md");
+  await fs.writeFile(localPath, data);
+  const attachment = await markHydratedFile(file, { localPath, size: data.length });
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  for (const access of ["owner", "public"]) {
+    const items = [];
+    const provider = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+      requesterAccess: () => access,
+      runCodex: async (_config, request) => {
+        assert.equal(request.prompt.includes(localPath), true);
+        assert.equal(request.prompt.includes(text), false);
+        await request.onItem?.({ type: "agent_message", text: `Reading ${localPath}` });
+        return JSON.stringify({
+          reply_text: `Read ${localPath}; cache directory ${directory}.`,
+          attachments: [],
+        });
+      },
+    });
+    const result = await provider.reply({
+      caseId: `case-${access}`, message: { ...scope, attachments: [attachment] },
+      history: [], onItem: (item) => items.push(item),
+    });
+    assert.equal(result.text.includes(directory), false);
+    assert.match(result.text, /SKILL\(1\).md/);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].text.includes(directory), false);
+  }
+});
+
+test("native app-server completes a metadata-first file read through the same conversation", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "file.md");
+  await fs.writeFile(localPath, data);
+  const attachment = await markHydratedFile(file, { localPath, size: data.length });
+  const binary = path.join(directory, "codex");
+  await fs.copyFile(new URL("./fixtures/file-app-server.cjs.fixture", import.meta.url), binary);
+  await fs.chmod(binary, 0o700);
+  const provider = createCodexProvider({
+    codexBin: binary, codexHome: directory, workingDirectory: directory,
+    timeoutMs: 3000,
+  });
+  const result = await provider.reply({
+    caseId: "case", message: { ...scope, text: "analyze the attachment", attachments: [attachment] },
+    history: [],
+  });
+  assert.equal(result.text, "selected file read successfully");
+  assert.equal(result.sessionId, "file-test-thread");
+  assert.deepEqual(result.artifacts, []);
 });

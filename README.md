@@ -67,6 +67,26 @@ implemented adapters, not a promise of built-in support for every messaging
 platform. Telegram is a user-account integration, not a Bot API token setup.
 Other platforms need an adapter or a compatible hook.
 
+### Incoming Files
+
+Incoming WeChat files are cached and validated, but their contents are **not
+automatically expanded into the model context**. The assistant first receives
+filename, size, type, and a current-conversation file reference, then decides
+whether the task needs a read.
+
+Files already visible in the conversation use the same attachment-read
+workflow regardless of sender identity. Verified full cache paths are internal
+metadata, never chat output or permission to access other files. Selected text
+is read by the framework through bounded, conversation-scoped references.
+Download credentials are not needed by the model. Files from other chats and
+arbitrary filesystem paths cannot be requested through this mechanism;
+permissions for private tools and system files remain unchanged.
+
+Text previews are limited to 64 KiB per file and 128 Ki characters per turn,
+with at most six file references. Truncation and unsupported formats are
+reported explicitly. Known attachment cache paths are removed from final and
+intermediate chat text; actual file delivery still uses attachments.
+
 ## Quick Start
 
 ### 1. Prepare the Runtime

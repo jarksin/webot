@@ -64,6 +64,30 @@ Instance-specific identity and permissions remain in the private Webot data
 directory and are injected into every Codex turn; they are not committed to the
 source repository.
 
+## Attachment Read Boundary
+
+Incoming WeChat files are downloaded and validated into a private cache without
+decoding their text into the initial model prompt. That prompt contains metadata
+and current-turn references only. The assistant chooses whether to read the
+files required by the task; receiving an attachment alone does not request a
+read.
+
+Files already visible in the conversation have the same metadata-first read
+workflow regardless of sender identity. Verified full cache paths remain
+internal attachment metadata; they do not grant access to other local files or
+change requester tool permissions. A model-selected text read is consumed
+internally by the provider and resolved only against
+framework-created references for the current conversation. It cannot supply an
+arbitrary path or reuse another chat's reference. File text and embedded
+instructions remain untrusted data, not authority to execute or install code.
+
+On-demand previews retain the original encoding and size bounds: 64 KiB per
+file, 128 Ki characters per provider turn, and at most six references. Symlinks,
+changed caches, malformed/repeated references, and cancelled tasks fail safely.
+Intermediate and final chat text redact known attachment cache paths; outgoing
+attachment paths remain internal delivery metadata. Read continuations retain
+the Codex session and account for the extra model requests.
+
 ## Runtime Controls
 
 - `WEBOT_CHANNELS` selects which connectors start (`pad`, `telegram`, or
