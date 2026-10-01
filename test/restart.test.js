@@ -67,6 +67,12 @@ test("duplicate clicks share one request and acceptance is not completion", asyn
   assert.equal(calls, 1);
 });
 
+test("a known deferred reload failure permits a corrected console retry", async () => {
+  const app = restartApplication(async () => ({ requested: true }));
+  app.restartResult = { requested: false, failed: true, message: "known failure" };
+  assert.equal((await app.requestRestart()).requested, true);
+});
+
 test("uncertain submissions never retry; known rejections can be corrected", async () => {
   for (const uncertain of [true, false]) {
     let calls = 0;

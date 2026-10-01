@@ -1408,8 +1408,8 @@ document.addEventListener("click", async (event) => {
           body: JSON.stringify({ sourceId: source.id, enabled: !source.enabled }),
         });
         settings = result.settings;
-        showNotice(result.apply?.mode === "controlled-drain"
-          ? "通道配置已保存，待当前任务结束后生效"
+        showNotice(result.apply?.mode === "controlled-idle"
+          ? "通道配置已保存，任务空闲时生效；新任务继续处理"
           : source.enabled ? "通道已停用" : "通道已启用");
         status = await api("/api/admin/status");
       } finally {
@@ -1679,6 +1679,11 @@ async function reloadForRuntimeRevisionChange() {
   const nextStatus = await api("/api/admin/status");
   const revision = String(nextStatus.runtime?.sourceRevision || "");
   status = nextStatus;
+  if (restartStartedAt !== null && nextStatus.restart?.error) {
+    restartStartedAt = null;
+    restartExpectedRevision = "";
+    showNotice(nextStatus.restart.error, true);
+  }
   if (restartStartedAt !== null && nextStatus.ok === true &&
       nextStatus.runtime?.startedAt &&
       nextStatus.runtime.startedAt !== restartStartedAt &&
@@ -1725,8 +1730,8 @@ document.querySelector("#save-button").addEventListener("click", async () => {
     dirty = false;
     saveState.textContent = "已保存";
     showNotice(
-      body.apply?.mode === "controlled-drain"
-        ? "配置已保存，当前 worker 完成后受控重载"
+      body.apply?.mode === "controlled-idle"
+        ? "配置已保存，任务空闲时受控重载；新任务继续处理"
         : body.apply?.mode === "controlled-restart"
           ? "配置已保存，正在受控重载"
           : "配置已动态生效",
@@ -1754,7 +1759,7 @@ document.querySelector("#restart-button").addEventListener("click", async () => 
     showNotice("请先保存当前编辑，再重载 Webot", true);
     return;
   }
-  if (!window.confirm("等待正在执行的任务结束后重载 Webot？账号、配置和聊天记录会保留。")) return;
+  if (!window.confirm("任务空闲时重载 Webot？等待期间新任务照常运行，账号、配置和聊天记录会保留。")) return;
   const button = document.querySelector("#restart-button");
   button.disabled = true;
   try {
@@ -1768,7 +1773,7 @@ document.querySelector("#restart-button").addEventListener("click", async () => 
     restartStartedAt = status.runtime.startedAt;
     restartExpectedRevision = body.restart.revision || "";
     status.restart.pending = true;
-    showNotice(body.restart.message, !body.restart.requested);
+    showNotice(body.restart.message, !(body.restart.requested || body.restart.pending));
     renderRuntimeIdentity();
   } catch (error) {
     showNotice(`未确认重载结果：${error.message}。请刷新状态后检查，勿重复提交。`, true);

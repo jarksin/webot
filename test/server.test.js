@@ -12,7 +12,7 @@ test("local channel activation API passes a source-scoped enable command", async
     stopConnectors() {},
     async setPadSourceEnabled(sourceId, enabled) {
       commands.push({ sourceId, enabled });
-      return { settings: {}, apply: { mode: "controlled-drain" } };
+      return { settings: {}, apply: { mode: "controlled-idle" } };
     },
   };
   const server = createServer({
@@ -30,7 +30,7 @@ test("local channel activation API passes a source-scoped enable command", async
   );
   assert.equal(response.status, 200);
   assert.deepEqual(commands, [{ sourceId: "small", enabled: true }]);
-  assert.equal((await response.json()).apply.mode, "controlled-drain");
+  assert.equal((await response.json()).apply.mode, "controlled-idle");
 });
 
 test("serves health and verifies signed Hook callbacks", async () => {

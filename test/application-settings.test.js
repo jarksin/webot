@@ -77,7 +77,7 @@ test("applies prompt and worker settings dynamically without draining active wor
   application.caseStore.close();
 });
 
-test("defers connector changes to a controlled reload until active workers drain", async () => {
+test("connector reloads wait for idle without preventing new tasks from running", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-drain-"));
   const settingsStore = new SettingsStore(path.join(directory, "settings.json"));
   const application = new WebotApplication({
@@ -92,8 +92,11 @@ test("defers connector changes to a controlled reload until active workers drain
   await application.initialize();
 
   let active = 1;
+  let queued = 0;
   let draining = false;
-  application.caseManager.status = () => ({ active });
+  application.caseManager.status = () => ({ active, queued });
+  application.caseManager.idle = () => active === 0 && queued === 0;
+  application.caseManager.reserveIdle = () => ({ release() {} });
   application.caseManager.beginDrain = () => {
     draining = true;
     return { active, draining: true };
@@ -104,10 +107,18 @@ test("defers connector changes to a controlled reload until active workers drain
   };
 
   const result = await application.updateSettings({ channels: ["hook"] });
-  assert.equal(result.apply.mode, "controlled-drain");
-  assert.equal(draining, true);
+  assert.equal(result.apply.mode, "controlled-idle");
+  assert.equal(draining, false);
   assert.equal(applied, 0);
 
+  active = 0;
+  queued = 1;
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(applied, 0, "queued work must have priority over a reload");
+  queued = 0;
+  active = 1;
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(applied, 0, "a new worker must be allowed to finish");
   active = 0;
   await waitFor(() => applied === 1);
   application.caseStore.close();

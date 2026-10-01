@@ -105,7 +105,19 @@ export class WebotApplication {
       env,
       ready: () => !this.pendingSettings && !this.settingsApplying &&
         this.status().ok === true,
+      idle: () => this.caseManager?.idle() === true,
+      reserveIdle: () => this.caseManager?.reserveIdle(),
       onDeferredResult: (context, result, error) => {
+        if (context.console) {
+          this.restartResult = error
+            ? {
+                requested: false,
+                failed: !error.activationUncertain,
+                message: `重载未完成：${error.message}`,
+              }
+            : { ...result, message: "已提交空闲重载请求，等待版本验证。" };
+          return;
+        }
         const detail = this.caseStore.detail(context.caseId);
         const message = error
           ? `Webot 延后激活失败：${error.message}`
@@ -125,6 +137,7 @@ export class WebotApplication {
 
   async requestRestart() {
     if (this.restartOperation) return this.restartOperation;
+    if (this.restartResult?.failed) this.restartResult = null;
     if (this.restartResult) return this.restartResult;
     if (this.env.WEBOT_RUNTIME_MODE !== "source") {
       throw new Error("当前运行模式不支持源码重载");
@@ -139,7 +152,7 @@ export class WebotApplication {
         const result = await this.sourceActivator.restartFromConsole({ sourceId: source.id });
         this.restartResult = {
           ...result,
-          message: "重启已受理，等待当前任务结束。",
+          message: "重启已受理，等待任务空闲；新任务继续正常运行。",
         };
         return this.restartResult;
       } catch (error) {
@@ -630,8 +643,13 @@ export class WebotApplication {
     return this.caseManager.setPaused(paused);
   }
 
-  beginWorkerDrain() {
-    return this.caseManager.beginDrain();
+  beginWorkerDrain({ draining = true } = {}) {
+    if (draining === false) {
+      this.caseManager.idleDrain?.release();
+    } else {
+      this.caseManager.reserveIdle();
+    }
+    return this.caseManager.status();
   }
 
   async setPadSourceEnabled(sourceId, enabled) {
@@ -668,9 +686,11 @@ export class WebotApplication {
         apply: { mode: "dynamic", reasons: [] },
       };
     }
-    if (this.caseManager?.status().active > 0) {
+    const reservation = this.caseManager?.idle()
+      ? this.caseManager.reserveIdle()
+      : null;
+    if (this.caseManager && !reservation) {
       this.pendingSettings = saved;
-      this.caseManager.beginDrain();
       this.schedulePendingSettingsApply();
       const settings = this.settingsStore.publicSettings(saved);
       settings.assistant ||= {};
@@ -679,12 +699,18 @@ export class WebotApplication {
       return {
         settings,
         apply: {
-          mode: "controlled-drain",
+          mode: "controlled-idle",
           reasons: ["connector-rebuild-required"],
         },
       };
     }
-    await this.applySettings(saved);
+    this.settingsApplying = true;
+    try {
+      await this.applySettings(saved);
+    } finally {
+      reservation?.release();
+      this.settingsApplying = false;
+    }
     return {
       settings: this.settings(),
       apply: {
@@ -723,7 +749,13 @@ export class WebotApplication {
     const applyWhenIdle = async () => {
       this.settingsApplyTimer = null;
       if (!this.pendingSettings) return;
-      if (this.caseManager?.status().active > 0) {
+      if (!this.caseManager?.idle()) {
+        this.settingsApplyTimer = setTimeout(applyWhenIdle, 100);
+        this.settingsApplyTimer.unref?.();
+        return;
+      }
+      const reservation = this.caseManager.reserveIdle();
+      if (!reservation) {
         this.settingsApplyTimer = setTimeout(applyWhenIdle, 100);
         this.settingsApplyTimer.unref?.();
         return;
@@ -733,13 +765,14 @@ export class WebotApplication {
       this.settingsApplying = true;
       try {
         await this.applySettings(pending);
-        this.logger.info("deferred settings applied after workers drained");
+        this.logger.info("deferred settings applied while workers were idle");
       } catch (error) {
         this.pendingSettings = pending;
         this.logger.error("deferred settings apply failed", {
           error: error.message,
         });
       } finally {
+        reservation.release();
         this.settingsApplying = false;
       }
     };
@@ -887,7 +920,9 @@ export class WebotApplication {
         startedAt: this.startedAt,
       },
       restart: {
-        pending: Boolean(this.restartOperation || this.restartResult),
+        pending: Boolean(this.restartOperation ||
+          (this.restartResult && !this.restartResult.failed)),
+        error: this.restartResult?.failed ? this.restartResult.message : "",
         supported: this.env.WEBOT_RUNTIME_MODE === "source" &&
           this.config.pad.sources.some((source) => source.enabled),
       },

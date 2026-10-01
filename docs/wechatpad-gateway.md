@@ -20,8 +20,10 @@ them outside this repository and restrict their filesystem permissions.
 ## Channel Policy
 
 Each account can be enabled or paused from Settings without deleting its
-credentials or account session. Connector changes wait for active tasks to
-finish before being applied.
+credentials or account session. Connector changes and controlled reloads wait
+until both running tasks and the task queue are empty. New tasks retain priority
+while a reload is waiting. Only the final switch briefly reserves scheduling;
+an abandoned switch releases that reservation automatically.
 
 `allowlistOnly` prevents private bot-name commands from bypassing the private
 allowlist. `keywordOnly` additionally requires a configured summon word in

@@ -114,6 +114,7 @@ export class CaseManager {
     this.forced = new Set();
     this.active = 0;
     this.draining = false;
+    this.idleDrain = null;
   }
 
   paused() {
@@ -127,8 +128,45 @@ export class CaseManager {
   }
 
   beginDrain() {
+    if (this.idleDrain) this.idleDrain.release(false);
     this.draining = true;
     return this.status();
+  }
+
+  idle() {
+    return this.active === 0 && this.queue.length === 0 &&
+      this.rerun.size === 0 && !this.draining;
+  }
+
+  reserveIdle({ leaseMs = 60_000, schedule = setTimeout, cancel = clearTimeout } = {}) {
+    if (this.idleDrain) {
+      if (this.active > 0 || this.queue.length || this.rerun.size) {
+        this.idleDrain.release();
+        return null;
+      }
+      this.idleDrain.renew();
+      return this.idleDrain;
+    }
+    if (!this.idle()) return null;
+    let timer;
+    const reservation = {
+      renew: () => {
+        cancel(timer);
+        timer = schedule(reservation.release, leaseMs);
+        timer.unref?.();
+      },
+      release: (resume = true) => {
+        if (this.idleDrain !== reservation) return;
+        cancel(timer);
+        this.idleDrain = null;
+        this.draining = false;
+        if (resume) this.drain();
+      },
+    };
+    this.idleDrain = reservation;
+    this.draining = true;
+    reservation.renew();
+    return reservation;
   }
 
   caseSettings() {
@@ -664,11 +702,14 @@ export class CaseManager {
               session.run_count,
               `已提交 Webot v${activation.version} 受控激活请求`,
             );
-          } else if (activation?.reason === "waiting-for-ingress") {
+          } else if (activation?.reason === "waiting-for-idle" ||
+                     activation?.reason === "waiting-for-ingress") {
             this.caseStore.addProgress(
               caseId,
               session.run_count,
-              "Webot 激活等待连接配置应用和入站健康恢复",
+              activation.reason === "waiting-for-idle"
+                ? "Webot 激活等待任务空闲，新任务继续正常调度"
+                : "Webot 激活等待连接配置应用和入站健康恢复",
             );
           }
         } catch (error) {
@@ -810,9 +851,11 @@ export class CaseManager {
   }
 
   stopAll() {
+    // A discarded manager must not later resume from an old restart lease.
     this.queue = [];
     this.rerun.clear();
     this.forced.clear();
+    this.idleDrain?.release();
     for (const run of this.running.values()) run.controller.abort();
   }
 

@@ -45,6 +45,8 @@ export function createSourceActivator({
   fetchImpl = fetch,
   candidate = sourceCandidate,
   ready = () => true,
+  idle = () => true,
+  reserveIdle = () => ({ release() {} }),
   onDeferredResult = () => {},
   schedule = (callback, delay) => setTimeout(callback, delay),
   now = Date.now,
@@ -96,6 +98,65 @@ export function createSourceActivator({
       activationId: String(body.activation_id || ""),
     };
   }
+  async function submitWhenIdle(next, context) {
+    if (!ready() || !idle()) return null;
+    const reservation = reserveIdle();
+    if (!reservation) return null;
+    try {
+      return await submit(next, context);
+    } catch (error) {
+      reservation.release();
+      throw error;
+    }
+  }
+
+  function defer(context, includeCurrent = false, pinnedCandidate = null) {
+    if (!pending.has(context.caseId)) {
+      const ticket = {};
+      let deadline = now() + readinessTimeoutMs;
+      pending.set(context.caseId, ticket);
+      const poll = async () => {
+        if (pending.get(context.caseId) !== ticket) return;
+        try {
+          // Busy workers are not a failed health check and never time out a reload.
+          if (!idle()) {
+            deadline = now() + readinessTimeoutMs;
+          } else if (!ready()) {
+            if (now() >= deadline) {
+              throw new Error("Webot activation readiness timed out");
+            }
+          } else {
+            const next = includeCurrent
+              ? pinnedCandidate
+              : await candidate({ env });
+            const result = next
+              ? await submitWhenIdle(next, context)
+              : { requested: false, reason: "source-current" };
+            if (result) {
+              pending.delete(context.caseId);
+              onDeferredResult(context, result);
+              return;
+            }
+          }
+          schedule(poll, 1000).unref?.();
+        } catch (error) {
+          pending.delete(context.caseId);
+          onDeferredResult(context, null, error);
+        }
+      };
+      schedule(poll, 1000).unref?.();
+    }
+    return {
+      requested: false,
+      pending: true,
+      reason: idle() ? "waiting-for-ingress" : "waiting-for-idle",
+      ...(pinnedCandidate ? {
+        version: pinnedCandidate.version,
+        revision: pinnedCandidate.revision,
+      } : {}),
+    };
+  }
+
   return {
     async restartFromConsole({ sourceId }) {
       if (!ready()) {
@@ -103,10 +164,13 @@ export function createSourceActivator({
       }
       const next = await candidate({ env, includeCurrent: true });
       if (!next) throw new Error("当前运行模式不支持源码重载");
-      return submit(next, {
+      const context = {
         caseId: `console-restart-${now()}`,
         sourceId,
-      });
+        console: true,
+      };
+      const result = await submitWhenIdle(next, context);
+      return result || defer(context, true, next);
     },
     async activate(context) {
       const { caseId, message } = context;
@@ -116,43 +180,12 @@ export function createSourceActivator({
       }
       const next = await candidate({ env });
       if (!next) return { requested: false, reason: "source-current" };
-      // Waiting inside afterOwnerRun would deadlock a connector change that
-      // itself waits for this worker to finish. Return and let the parent
-      // submit after settings application and real ingress health recover.
-      if (!ready()) {
-        if (!pending.has(caseId)) {
-          const deadline = now() + readinessTimeoutMs;
-          const ticket = {};
-          pending.set(caseId, ticket);
-          const poll = async () => {
-            if (pending.get(caseId) !== ticket) return;
-            try {
-              if (now() >= deadline) {
-                throw new Error("Webot activation readiness timed out");
-              }
-              if (!ready()) {
-                schedule(poll, 1000).unref?.();
-                return;
-              }
-              pending.delete(caseId);
-              // Re-read the committed candidate; broker still checks its
-              // exact revision and the live parent process provenance.
-              const current = await candidate({ env });
-              const result = current
-                ? await submit(current, context)
-                : { requested: false, reason: "source-current" };
-              onDeferredResult(context, result);
-            } catch (error) {
-              pending.delete(caseId);
-              onDeferredResult(context, null, error);
-            }
-          };
-          schedule(poll, 1000).unref?.();
-        }
-        return { requested: false, reason: "waiting-for-ingress" };
-      }
+      // afterOwnerRun still owns a worker slot; let it finish without closing
+      // scheduling, then atomically reserve an empty queue before submission.
+      const result = await submitWhenIdle(next, context);
+      if (!result) return defer(context);
       pending.delete(caseId);
-      return submit(next, context);
+      return result;
     },
   };
 }

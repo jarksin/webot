@@ -126,7 +126,8 @@ test("account settings expose a saved channel activation command and keyword-onl
   assert.match(javascript, /data-lucide="power"/);
   assert.match(javascript, /\/api\/admin\/opt\/enabled/);
   assert.match(javascript, /body: JSON\.stringify\(\{ sourceId: source\.id, enabled: !source\.enabled \}\)/);
-  assert.match(javascript, /通道配置已保存，待当前任务结束后生效/);
+  assert.match(javascript, /通道配置已保存，任务空闲时生效；新任务继续处理/);
+  assert.match(javascript, /nextStatus\.restart\?\.error/);
   assert.match(javascript, /source-keyword-only/);
   assert.match(javascript, /keywordOnly: document\.querySelector\("#source-keyword-only"\)\.checked/);
 });
