@@ -7,6 +7,7 @@ import { loadConfig } from "../src/config.js";
 import { acceptedMessage, WebotRuntime } from "../src/runtime.js";
 import { requesterAccess } from "../src/security.js";
 import { SessionStore } from "../src/session-store.js";
+import { normalizePadEnvelope } from "../src/normalize.js";
 
 function config(overrides = {}) {
   return loadConfig({
@@ -57,6 +58,148 @@ test("requires a trigger in group chats", () => {
     acceptedMessage({ ...base, mentions: ["wxid_bot"] }, config()).accepted,
     true,
   );
+});
+
+test("keyword-only Pad sources require both the allowlist and an explicit summon", () => {
+  const sourceConfig = loadConfig({}, {
+    pad: { sources: [{
+      id: "main",
+      selfId: "wxid_bot",
+      enabled: true,
+      allowSelf: true,
+      keywordOnly: true,
+      ignoreAllowlist: false,
+      allowedChatIds: ["allowed@chatroom"],
+      allowedSenderIds: ["wxid_friend"],
+      blockedSenderIds: ["wxid_blocked"],
+      triggerKeywords: ["webot"],
+      botNames: ["Webot", "helper"],
+    }] },
+  });
+  const message = {
+    transport: "pad",
+    sourceId: "main",
+    chatType: "private",
+    chatId: "wxid_friend",
+    senderId: "wxid_friend",
+    selfId: "wxid_bot",
+    direction: "incoming",
+    text: "webot hello",
+    mentions: [],
+  };
+  assert.equal(acceptedMessage(message, sourceConfig).text, "hello");
+  for (const text of ["hello", "helper hello", "@Webot hello", "webotany hello"]) {
+    assert.equal(acceptedMessage({ ...message, text }, sourceConfig).reason, "private-not-triggered");
+  }
+  for (const text of ["webot hello", "@Webot hello"]) {
+    assert.equal(acceptedMessage({
+      ...message, chatId: "wxid_stranger", senderId: "wxid_stranger", text,
+    }, sourceConfig).reason, "sender-not-allowed");
+  }
+  const group = { ...message, chatType: "group", chatId: "allowed@chatroom" };
+  assert.equal(acceptedMessage(group, sourceConfig).accepted, true);
+  assert.equal(acceptedMessage({
+    ...group, text: "hello", mentions: ["wxid_bot"],
+  }, sourceConfig).reason, "group-not-triggered");
+  assert.equal(acceptedMessage({
+    ...group, chatId: "other@chatroom", mentions: ["wxid_bot"],
+  }, sourceConfig).reason, "chat-not-allowed");
+  assert.equal(acceptedMessage({
+    ...message, senderId: "wxid_blocked",
+  }, sourceConfig).reason, "sender-blocked");
+  const self = {
+    ...message, chatId: "wxid_bot", senderId: "wxid_bot",
+    selfConversation: true, exactSelfChat: true, direction: "outgoing",
+  };
+  assert.equal(acceptedMessage(self, sourceConfig).accepted, true);
+  assert.equal(acceptedMessage({
+    ...self, text: "hello",
+  }, sourceConfig).reason, "private-not-triggered");
+  assert.equal(acceptedMessage({
+    ...self, text: "【AI】webot hello",
+  }, sourceConfig).reason, "assistant-echo");
+  assert.equal(acceptedMessage({
+    ...message, senderId: "wxid_bot", direction: "outgoing", chatId: "wxid_stranger",
+  }, sourceConfig).reason, "sender-not-allowed");
+  sourceConfig.pad.sources[0].enabled = false;
+  assert.equal(acceptedMessage(message, sourceConfig).reason, "source-disabled");
+});
+
+test("strict private allowlists preserve one peer conversation without keyword bypass", () => {
+  const sourceConfig = loadConfig({}, {
+    pad: { sources: [{
+      id: "small",
+      selfId: "wxid_small",
+      enabled: true,
+      allowSelf: false,
+      allowlistOnly: true,
+      allowedSenderIds: ["wxid_owner"],
+      selfChatPeers: ["wxid_owner"],
+      acceptSelfChatPeerMessages: true,
+      triggerKeywords: ["webot"],
+      botNames: ["Webot"],
+    }] },
+  });
+  const message = {
+    transport: "pad", sourceId: "small", chatType: "private",
+    chatId: "wxid_owner", senderId: "wxid_owner", selfId: "wxid_small",
+    direction: "incoming", selfPeer: true, text: "hello", mentions: [],
+  };
+  assert.equal(acceptedMessage(message, sourceConfig).accepted, true);
+  assert.equal(acceptedMessage({
+    ...message, selfPeer: false, chatId: "wxid_stranger",
+    senderId: "wxid_stranger", text: "webot hello",
+  }, sourceConfig).reason, "sender-not-allowed");
+  assert.equal(acceptedMessage({
+    ...message, chatId: "room@chatroom", chatType: "group", text: "webot hello",
+    selfPeer: false, mentions: ["wxid_small"],
+  }, sourceConfig).reason, "chat-not-allowed");
+  assert.equal(acceptedMessage({
+    ...message, senderId: "wxid_small", direction: "outgoing",
+  }, sourceConfig).reason, "self-peer-outgoing");
+});
+
+test("isolated peer ingress does not trigger the primary account or echo its own reply", () => {
+  const sourceConfig = loadConfig({}, {
+    pad: { sources: [
+      {
+        id: "main", selfId: "wxid_owner", allowSelf: true, keywordOnly: true,
+        triggerKeywords: ["webot"], blockedChatIds: ["wxid_small"],
+        blockedSenderIds: ["wxid_small"],
+      },
+      {
+        id: "small", selfId: "wxid_small", allowlistOnly: true, allowSelf: false,
+        selfChatPeers: ["wxid_owner"], acceptSelfChatPeerMessages: true,
+        allowedSenderIds: ["wxid_owner"],
+      },
+    ] },
+  });
+  const normalize = (sourceId, from, to, text) => normalizePadEnvelope({
+    Data: { messages: [{
+      NewMsgId: "isolated-pair", MsgType: 1,
+      FromUserName: from, ToUserName: to, Content: text,
+    }] },
+  }, sourceConfig.pad.sources.find((source) => source.id === sourceId))[0];
+  assert.equal(acceptedMessage(
+    normalize("small", "wxid_owner", "wxid_small", "hello"),
+    sourceConfig,
+  ).accepted, true);
+  assert.equal(acceptedMessage(
+    normalize("small", "wxid_small", "wxid_owner", "reply"),
+    sourceConfig,
+  ).reason, "self-peer-outgoing");
+  assert.equal(acceptedMessage(
+    normalize("main", "wxid_small", "wxid_owner", "webot reply"),
+    sourceConfig,
+  ).reason, "chat-blocked");
+  assert.equal(acceptedMessage(
+    normalize("main", "wxid_owner", "wxid_small", "webot hello"),
+    sourceConfig,
+  ).reason, "chat-blocked");
+  assert.equal(acceptedMessage(
+    normalize("small", "wxid_stranger", "wxid_small", "webot hello"),
+    sourceConfig,
+  ).reason, "sender-not-allowed");
 });
 
 test("drops empty assistant envelopes before they can trigger a case", () => {

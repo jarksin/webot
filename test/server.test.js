@@ -4,6 +4,35 @@ import crypto from "node:crypto";
 import { loadConfig } from "../src/config.js";
 import { createServer } from "../src/server.js";
 
+test("local channel activation API passes a source-scoped enable command", async (context) => {
+  const commands = [];
+  const application = {
+    config: loadConfig({ WEBOT_HOST: "127.0.0.1", WEBOT_PORT: "0" }),
+    startConnectors() {},
+    stopConnectors() {},
+    async setPadSourceEnabled(sourceId, enabled) {
+      commands.push({ sourceId, enabled });
+      return { settings: {}, apply: { mode: "controlled-drain" } };
+    },
+  };
+  const server = createServer({
+    application, logger: { info() {}, warn() {}, error() {} },
+  });
+  const address = await server.start();
+  context.after(() => server.stop());
+  const response = await fetch(
+    `http://127.0.0.1:${address.port}/api/admin/opt/enabled`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sourceId: "small", enabled: true }),
+    },
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(commands, [{ sourceId: "small", enabled: true }]);
+  assert.equal((await response.json()).apply.mode, "controlled-drain");
+});
+
 test("serves health and verifies signed Hook callbacks", async () => {
   const config = loadConfig({
     WEBOT_HOST: "127.0.0.1",

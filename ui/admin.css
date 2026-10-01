@@ -482,6 +482,9 @@ body.case-resizing { cursor: col-resize; user-select: none; }
   .metric-grid, .form-grid, .form-grid.three { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .section-head { align-items: center; }
+  .source-actions { flex-shrink: 0; }
+  .source-actions .button { width: 34px; padding: 0; }
+  .source-actions .button span { display: none; }
   .settings-card { padding: 12px; }
   .settings-fold { padding: 0; }
   .settings-card-body { padding: 12px; }

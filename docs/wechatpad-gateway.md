@@ -17,6 +17,18 @@ Configure each account with:
 Credentials, gateway sessions, protocol state, and logs are runtime data. Keep
 them outside this repository and restrict their filesystem permissions.
 
+## Channel Policy
+
+Each account can be enabled or paused from Settings without deleting its
+credentials or account session. Connector changes wait for active tasks to
+finish before being applied.
+
+`allowlistOnly` prevents private bot-name commands from bypassing the private
+allowlist. `keywordOnly` additionally requires a configured summon word in
+private and group messages; a mention alone does not trigger a reply.
+Both settings are optional and leave existing account behavior unchanged when
+disabled. Group allowlists, blacklists and self-chat controls still apply.
+
 ## Local Example
 
 A local gateway may expose endpoints similar to:

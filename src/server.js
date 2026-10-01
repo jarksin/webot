@@ -252,6 +252,18 @@ export function createServer({
         }
         if (
           request.method === "POST" &&
+          url.pathname === "/api/admin/opt/enabled"
+        ) {
+          const body = JSON.parse((await readBody(request)).toString("utf8"));
+          const result = await application.setPadSourceEnabled(
+            String(body.sourceId || ""),
+            body.enabled,
+          );
+          respond(response, 200, { ok: true, ...result });
+          return;
+        }
+        if (
+          request.method === "POST" &&
           url.pathname === "/api/admin/opt/test"
         ) {
           const body = JSON.parse((await readBody(request)).toString("utf8"));

@@ -116,6 +116,8 @@ test("serialized opt settings omit callback compatibility fields", () => {
         apiUrl: "http://127.0.0.1:18102/api",
         accessToken: "secret",
         ignoreAllowlist: true,
+        keywordOnly: true,
+        allowlistOnly: true,
         mentionDisplayNames: {
           owner_wxid: "大号",
         },
@@ -135,6 +137,8 @@ test("serialized opt settings omit callback compatibility fields", () => {
   );
   assert.equal(source.wsUrl, "ws://127.0.0.1:18102/ws/wxid_small");
   assert.equal(source.ignoreAllowlist, true);
+  assert.equal(source.keywordOnly, true);
+  assert.equal(source.allowlistOnly, true);
   assert.deepEqual(source.mentionDisplayNames, {
     owner_wxid: "大号",
   });

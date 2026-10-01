@@ -94,6 +94,8 @@ export function normalizeSource(value, env, defaults) {
       value.ignore_allowlist ?? value.ignoreAllowlist,
       false,
     ),
+    keywordOnly: boolean(value.keyword_only ?? value.keywordOnly, false),
+    allowlistOnly: boolean(value.allowlist_only ?? value.allowlistOnly, false),
     allowedChatIds: new Set(
       stringList(value.group_chat_ids ?? value.allowedChatIds),
     ),

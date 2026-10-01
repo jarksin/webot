@@ -153,6 +153,9 @@ export function acceptedMessage(message, config) {
   if (message.transport === "pad" && config.pad.sources.length && !source) {
     return { accepted: false, reason: "source-not-configured" };
   }
+  if (source?.enabled === false) {
+    return { accepted: false, reason: "source-disabled" };
+  }
   if (
     message.transport === "telegram" &&
     config.telegram.sources.length &&
@@ -228,11 +231,17 @@ export function acceptedMessage(message, config) {
       }
     } else if (
       !source.ignoreAllowlist &&
-      !hasCaseInsensitive(source.allowedSenderIds, message.senderId) &&
+      !hasCaseInsensitive(
+        source.allowedSenderIds,
+        (source.keywordOnly || source.allowlistOnly) && message.direction === "outgoing"
+          ? message.chatId
+          : message.senderId,
+      ) &&
       !hasCaseInsensitive(source.privateNicknameAllowlist, message.senderName) &&
-      !privateBotPrefix &&
-      !outgoingPrivateBotCommand &&
-      !outgoingTelegramCommand
+      (source.keywordOnly || source.allowlistOnly ||
+        (!privateBotPrefix &&
+          !outgoingPrivateBotCommand &&
+          !outgoingTelegramCommand))
     ) {
       return { accepted: false, reason: "sender-not-allowed" };
     }
@@ -252,7 +261,20 @@ export function acceptedMessage(message, config) {
     return { accepted: false, reason: "sender-not-allowed" };
   }
 
-  if (message.chatType === "group") {
+  if (source?.keywordOnly) {
+    const triggerText = message.chatType === "private"
+      ? commandText
+      : message.text.trim();
+    const triggered = !triggerText.startsWith("@") &&
+      hasBotNamePrefix(triggerText, triggerKeywords);
+    if (!triggered) {
+      return {
+        accepted: false,
+        reason: `${message.chatType}-not-triggered`,
+        ...(message.chatType === "group" ? { retainGroupContext: true } : {}),
+      };
+    }
+  } else if (message.chatType === "group") {
     const lowerText = message.text.toLowerCase();
     const groupTriggers = source?.triggerKeywords?.size
       ? source.triggerKeywords

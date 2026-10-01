@@ -633,7 +633,7 @@ function accountsMarkup() {
           <div class="account-list">
             ${sources.map((item, index) => `<button class="account-item ${index === selectedSource ? "active" : ""}" data-source-index="${index}">
               <span class="account-avatar"><i data-lucide="user-round"></i></span>
-              <span class="account-copy"><strong>${escapeHtml(item.displayName || item.id)}</strong><span>${escapeHtml(item.selfId || "未填写 wxid")}</span></span>
+              <span class="account-copy"><strong>${escapeHtml(item.displayName || item.id)} · ${item.enabled ? "已启用" : "已停用"}</strong><span>${escapeHtml(item.selfId || "未填写 wxid")}</span></span>
             </button>`).join("")}
           </div>
           <div class="editor">${source ? accountEditor(source) : `<div class="empty"><div><i data-lucide="users"></i><div>添加一个微信账号</div></div></div>`}</div>
@@ -650,7 +650,7 @@ function accountEditor(source) {
   return `
     <div class="form-section">
       <div class="section-head"><div><h2>账号信息</h2><p>${current?.websocket?.connected ? "WS 连接正常" : "WS 未连接"}</p></div>
-        <div class="inline-actions"><button class="button secondary" data-action="test-source"><i data-lucide="activity"></i><span>检测连接</span></button><button class="button danger icon-only" data-action="delete-source" title="删除账号"><i data-lucide="trash-2"></i></button></div>
+        <div class="inline-actions source-actions"><button class="button secondary" data-action="toggle-source" title="${source.enabled ? "停用通道" : "启用通道"}"><i data-lucide="power"></i><span>${source.enabled ? "停用通道" : "启用通道"}</span></button><button class="button secondary" data-action="test-source" title="检测连接"><i data-lucide="activity"></i><span>检测连接</span></button><button class="button danger icon-only" data-action="delete-source" title="删除账号"><i data-lucide="trash-2"></i></button></div>
       </div>
       <div class="form-grid">
         ${field("显示名称", "source-name", source.displayName)}
@@ -672,6 +672,8 @@ function accountEditor(source) {
     <div class="form-section">
       <h2>监听与触发规则</h2>
       ${toggle("忽略白名单", "source-ignore-allowlist", source.ignoreAllowlist === true, "允许所有个人私聊；所有群聊均可通过 @ 或触发词触发，系统账号、公众号和黑名单仍过滤")}
+      ${toggle("仅召唤词触发", "source-keyword-only", source.keywordOnly === true, "私聊与群聊均需召唤词，不以 @ 或机器人名称绕过白名单")}
+      ${toggle("严格私聊白名单", "source-allowlist-only", source.allowlistOnly === true, "非白名单私聊不通过召唤词触发")}
       <div class="form-grid">
         ${field("允许私聊 wxid", "source-senders", listText(source.allowedSenderIds), { textarea: true })}
         ${field("允许私聊昵称", "source-nicknames", listText(source.privateNicknameAllowlist), { textarea: true })}
@@ -1067,6 +1069,8 @@ function readAccountForm() {
     accessTokenFile: document.querySelector("#source-token-file").value.trim(),
     enabled: document.querySelector("#source-enabled").checked,
     ignoreAllowlist: document.querySelector("#source-ignore-allowlist").checked,
+    keywordOnly: document.querySelector("#source-keyword-only").checked,
+    allowlistOnly: document.querySelector("#source-allowlist-only").checked,
     allowedSenderIds: parseList(document.querySelector("#source-senders").value),
     blockedSenderIds: parseList(document.querySelector("#source-blocked-senders").value),
     privateNicknameAllowlist: parseList(document.querySelector("#source-nicknames").value),
@@ -1373,6 +1377,8 @@ document.addEventListener("click", async (event) => {
         selfChatPeers: [],
         acceptSelfChatPeerMessages: false,
         ignoreAllowlist: false,
+        keywordOnly: false,
+        allowlistOnly: false,
         allowedChatIds: [],
         blockedChatIds: [],
         allowedSenderIds: [],
@@ -1391,6 +1397,25 @@ document.addEventListener("click", async (event) => {
       dirty = true;
       saveState.textContent = "未保存";
       render();
+    } else if (action === "toggle-source") {
+      if (dirty) throw new Error("请先保存配置");
+      const source = settings.pad.sources[selectedSource];
+      const button = event.target.closest("[data-action]");
+      button.disabled = true;
+      try {
+        const result = await api("/api/admin/opt/enabled", {
+          method: "POST",
+          body: JSON.stringify({ sourceId: source.id, enabled: !source.enabled }),
+        });
+        settings = result.settings;
+        showNotice(result.apply?.mode === "controlled-drain"
+          ? "通道配置已保存，待当前任务结束后生效"
+          : source.enabled ? "通道已停用" : "通道已启用");
+        status = await api("/api/admin/status");
+      } finally {
+        button.disabled = false;
+        render();
+      }
     } else if (action === "test-source") {
       readAccountForm();
       if (dirty) throw new Error("请先保存配置");

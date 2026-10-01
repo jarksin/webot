@@ -15,6 +15,26 @@ async function waitFor(check, timeoutMs = 1000) {
   throw new Error("condition was not met");
 }
 
+test("channel enable changes preserve credentials and other source settings", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-enable-"));
+  const settingsStore = new SettingsStore(path.join(directory, "settings.json"));
+  await settingsStore.save({
+    pad: { sources: [
+      { id: "main", enabled: true, accessToken: "main-secret", keywordOnly: true },
+      { id: "small", enabled: false, accessToken: "small-secret" },
+    ] },
+  });
+  const application = new WebotApplication({ settingsStore });
+  application.updateSettings = async (patch) => patch;
+  const patch = await application.setPadSourceEnabled("small", true);
+  assert.deepEqual(patch.pad.sources, [
+    { id: "main", enabled: true, accessToken: "main-secret", keywordOnly: true },
+    { id: "small", enabled: true, accessToken: "small-secret" },
+  ]);
+  await assert.rejects(application.setPadSourceEnabled("missing", true), /unknown/);
+  await assert.rejects(application.setPadSourceEnabled("main", "false"), /boolean/);
+});
+
 test("applies prompt and worker settings dynamically without draining active workers", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-"));
   const settingsStore = new SettingsStore(path.join(directory, "settings.json"));

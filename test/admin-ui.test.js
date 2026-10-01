@@ -121,6 +121,16 @@ test("account settings expose an allowlist bypass that keeps group triggers", ()
   assert.match(javascript, /系统账号、公众号和黑名单仍过滤/);
 });
 
+test("account settings expose a saved channel activation command and keyword-only policy", () => {
+  assert.match(javascript, /data-action="toggle-source"/);
+  assert.match(javascript, /data-lucide="power"/);
+  assert.match(javascript, /\/api\/admin\/opt\/enabled/);
+  assert.match(javascript, /body: JSON\.stringify\(\{ sourceId: source\.id, enabled: !source\.enabled \}\)/);
+  assert.match(javascript, /通道配置已保存，待当前任务结束后生效/);
+  assert.match(javascript, /source-keyword-only/);
+  assert.match(javascript, /keywordOnly: document\.querySelector\("#source-keyword-only"\)\.checked/);
+});
+
 test("case workspace groups named sessions and reloads on runtime revision changes", () => {
   assert.match(html, /name="webot-runtime-revision"/);
   assert.match(javascript, /caseSessionOptions/);

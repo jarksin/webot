@@ -28,6 +28,8 @@ test("loads source-scoped Pad policies and credentials", () => {
           owner_wxid: "大号",
         },
         ignore_allowlist: true,
+        keyword_only: true,
+        allowlist_only: true,
         group_chat_ids: ["one@chatroom", "two@chatroom"],
         blocked_chat_ids: ["blocked@chatroom"],
         blocked_sender_ids: ["wxid_blocked"],
@@ -47,6 +49,8 @@ test("loads source-scoped Pad policies and credentials", () => {
   assert.equal(config.pad.sources[0].credentialSource, "environment");
   assert.equal(config.pad.sources[0].acceptSelfChatPeerMessages, false);
   assert.equal(config.pad.sources[0].ignoreAllowlist, false);
+  assert.equal(config.pad.sources[0].keywordOnly, false);
+  assert.equal(config.pad.sources[0].allowlistOnly, false);
   assert.equal(config.pad.sources[1].acceptSelfChatPeerMessages, true);
   assert.equal(
     configuredPadMentionDisplayName(config, {
@@ -56,6 +60,8 @@ test("loads source-scoped Pad policies and credentials", () => {
     "大号",
   );
   assert.equal(config.pad.sources[1].ignoreAllowlist, true);
+  assert.equal(config.pad.sources[1].keywordOnly, true);
+  assert.equal(config.pad.sources[1].allowlistOnly, true);
   assert.deepEqual([...config.pad.sources[1].allowedChatIds], [
     "one@chatroom",
     "two@chatroom",

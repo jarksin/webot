@@ -634,6 +634,24 @@ export class WebotApplication {
     return this.caseManager.beginDrain();
   }
 
+  async setPadSourceEnabled(sourceId, enabled) {
+    if (typeof enabled !== "boolean") {
+      throw new Error("enabled must be a boolean");
+    }
+    const current = this.settingsStore.current();
+    const sources = current.pad?.sources || [];
+    if (!sources.some((source) => source.id === sourceId)) {
+      throw new Error("unknown Pad source");
+    }
+    return this.updateSettings({
+      pad: {
+        sources: sources.map((source) =>
+          source.id === sourceId ? { ...source, enabled } : source,
+        ),
+      },
+    });
+  }
+
   async updateSettings(next) {
     const candidate = this.settingsStore.merged(next);
     const candidateConfig = loadConfig(this.env, candidate);
