@@ -65,7 +65,11 @@ async function fixture(t, transport = "telegram", autoSend = true) {
     caseStore.close();
     await fs.rm(directory, { recursive: true, force: true });
   });
-  async function ingest(chatId = "test-self", sourceId = "test-source") {
+  async function ingest(
+    chatId = "test-self",
+    sourceId = "test-source",
+    text = "task",
+  ) {
     const received = await manager.receive({
       transport,
       sourceId,
@@ -80,7 +84,7 @@ async function fixture(t, transport = "telegram", autoSend = true) {
       direction: "incoming",
       selfConversation: true,
       exactSelfChat: true,
-      text: "task",
+      text,
     });
     assert.equal(received.accepted, true);
     return received.caseId;
@@ -137,13 +141,13 @@ for (const transport of ["telegram", "pad"]) {
     await next.progress("next progress");
     await next.finish("next finished");
     assert.deepEqual(f.sent.slice(-2).map((item) => item.text), [
-      "next progress",
-      "[done] next finished",
+      "[main] next progress",
+      "[main] [done] next finished",
     ]);
   });
 }
 
-test("existing idle sessions do not label a single running session", async (t) => {
+test("existing idle sessions label a single running session", async (t) => {
   const f = await fixture(t);
   const scope = await f.ingest();
   f.caseStore.createSession(scope, "project-a");
@@ -151,7 +155,10 @@ test("existing idle sessions do not label a single running session", async (t) =
   const run = await f.start(namedId);
   await run.progress("progress");
   await run.finish();
-  assert.deepEqual(f.sent.map((item) => item.text), ["progress", "[done] finished"]);
+  assert.deepEqual(f.sent.map((item) => item.text), [
+    "[project-a] progress",
+    "[project-a] [done] finished",
+  ]);
 });
 
 test("running sessions in different chats do not share labels", async (t) => {
@@ -167,9 +174,9 @@ test("running sessions in different chats do not share labels", async (t) => {
   await first.finish("first finished");
   await other.finish("other finished");
   assert.deepEqual(f.sent.map((item) => item.text), [
-    "first progress",
+    "[project-a] first progress",
     "other progress",
-    "[done] first finished",
+    "[project-a] [done] first finished",
     "[done] other finished",
   ]);
 });
@@ -295,4 +302,66 @@ test("overlapping silent sessions remain silent", async (t) => {
   await main.finish();
   assert.deepEqual(f.sent.map((item) => item.text), ["[main] [done] finished"]);
   assert.equal(f.caseStore.detail(namedId).drafts.length, 0);
+});
+
+for (const transport of ["telegram", "pad"]) {
+  test(`${transport} labels switches with the destination and replays only its last reply`, async (t) => {
+    const f = await fixture(t, transport);
+    const scope = await f.ingest();
+    const main = await f.start(scope);
+    await main.finish("main result");
+    await f.ingest("test-self", "test-source", "/session new project-a");
+    assert.match(f.sent.at(-1).text, /^\[project-a\] 已新建并切换/);
+    const namedId = await f.ingest();
+    const named = await f.start(namedId);
+    await named.finish("project result");
+    await f.ingest("test-self", "test-source", "/session main");
+    assert.equal(f.sent.at(-1).text,
+      "[main] 已切回默认 session「main」。\n\n上次最后输出：\nmain result");
+    await f.ingest("test-self", "test-source", "/session project-a");
+    assert.equal(f.sent.at(-1).text,
+      "[project-a] 已切换到 session「project-a」。\n\n上次最后输出：\nproject result");
+    await f.ingest("test-self", "test-source", "/status");
+    assert.match(f.sent.at(-1).text, /^\[project-a\] 当前 session/);
+    await f.ingest("test-self", "test-source", "/session main");
+    await f.ingest("test-self", "test-source", "/session project-a");
+    assert.equal(f.sent.at(-1).text,
+      "[project-a] 已切换到 session「project-a」。\n\n上次最后输出：\nproject result");
+    assert.equal((await f.sessionStore.history(namedId)).at(-1).content, "project result");
+  });
+}
+
+test("single-session output stays unlabelled and deleted sessions do not count", async (t) => {
+  const f = await fixture(t);
+  const scope = await f.ingest();
+  const main = await f.start(scope);
+  await main.progress("single progress");
+  await main.finish("single result");
+  assert.deepEqual(f.sent.map((item) => item.text), [
+    "single progress",
+    "[done] single result",
+  ]);
+  f.caseStore.createSession(scope, "temporary");
+  f.caseStore.activateSession(scope, "main");
+  f.caseStore.deleteSession(scope, "temporary");
+  await f.ingest();
+  const next = await f.start(scope);
+  await next.progress("next progress");
+  await next.finish("next result");
+  assert.deepEqual(f.sent.slice(-2).map((item) => item.text), [
+    "next progress",
+    "[done] next result",
+  ]);
+});
+
+test("a draft created before a second session is labelled when sent later", async (t) => {
+  const f = await fixture(t, "telegram", false);
+  const scope = await f.ingest();
+  const main = await f.start(scope);
+  await main.finish("main result");
+  const draft = f.caseStore.detail(scope).drafts[0];
+  assert.equal(draft.output_session_name, "");
+  f.caseStore.createSession(scope, "project-a");
+  await f.manager.sendDraft(scope, draft.id);
+  assert.equal(f.sent.at(-1).text, "[main] [done] main result");
 });

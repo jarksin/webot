@@ -199,6 +199,12 @@ export class CaseManager {
 
   outputSessionName(caseId) {
     const run = this.running.get(caseId);
+    const session = this.caseStore.sessionForTarget(caseId);
+    const scopeCaseId = run?.sessionScopeCaseId || session?.scope_case_id;
+    if (scopeCaseId && this.caseStore.listSessions(scopeCaseId).length > 1) {
+      if (run) run.labelOutputs = true;
+      return run?.sessionName || session.name;
+    }
     return run?.labelOutputs ? run.sessionName : "";
   }
 
@@ -339,7 +345,9 @@ export class CaseManager {
           {
             triggerMessageId: ingested.messageRow,
             inputCutoffMessageId: ingested.messageRow,
-            outputSessionName: this.outputSessionName(ingested.caseId),
+            outputSessionName: this.outputSessionName(
+              result.outputCaseId || ingested.caseId,
+            ),
           },
         );
         this.caseStore.addProgress(
@@ -508,16 +516,6 @@ export class CaseManager {
       },
     });
     const currentRun = this.running.get(caseId);
-    // Retain labels through completion, even after an overlapping run finishes.
-    for (const [otherCaseId, otherRun] of this.running) {
-      if (
-        otherCaseId !== caseId &&
-        otherRun.sessionScopeCaseId === currentRun.sessionScopeCaseId
-      ) {
-        currentRun.labelOutputs = true;
-        otherRun.labelOutputs = true;
-      }
-    }
     this.caseStore.addProgress(caseId, session.run_count, "worker 开始处理");
     const liveProgressSeen = new Set();
     const onItem = async (item) => {

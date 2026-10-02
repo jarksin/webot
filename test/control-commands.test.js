@@ -258,3 +258,55 @@ test("keeps stop replies concise", async () => {
   }
   caseStore.close();
 });
+
+test("switches replay the destination's last assistant output, but not cleared or other histories", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-session-replay-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const sessionStore = new SessionStore(path.join(directory, "sessions"), 4);
+  t.after(async () => {
+    caseStore.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const scopeCaseId = "test-scope";
+  caseStore.ensureSessionScope(scopeCaseId);
+  const project = caseStore.createSession(scopeCaseId, "project-a");
+  const empty = caseStore.createSession(scopeCaseId, "empty");
+  await sessionStore.append(scopeCaseId, "assistant", "main output");
+  await sessionStore.append(project.target_case_id, "assistant", "old project output");
+  await sessionStore.append(project.target_case_id, "assistant", "last project output\nsecond line");
+  await sessionStore.append(project.target_case_id, "user", "pending task");
+  await sessionStore.append("other-chat", "assistant", "private other output");
+  const common = { caseStore, sessionStore, config: {}, scopeCaseId };
+  const switched = await applyControlCommand({
+    ...common,
+    caseId: empty.target_case_id,
+    command: parseControlCommand("/session use PROJECT-A"),
+  });
+  assert.equal(switched.text,
+    "已切换到 session「project-a」。\n\n上次最后输出：\nlast project output\nsecond line");
+  assert.equal(switched.outputCaseId, project.target_case_id);
+  const fresh = await applyControlCommand({
+    ...common,
+    caseId: project.target_case_id,
+    command: parseControlCommand("/session empty"),
+  });
+  assert.equal(fresh.text, "已切换到 session「empty」。");
+  await applyControlCommand({
+    ...common,
+    caseId: project.target_case_id,
+    command: parseControlCommand("/clear"),
+  });
+  const cleared = await applyControlCommand({
+    ...common,
+    caseId: empty.target_case_id,
+    command: parseControlCommand("/session project-a"),
+  });
+  assert.equal(cleared.text, "已切换到 session「project-a」。");
+  const missing = await applyControlCommand({
+    ...common,
+    caseId: project.target_case_id,
+    command: parseControlCommand("/session missing"),
+  });
+  assert.match(missing.text, /找不到/);
+  assert.equal(caseStore.activeSession(scopeCaseId).name, "project-a");
+});

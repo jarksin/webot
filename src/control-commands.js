@@ -165,6 +165,7 @@ export async function applyControlCommand({
           text:
             `已新建并切换到 session「${created.name}」。`
             + "该 session 的上下文、Codex session、模型和 effort 均独立。",
+          outputCaseId: created.target_case_id,
         };
       } catch (error) {
         return { text: `${error.message}。用 /sessions 查看现有 session。` };
@@ -201,10 +202,18 @@ export async function applyControlCommand({
     if (!selected) {
       return { text: `找不到 session「${name}」。用 /sessions 查看。` };
     }
+    const history = await sessionStore.history(selected.target_case_id);
+    const lastOutput = history.findLast(
+      (entry) => entry.role === "assistant" && clean(entry.content),
+    );
+    const confirmation = selected.session_id === "main"
+      ? "已切回默认 session「main」。"
+      : `已切换到 session「${selected.name}」。`;
     return {
-      text: selected.session_id === "main"
-        ? "已切回默认 session「main」。"
-        : `已切换到 session「${selected.name}」。`,
+      text: confirmation + (lastOutput
+        ? `\n\n上次最后输出：\n${clean(lastOutput.content)}`
+        : ""),
+      outputCaseId: selected.target_case_id,
     };
   }
 

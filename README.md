@@ -160,7 +160,7 @@ additional permissions.
 | `/session` | Shows the current session and available session actions. Aliases: `/session current`, `/session show`. |
 | `/sessions` | Lists sessions in this chat; the active one is marked. |
 | `/session new <name>` | Creates and switches to an isolated named session. Omit the name to generate one automatically. |
-| `/session <name>` | Switches to an existing session. `/session use <name>` is an alias. |
+| `/session <name>` | Switches to an existing session and shows its last assistant reply, if any. `/session use <name>` is an alias. |
 | `/session main` | Returns to the default session. |
 | `/session delete <name>` | Deletes an inactive named session from selection; archived history remains. The current session and `main` cannot be deleted. |
 | `/models` | Lists locally known models. Aliases: `/modes` and `/model list`. |
@@ -187,10 +187,11 @@ Update the website copy and run the relevant tests.
 /session main
 ```
 
-Model and effort overrides belong to the selected session. When sessions in
-the same chat run concurrently, progress and completion replies carry a
-`[session-name]` prefix, including delayed sends and retries. Independent chats
-and single-session runs stay unchanged.
+Model and effort overrides belong to the selected session. Chats with multiple
+undeleted sessions carry a `[session-name]` prefix on progress, completion, and
+control-command replies, even when only one session is running. Delayed sends
+and retries retain their labels; switch replies use the destination session's
+name. Independent chats and chats with only one session stay unchanged.
 
 ## Self-Iteration and Guarded Reload
 
