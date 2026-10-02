@@ -89,7 +89,9 @@ export function parseControlCommand(value) {
   if (/^\/stop(?:\s+(?:worker|task|case|任务))?\s*$/i.test(text)) {
     return { type: "stop", action: "stop" };
   }
-  if (/^\/status\s*$/i.test(text)) return { type: "status", action: "show" };
+  if (/^\/(?:st|status)\s*$/i.test(text)) {
+    return { type: "status", action: "show" };
+  }
   if (/^\/help\s*$/i.test(text)) return { type: "help", action: "show" };
   return null;
 }
@@ -305,9 +307,7 @@ export async function applyControlCommand({
     return {
       text:
         `当前 session：${session?.name || "main"}\n`
-        + `当前模型：${runtime.model}（${runtime.modelSource}）\n`
-        + `Reasoning：${runtime.reasoningEffort}（${runtime.effortSource}）\n`
-        + `Service tier：${runtime.serviceTier}`,
+        + `当前模型：${runtime.model}`,
     };
   }
 
@@ -316,7 +316,7 @@ export async function applyControlCommand({
       "会话：/session、/sessions、/session new <名称>、"
       + "/session <名称>、/session delete <名称>。\n"
       + "运行：/models、/model [模型|default]、/effort [级别|default]、"
-      + "/status、/clear、/stop。\n"
+      + "/st（/status）、/clear、/stop。\n"
       + "也可用 /model <模型> <任务> 直接指定下一项任务。",
   };
 }

@@ -323,6 +323,9 @@ for (const transport of ["telegram", "pad"]) {
       "[project-a] 已切换到 session「project-a」。\n\n上次最后输出：\nproject result");
     await f.ingest("test-self", "test-source", "/status");
     assert.match(f.sent.at(-1).text, /^\[project-a\] 当前 session/);
+    const status = f.sent.at(-1).text;
+    await f.ingest("test-self", "test-source", "/st");
+    assert.equal(f.sent.at(-1).text, status);
     await f.ingest("test-self", "test-source", "/session main");
     await f.ingest("test-self", "test-source", "/session project-a");
     assert.equal(f.sent.at(-1).text,

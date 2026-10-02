@@ -54,6 +54,14 @@ test("parses stable owner control commands", () => {
     action: "use",
     name: "main",
   });
+  for (const text of ["/st", "/status", " /ST ", "/STATUS"]) {
+    assert.deepEqual(parseControlCommand(text), {
+      type: "status",
+      action: "show",
+    });
+  }
+  assert.equal(parseControlCommand("/st task"), null);
+  assert.equal(parseControlCommand("/status task"), null);
   assert.equal(parseControlCommand("/unknown"), null);
 });
 
@@ -309,4 +317,41 @@ test("switches replay the destination's last assistant output, but not cleared o
   });
   assert.match(missing.text, /找不到/);
   assert.equal(caseStore.activeSession(scopeCaseId).name, "project-a");
+});
+
+test("st and status show only the selected session and its effective model", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-status-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  const sessionStore = new SessionStore(path.join(directory, "sessions"), 4);
+  t.after(async () => {
+    caseStore.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const scopeCaseId = "test-scope";
+  caseStore.ensureSessionScope(scopeCaseId);
+  const project = caseStore.createSession(scopeCaseId, "project-a");
+  caseStore.setRuntimeSetting(`assistant_model:${scopeCaseId}`, "main-model");
+  caseStore.setRuntimeSetting(`assistant_model:${project.target_case_id}`, "project-model");
+  const common = { caseStore, sessionStore, config: { codexModel: "default-model" } };
+  for (const command of ["/st", "/status"]) {
+    const named = await applyControlCommand({
+      ...common,
+      caseId: project.target_case_id,
+      command: parseControlCommand(command),
+    });
+    assert.equal(named.text, "当前 session：project-a\n当前模型：project-model");
+    const main = await applyControlCommand({
+      ...common,
+      caseId: scopeCaseId,
+      command: parseControlCommand(command),
+    });
+    assert.equal(main.text, "当前 session：main\n当前模型：main-model");
+  }
+  caseStore.deleteRuntimeSetting(`assistant_model:${project.target_case_id}`);
+  const defaults = await applyControlCommand({
+    ...common,
+    caseId: project.target_case_id,
+    command: parseControlCommand("/st"),
+  });
+  assert.equal(defaults.text, "当前 session：project-a\n当前模型：default-model");
 });

@@ -156,7 +156,7 @@ additional permissions.
 | Command | What it does |
 | --- | --- |
 | `/help` | Shows the control-command summary. |
-| `/status` | Shows the current named session, model, reasoning effort, and service tier. |
+| `/status` | Shows the current named session and effective model. Alias: `/st`. |
 | `/session` | Shows the current session and available session actions. Aliases: `/session current`, `/session show`. |
 | `/sessions` | Lists sessions in this chat; the active one is marked. |
 | `/session new <name>` | Creates and switches to an isolated named session. Omit the name to generate one automatically. |
