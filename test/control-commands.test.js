@@ -267,7 +267,7 @@ test("keeps stop replies concise", async () => {
   caseStore.close();
 });
 
-test("switches replay the destination's last assistant output, but not cleared or other histories", async (t) => {
+test("switches preview both destination roles within twenty characters without other histories", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-session-replay-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
   const sessionStore = new SessionStore(path.join(directory, "sessions"), 4);
@@ -291,14 +291,14 @@ test("switches replay the destination's last assistant output, but not cleared o
     command: parseControlCommand("/session use PROJECT-A"),
   });
   assert.equal(switched.text,
-    "已切换到 session「project-a」。\n\n上次最后输出：\nlast project output\nsecond line");
+    "已切换到 session「project-a」。\n用户最后输入：pending task\n模型最后输出：last project output…");
   assert.equal(switched.outputCaseId, project.target_case_id);
   const fresh = await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
     command: parseControlCommand("/session empty"),
   });
-  assert.equal(fresh.text, "已切换到 session「empty」。");
+  assert.equal(fresh.text, "已切换到 session「empty」。\n用户最后输入：暂无\n模型最后输出：暂无");
   await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
@@ -309,7 +309,7 @@ test("switches replay the destination's last assistant output, but not cleared o
     caseId: empty.target_case_id,
     command: parseControlCommand("/session project-a"),
   });
-  assert.equal(cleared.text, "已切换到 session「project-a」。");
+  assert.equal(cleared.text, "已切换到 session「project-a」。\n用户最后输入：暂无\n模型最后输出：暂无");
   const missing = await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
@@ -317,6 +317,14 @@ test("switches replay the destination's last assistant output, but not cleared o
   });
   assert.match(missing.text, /找不到/);
   assert.equal(caseStore.activeSession(scopeCaseId).name, "project-a");
+  await sessionStore.append(project.target_case_id, "user", "这是一个需要按字符正确截断并且不能超过二十个字的用户输入");
+  await sessionStore.append(project.target_case_id, "assistant", "𠀀".repeat(21));
+  const unicode = await applyControlCommand({
+    ...common, caseId: empty.target_case_id, command: parseControlCommand("/session project-a"),
+  });
+  const previews = unicode.text.split("\n").slice(1).map((line) => line.split("：")[1]);
+  assert.equal(Array.from(previews[0]).length, 20);
+  assert.equal(previews[1], "𠀀".repeat(19) + "…");
 });
 
 test("st and status show only the selected session and its effective model", async (t) => {

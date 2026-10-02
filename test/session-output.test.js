@@ -317,10 +317,10 @@ for (const transport of ["telegram", "pad"]) {
     await named.finish("project result");
     await f.ingest("test-self", "test-source", "/session main");
     assert.equal(f.sent.at(-1).text,
-      "[main] 已切回默认 session「main」。\n\n上次最后输出：\nmain result");
+      "[main] 已切回默认 session「main」。\n用户最后输入：task\n模型最后输出：main result");
     await f.ingest("test-self", "test-source", "/session project-a");
     assert.equal(f.sent.at(-1).text,
-      "[project-a] 已切换到 session「project-a」。\n\n上次最后输出：\nproject result");
+      "[project-a] 已切换到 session「project-a」。\n用户最后输入：task\n模型最后输出：project result");
     await f.ingest("test-self", "test-source", "/status");
     assert.match(f.sent.at(-1).text, /^\[project-a\] 当前 session/);
     const status = f.sent.at(-1).text;
@@ -329,7 +329,7 @@ for (const transport of ["telegram", "pad"]) {
     await f.ingest("test-self", "test-source", "/session main");
     await f.ingest("test-self", "test-source", "/session project-a");
     assert.equal(f.sent.at(-1).text,
-      "[project-a] 已切换到 session「project-a」。\n\n上次最后输出：\nproject result");
+      "[project-a] 已切换到 session「project-a」。\n用户最后输入：task\n模型最后输出：project result");
     assert.equal((await f.sessionStore.history(namedId)).at(-1).content, "project result");
   });
 }

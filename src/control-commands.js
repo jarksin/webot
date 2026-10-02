@@ -14,6 +14,13 @@ function clean(value) {
   return String(value || "").trim();
 }
 
+function sessionPreview(value) {
+  const text = clean(value).replace(/\s+/gu, " ");
+  if (!text) return "暂无";
+  const characters = Array.from(text);
+  return characters.length > 20 ? characters.slice(0, 19).join("") + "…" : text;
+}
+
 function validModel(value) {
   return /^[A-Za-z0-9][A-Za-z0-9._@-]{0,79}$/.test(clean(value));
 }
@@ -205,6 +212,9 @@ export async function applyControlCommand({
       return { text: `找不到 session「${name}」。用 /sessions 查看。` };
     }
     const history = await sessionStore.history(selected.target_case_id);
+    const lastInput = history.findLast(
+      (entry) => entry.role === "user" && clean(entry.content),
+    );
     const lastOutput = history.findLast(
       (entry) => entry.role === "assistant" && clean(entry.content),
     );
@@ -212,9 +222,9 @@ export async function applyControlCommand({
       ? "已切回默认 session「main」。"
       : `已切换到 session「${selected.name}」。`;
     return {
-      text: confirmation + (lastOutput
-        ? `\n\n上次最后输出：\n${clean(lastOutput.content)}`
-        : ""),
+      text: confirmation
+        + `\n用户最后输入：${sessionPreview(lastInput?.content)}`
+        + `\n模型最后输出：${sessionPreview(lastOutput?.content)}`,
       outputCaseId: selected.target_case_id,
     };
   }
