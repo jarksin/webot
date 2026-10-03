@@ -160,7 +160,7 @@ additional permissions.
 | `/session` | Shows the current session and available session actions. Aliases: `/session current`, `/session show`. |
 | `/sessions` | Lists sessions in this chat; the active one is marked. |
 | `/session new <name>` | Creates and switches to an isolated named session. Omit the name to generate one automatically. |
-| `/session <name>` | Switches to an existing session and shows its last assistant reply, if any. `/session use <name>` is an alias. |
+| `/session <name>` | Switches to an existing session and previews its last input and output with `user:` and the output's recorded model name. Each preview is limited to 20 characters. `/session use <name>` is an alias. |
 | `/session main` | Returns to the default session. |
 | `/session delete <name>` | Deletes an inactive named session from selection; archived history remains. The current session and `main` cannot be deleted. |
 | `/models` | Lists locally known models. Aliases: `/modes` and `/model list`. |

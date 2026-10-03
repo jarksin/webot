@@ -1505,6 +1505,16 @@ export class CaseStore {
       }));
   }
 
+  outputModel(caseId, text) {
+    const row = this.db.prepare(`
+      SELECT model FROM drafts
+      WHERE case_id=? AND text=?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(caseId, String(text || ""));
+    return String(row?.model || "").trim();
+  }
+
   progress(caseId, limit = 100) {
     return this.db.prepare(`
       SELECT * FROM (

@@ -275,30 +275,50 @@ test("switches preview both destination roles within twenty characters without o
     caseStore.close();
     await fs.rm(directory, { recursive: true, force: true });
   });
-  const scopeCaseId = "test-scope";
-  caseStore.ensureSessionScope(scopeCaseId);
+  const message = {
+    transport: "telegram",
+    sourceId: "test-source",
+    conversationId: "private:test-chat",
+    chatId: "test-chat",
+    senderId: "test-owner",
+    chatType: "private",
+    messageId: "main-input",
+    text: "task",
+  };
+  const { scopeCaseId } = caseStore.ingest(message, message.text, {
+    useActiveSession: true,
+  });
   const project = caseStore.createSession(scopeCaseId, "project-a");
+  caseStore.ingest({ ...message, messageId: "project-input" }, message.text, {
+    useActiveSession: true,
+  });
   const empty = caseStore.createSession(scopeCaseId, "empty");
   await sessionStore.append(scopeCaseId, "assistant", "main output");
   await sessionStore.append(project.target_case_id, "assistant", "old project output");
   await sessionStore.append(project.target_case_id, "assistant", "last project output\nsecond line");
+  caseStore.addDraft(project.target_case_id, "last project output\nsecond line", "gpt-6-astra");
+  caseStore.addDraft(scopeCaseId, "last project output\nsecond line", "other-session-model");
+  caseStore.setRuntimeSetting(`assistant_model:${project.target_case_id}`, "next-model");
+  for (let index = 0; index < 60; index += 1) {
+    caseStore.addDraft(project.target_case_id, "control reply", "next-model");
+  }
   await sessionStore.append(project.target_case_id, "user", "pending task");
   await sessionStore.append("other-chat", "assistant", "private other output");
-  const common = { caseStore, sessionStore, config: {}, scopeCaseId };
+  const common = { caseStore, sessionStore, config: { codexModel: "default-model" }, scopeCaseId };
   const switched = await applyControlCommand({
     ...common,
     caseId: empty.target_case_id,
     command: parseControlCommand("/session use PROJECT-A"),
   });
   assert.equal(switched.text,
-    "已切换到 session「project-a」。\n用户最后输入：pending task\n模型最后输出：last project output…");
+    "已切换到 session「project-a」。\nuser: pending task\ngpt-6-astra: last project output…");
   assert.equal(switched.outputCaseId, project.target_case_id);
   const fresh = await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
     command: parseControlCommand("/session empty"),
   });
-  assert.equal(fresh.text, "已切换到 session「empty」。\n用户最后输入：暂无\n模型最后输出：暂无");
+  assert.equal(fresh.text, "已切换到 session「empty」。\nuser: 暂无\ndefault-model: 暂无");
   await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
@@ -309,7 +329,7 @@ test("switches preview both destination roles within twenty characters without o
     caseId: empty.target_case_id,
     command: parseControlCommand("/session project-a"),
   });
-  assert.equal(cleared.text, "已切换到 session「project-a」。\n用户最后输入：暂无\n模型最后输出：暂无");
+  assert.equal(cleared.text, "已切换到 session「project-a」。\nuser: 暂无\ndefault-model: 暂无");
   const missing = await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
@@ -322,7 +342,8 @@ test("switches preview both destination roles within twenty characters without o
   const unicode = await applyControlCommand({
     ...common, caseId: empty.target_case_id, command: parseControlCommand("/session project-a"),
   });
-  const previews = unicode.text.split("\n").slice(1).map((line) => line.split("：")[1]);
+  const previews = unicode.text.split("\n").slice(1).map((line) => line.split(": ")[1]);
+  assert.match(unicode.text, /\nassistant: /);
   assert.equal(Array.from(previews[0]).length, 20);
   assert.equal(previews[1], "𠀀".repeat(19) + "…");
 });

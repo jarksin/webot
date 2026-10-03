@@ -218,13 +218,17 @@ export async function applyControlCommand({
     const lastOutput = history.findLast(
       (entry) => entry.role === "assistant" && clean(entry.content),
     );
+    const outputModel = lastOutput
+      ? caseStore.outputModel(selected.target_case_id, lastOutput.content)
+        || "assistant"
+      : effectiveRuntime(caseStore, selected.target_case_id, config, env).model;
     const confirmation = selected.session_id === "main"
       ? "已切回默认 session「main」。"
       : `已切换到 session「${selected.name}」。`;
     return {
       text: confirmation
-        + `\n用户最后输入：${sessionPreview(lastInput?.content)}`
-        + `\n模型最后输出：${sessionPreview(lastOutput?.content)}`,
+        + `\nuser: ${sessionPreview(lastInput?.content)}`
+        + `\n${outputModel}: ${sessionPreview(lastOutput?.content)}`,
       outputCaseId: selected.target_case_id,
     };
   }
