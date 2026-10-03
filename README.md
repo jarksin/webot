@@ -190,8 +190,11 @@ Update the website copy and run the relevant tests.
 Model and effort overrides belong to the selected session. Chats with multiple
 undeleted sessions carry a `[session-name]` prefix on progress, completion, and
 control-command replies, even when only one session is running. Delayed sends
-and retries retain their labels; switch replies use the destination session's
-name. Independent chats and chats with only one session stay unchanged.
+and retries retain their labels. Switch replies use the originating session's
+name, show the old-to-new transition, and preview the destination. Automatic
+media and group context are isolated by session; an explicit message quote
+can still reference a message in the same chat. Independent chats and chats
+with only one session stay unchanged.
 
 ## Self-Iteration and Guarded Reload
 

@@ -311,14 +311,14 @@ test("switches preview both destination roles within twenty characters without o
     command: parseControlCommand("/session use PROJECT-A"),
   });
   assert.equal(switched.text,
-    "已切换到 session「project-a」。\nuser: pending task\ngpt-6-astra: last project output…");
-  assert.equal(switched.outputCaseId, project.target_case_id);
+    "已切换 session「empty」→「project-a」。\nuser: pending task\ngpt-6-astra: last project output…");
+  assert.equal(switched.outputCaseId, empty.target_case_id);
   const fresh = await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
     command: parseControlCommand("/session empty"),
   });
-  assert.equal(fresh.text, "已切换到 session「empty」。\nuser: 暂无\ndefault-model: 暂无");
+  assert.equal(fresh.text, "已切换 session「project-a」→「empty」。\nuser: 暂无\ndefault-model: 暂无");
   await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
@@ -329,7 +329,7 @@ test("switches preview both destination roles within twenty characters without o
     caseId: empty.target_case_id,
     command: parseControlCommand("/session project-a"),
   });
-  assert.equal(cleared.text, "已切换到 session「project-a」。\nuser: 暂无\ndefault-model: 暂无");
+  assert.equal(cleared.text, "已切换 session「empty」→「project-a」。\nuser: 暂无\ndefault-model: 暂无");
   const missing = await applyControlCommand({
     ...common,
     caseId: project.target_case_id,
@@ -344,6 +344,7 @@ test("switches preview both destination roles within twenty characters without o
   });
   const previews = unicode.text.split("\n").slice(1).map((line) => line.split(": ")[1]);
   assert.match(unicode.text, /\nassistant: /);
+  assert.match(unicode.text, /^当前已是 session「project-a」。/);
   assert.equal(Array.from(previews[0]).length, 20);
   assert.equal(previews[1], "𠀀".repeat(19) + "…");
 });

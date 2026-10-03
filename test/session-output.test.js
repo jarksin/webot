@@ -305,23 +305,23 @@ test("overlapping silent sessions remain silent", async (t) => {
 });
 
 for (const transport of ["telegram", "pad"]) {
-  test(`${transport} labels switches with the destination and replays only its last reply`, async (t) => {
+  test(`${transport} labels switches with their origin and previews the destination`, async (t) => {
     const f = await fixture(t, transport);
     const scope = await f.ingest();
     const main = await f.start(scope);
     await main.finish({ text: "main result", model: "main-model" });
     await f.ingest("test-self", "test-source", "/session new project-a");
-    assert.match(f.sent.at(-1).text, /^\[project-a\] 已新建并切换/);
+    assert.match(f.sent.at(-1).text, /^\[main\] 已新建并切换 session「main」→「project-a」/);
     const namedId = await f.ingest();
     const named = await f.start(namedId);
     await named.finish({ text: "project result", model: "gpt-6-astra" });
     f.caseStore.setRuntimeSetting(`assistant_model:${namedId}`, "next-model");
     await f.ingest("test-self", "test-source", "/session main");
     assert.equal(f.sent.at(-1).text,
-      "[main] 已切回默认 session「main」。\nuser: task\nmain-model: main result");
+      "[project-a] 已切换 session「project-a」→「main」。\nuser: task\nmain-model: main result");
     await f.ingest("test-self", "test-source", "/session project-a");
     assert.equal(f.sent.at(-1).text,
-      "[project-a] 已切换到 session「project-a」。\nuser: task\ngpt-6-astra: project result");
+      "[main] 已切换 session「main」→「project-a」。\nuser: task\ngpt-6-astra: project result");
     await f.ingest("test-self", "test-source", "/status");
     assert.match(f.sent.at(-1).text, /^\[project-a\] 当前 session/);
     const status = f.sent.at(-1).text;
@@ -330,7 +330,7 @@ for (const transport of ["telegram", "pad"]) {
     await f.ingest("test-self", "test-source", "/session main");
     await f.ingest("test-self", "test-source", "/session project-a");
     assert.equal(f.sent.at(-1).text,
-      "[project-a] 已切换到 session「project-a」。\nuser: task\ngpt-6-astra: project result");
+      "[main] 已切换 session「main」→「project-a」。\nuser: task\ngpt-6-astra: project result");
     assert.equal((await f.sessionStore.history(namedId)).at(-1).content, "project result");
   });
 }

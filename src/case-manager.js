@@ -566,6 +566,7 @@ export class CaseManager {
         .join("\n");
       const mediaContext = await this.hydrateTelegramMediaContext(
         this.caseStore.mediaContextBefore(trigger.message, {
+          caseId,
           excludeMessageIds: pending.map((item) => item.message_id),
         }),
       );
@@ -584,6 +585,7 @@ export class CaseManager {
         trigger.message,
         {
           ...this.groupContextSettings(),
+          caseId,
           afterMessageId: previousMessage?.message_id || "",
           excludeMessageIds: pending.map((item) => item.message_id),
         },

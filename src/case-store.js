@@ -768,6 +768,26 @@ export class CaseStore {
     return deleteSession(this.db, scopeCaseId, name);
   }
 
+  sessionCaseIdFor(message) {
+    const scopeCaseId = caseIdFor(message);
+    return this.activeSession(scopeCaseId)?.target_case_id || scopeCaseId;
+  }
+
+  contextSessionCaseId(message, recordedCaseId = "") {
+    const assigned = this.db.prepare(`
+      SELECT case_id FROM messages WHERE source_id=? AND message_id=?
+    `).get(String(message.sourceId || "default"), String(message.messageId || ""));
+    if (assigned) return assigned.case_id;
+    if (recordedCaseId) return recordedCaseId;
+    const scopeCaseId = caseIdFor(message);
+    const managed = this.db.prepare(`
+      SELECT 1 FROM assistant_sessions
+      WHERE scope_case_id=? AND session_id!='main' LIMIT 1
+    `).get(scopeCaseId);
+    // Legacy uncaptured context cannot be assigned to a named session safely.
+    return managed ? "" : scopeCaseId;
+  }
+
   ingestSyncedMessage(message, options = {}) {
     if (!["pad", "telegram"].includes(message?.transport)) {
       return { inserted: false, reason: "not-gateway" };
@@ -776,6 +796,7 @@ export class CaseStore {
     const sourceId = String(message.sourceId || "default");
     const conversationId = conversationIdFor(message);
     const snapshot = syncedMessageSnapshot(message);
+    snapshot.metadata.sessionCaseId = this.sessionCaseIdFor(message);
     const result = this.db.prepare(`
       INSERT OR IGNORE INTO synced_messages(
         source_id, conversation_id, message_id, timestamp, direction,
@@ -1032,6 +1053,7 @@ export class CaseStore {
     const excluded = new Set(
       (options.excludeMessageIds || []).map((item) => String(item || "")),
     );
+    const contextCaseId = options.caseId || this.sessionCaseIdFor(message);
     return rows
       .filter((row) =>
         Number(row.timestamp || 0) <= Number(message.timestamp || now()) &&
@@ -1044,7 +1066,11 @@ export class CaseStore {
         Array.isArray(row.attachments) &&
         row.attachments.some((attachment) =>
           attachment?.kind === "image" || (pad && attachment?.kind === "file")
-        )
+        ) &&
+        this.contextSessionCaseId(
+          { ...message, messageId: row.message_id },
+          row.metadata?.sessionCaseId,
+        ) === contextCaseId
       )
       .slice(-limit)
       .map((row) => ({
@@ -1090,7 +1116,10 @@ export class CaseStore {
       String(message.senderId || ""),
       String(message.senderName || ""),
       String(message.text || ""),
-      JSON.stringify(message),
+      JSON.stringify({
+        ...message,
+        sessionCaseId: this.sessionCaseIdFor(message),
+      }),
       createdAt,
     );
     if (!result.changes) return { inserted: false, reason: "duplicate" };
@@ -1224,12 +1253,16 @@ export class CaseStore {
       Number(upper.timestamp),
       Number(upper.id),
       ...excluded,
-      limit,
+      options.caseId ? Math.max(limit, 1000) : limit,
     );
-    return rows.reverse().map((row) => ({
-      ...row,
-      message: json(row.message_json, {}),
-    }));
+    const contextCaseId = options.caseId || this.sessionCaseIdFor(message);
+    return rows.reverse()
+      .map((row) => ({ ...row, message: json(row.message_json, {}) }))
+      .filter((row) => this.contextSessionCaseId(
+        { ...message, messageId: row.message_id },
+        row.message.sessionCaseId,
+      ) === contextCaseId)
+      .slice(-limit);
   }
 
   ingest(message, text = message.text, options = {}) {

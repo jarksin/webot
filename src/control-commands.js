@@ -172,9 +172,9 @@ export async function applyControlCommand({
         const created = caseStore.createSession(scopeCaseId, command.name);
         return {
           text:
-            `已新建并切换到 session「${created.name}」。`
+            `已新建并切换 session「${current.name}」→「${created.name}」。`
             + "该 session 的上下文、Codex session、模型和 effort 均独立。",
-          outputCaseId: created.target_case_id,
+          outputCaseId: caseId,
         };
       } catch (error) {
         return { text: `${error.message}。用 /sessions 查看现有 session。` };
@@ -222,14 +222,14 @@ export async function applyControlCommand({
       ? caseStore.outputModel(selected.target_case_id, lastOutput.content)
         || "assistant"
       : effectiveRuntime(caseStore, selected.target_case_id, config, env).model;
-    const confirmation = selected.session_id === "main"
-      ? "已切回默认 session「main」。"
-      : `已切换到 session「${selected.name}」。`;
+    const confirmation = selected.session_id === current.session_id
+      ? `当前已是 session「${selected.name}」。`
+      : `已切换 session「${current.name}」→「${selected.name}」。`;
     return {
       text: confirmation
         + `\nuser: ${sessionPreview(lastInput?.content)}`
         + `\n${outputModel}: ${sessionPreview(lastOutput?.content)}`,
-      outputCaseId: selected.target_case_id,
+      outputCaseId: caseId,
     };
   }
 
