@@ -85,6 +85,12 @@ function padDownloadContext(value) {
     compressType: numberValue(
       context.compress_type ?? context.CompressType ?? context.compressType,
     ),
+    rawDataLen: numberValue(context.raw_data_len ?? context.RawDataLen ?? context.rawDataLen),
+    rawMD5: scalar(context.raw_md5 ?? context.RawMD5 ?? context.rawMD5),
+    rawAESKey: scalar(context.raw_aes_key ?? context.RawAESKey ?? context.rawAESKey),
+    cdnRawVideoFileNo: scalar(
+      context.cdn_raw_video_file_no ?? context.CDNRawVideoFileNo ?? context.cdnRawVideoFileNo,
+    ),
     section: section
       ? {
           startPos: numberValue(
@@ -195,14 +201,17 @@ function structuredPadAttachments(message) {
   }
   const video = objectValue(message.video ?? message.Video);
   if (video) {
+    const rawContext = padDownloadContext(video.raw_download_context ?? video.RawDownloadContext);
+    const completeRaw = rawContext?.endpoint === "/api/v1/media/download-raw-video-binary" &&
+      rawContext.rawDataLen && rawContext.rawMD5 && rawContext.rawAESKey && rawContext.cdnRawVideoFileNo;
     attachments.push({
       kind: "video",
-      size: numberValue(video.data_len ?? video.DataLen),
+      size: completeRaw ? rawContext.rawDataLen : numberValue(video.data_len ?? video.DataLen),
       durationSeconds: numberValue(
         video.duration_seconds ?? video.DurationSeconds,
       ),
-      md5: scalar(video.md5 ?? video.MD5),
-      downloadContext: padDownloadContext(
+      md5: completeRaw ? rawContext.rawMD5 : scalar(video.md5 ?? video.MD5),
+      downloadContext: completeRaw ? rawContext : padDownloadContext(
         video.download_context ?? video.DownloadContext,
       ),
     });

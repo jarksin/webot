@@ -29,7 +29,7 @@ function decodeText(data, truncated) {
 
 export async function markHydratedFile(attachment, cached) {
   const result = { ...attachment, ...cached };
-  if (attachment?.kind !== "file" || !cached?.localPath) return result;
+  if (!["file", "video"].includes(attachment?.kind) || !cached?.localPath) return result;
   const info = await fs.lstat(cached.localPath);
   if (!info.isFile() || info.size !== cached.size) {
     throw new Error("cached attachment is not a matching regular file");

@@ -31,6 +31,7 @@ const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_WEBSOCKET_HEALTH_INTERVAL_MS = 30_000;
 const WEBSOCKET_OPEN = 1;
 const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
+const MAX_INBOUND_VIDEO_BYTES = 100 * 1024 * 1024;
 const WECHAT_MENTION_SEPARATOR = "\u2005";
 const execFileAsync = promisify(execFile);
 
@@ -134,6 +135,54 @@ function verifyInboundFile(data, attachment, context) {
   ) {
     throw new Error("Pad file download did not match its declared digest");
   }
+}
+
+function videoDownloadContextPayload(context) {
+  if (context.endpoint === "/api/v1/media/download-raw-video-binary") {
+    const length = Number(context.rawDataLen);
+    if (!context.cdnRawVideoFileNo || !/^[a-f0-9]{32}$/i.test(String(context.rawAESKey)) ||
+      !/^[a-f0-9]{32}$/i.test(String(context.rawMD5)) || !Number.isSafeInteger(length) ||
+      length <= 0 || length > MAX_INBOUND_VIDEO_BYTES) {
+      throw new Error("raw video download context is missing or invalid");
+    }
+    return {
+      cdn_raw_video_file_no: String(context.cdnRawVideoFileNo),
+      raw_aes_key: String(context.rawAESKey), raw_md5: String(context.rawMD5),
+      raw_data_len: length,
+    };
+  }
+  const length = Number(context.dataLen);
+  const msgId = Number(context.msgId || 0);
+  if (!Number.isSafeInteger(length) || length <= 0 || length > MAX_INBOUND_VIDEO_BYTES ||
+    !Number.isSafeInteger(msgId) || msgId < 0 || msgId > 0xffffffff ||
+    (!msgId && !context.newMsgId) ||
+    (context.newMsgId && !/^[1-9]\d{0,19}$/.test(String(context.newMsgId))) ||
+    (context.section?.startPos && Number(context.section.startPos) !== 0)) {
+    throw new Error("video download context is missing or invalid");
+  }
+  return {
+    msg_id: msgId, data_len: length,
+    ...(context.newMsgId ? { new_msg_id: String(context.newMsgId) } : {}),
+    section: { start_pos: 0, data_len: 65536 },
+  };
+}
+
+function inboundVideoType(data, context) {
+  if (context.endpoint === "/api/v1/media/download-raw-video-binary") {
+    if (data.length !== Number(context.rawDataLen) ||
+      crypto.createHash("md5").update(data).digest("hex") !== String(context.rawMD5).toLowerCase()) {
+      throw new Error("raw video size or digest mismatch");
+    }
+  }
+  if (data.length < 12) throw new Error("video container is truncated");
+  const size = data.readUInt32BE(0);
+  const type = data.subarray(4, 8).toString("ascii");
+  if (size < 8 || size > data.length || !["ftyp", "wide", "mdat", "moov"].includes(type)) {
+    throw new Error("unsupported video container");
+  }
+  return type === "ftyp" && data.subarray(8, 12).toString("ascii") !== "qt  "
+    ? { extension: ".mp4", mime: "video/mp4" }
+    : { extension: ".mov", mime: "video/quicktime" };
 }
 
 async function inboundResponseBytes(response, limit) {
@@ -384,15 +433,19 @@ export class PadTransport {
     const context = attachment?.downloadContext;
     const endpoint = String(context?.endpoint || "");
     const isFile = attachment?.kind === "file";
+    const isVideo = attachment?.kind === "video";
     if (
-      !(isFile
+      !(isVideo
+        ? ["/api/v1/media/download-video-binary", "/api/v1/media/download-raw-video-binary"].includes(endpoint)
+        : isFile
         ? endpoint === "/api/v1/media/download-file-binary"
         : attachment?.kind === "image" && endpoint === "/api/v1/media/download-img-binary")
     ) {
-      throw new Error(`attachment does not expose the complete ${isFile ? "file" : "image"} endpoint`);
+      throw new Error(`attachment does not expose the complete ${isVideo ? "video" : isFile ? "file" : "image"} endpoint`);
     }
-    const payload = isFile ? fileDownloadContextPayload(context) : imageDownloadContextPayload(context);
-    const limit = isFile ? Number(context.dataLen) : MAX_INBOUND_IMAGE_BYTES;
+    const payload = isVideo ? videoDownloadContextPayload(context) :
+      isFile ? fileDownloadContextPayload(context) : imageDownloadContextPayload(context);
+    const limit = isVideo ? MAX_INBOUND_VIDEO_BYTES : isFile ? Number(context.dataLen) : MAX_INBOUND_IMAGE_BYTES;
     const fileExtension = path.extname(String(attachment.filename || "")).toLowerCase();
     const extension = /^\.[a-z0-9]{1,12}$/.test(fileExtension) ? fileExtension : ".bin";
     const directory = path.join(
@@ -402,21 +455,21 @@ export class PadTransport {
     );
     const base = crypto.createHash("sha256").update(JSON.stringify([
       source.id, message.chatId, message.messageId, context,
-      ...(isFile ? [attachment.md5 || ""] : []),
+      ...(isFile || isVideo ? [attachment.md5 || ""] : []),
     ])).digest("hex");
-    for (const suffix of isFile ? [extension] : [".jpg", ".png", ".gif", ".webp"]) {
+    for (const suffix of isVideo ? [".mp4", ".mov"] : isFile ? [extension] : [".jpg", ".png", ".gif", ".webp"]) {
       const filePath = path.join(directory, `${base}${suffix}`);
       try {
         const info = fs.lstatSync(filePath);
         if (info.isFile() && info.size > 0 && info.size <= limit) {
           const data = fs.readFileSync(filePath);
           if (isFile) verifyInboundFile(data, attachment, context);
-          const type = isFile
+          const type = isVideo ? inboundVideoType(data, context) : isFile
             ? { extension, mime: "application/octet-stream" }
             : inboundImageType(data);
           return {
             localPath: filePath,
-            filename: isFile ? attachment.filename || `${base}${extension}` : `${base}${type.extension}`,
+            filename: isFile || isVideo ? attachment.filename || `${base}${type.extension}` : `${base}${type.extension}`,
             mime: type.mime, size: info.size,
           };
         }
@@ -426,7 +479,9 @@ export class PadTransport {
       const response = await this.fetch(padEndpointURL(source, endpoint), {
         method: "POST",
         headers: tokenHeaders(source.accessToken),
-        body: JSON.stringify(isFile ? {
+        body: JSON.stringify(isVideo ? {
+          video: { download_context: payload },
+        } : isFile ? {
           file: { name: attachment.filename, download_context: payload },
         } : {
           image: { download_context: payload },
@@ -434,11 +489,11 @@ export class PadTransport {
         signal: AbortSignal.timeout(180_000),
       });
       if (!response.ok) {
-        throw new Error(`Pad ${isFile ? "file" : "image"} download failed (${response.status})`);
+        throw new Error(`Pad ${isVideo ? "video" : isFile ? "file" : "image"} download failed (${response.status})`);
       }
       const data = await inboundResponseBytes(response, limit);
       if (isFile) verifyInboundFile(data, attachment, context);
-      const type = isFile
+      const type = isVideo ? inboundVideoType(data, context) : isFile
         ? { extension, mime: "application/octet-stream" }
         : inboundImageType(data);
       const filePath = path.join(directory, `${base}${type.extension}`);
@@ -452,7 +507,7 @@ export class PadTransport {
       }
       return {
         localPath: filePath,
-        filename: isFile ? attachment.filename || `${base}${extension}` : `${base}${type.extension}`,
+        filename: isFile || isVideo ? attachment.filename || `${base}${type.extension}` : `${base}${type.extension}`,
         mime: type.mime,
         size: data.length,
       };

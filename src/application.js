@@ -440,17 +440,23 @@ export class WebotApplication {
     for (let index = 0; index < attachments.length; index += 1) {
       const attachment = attachments[index];
       const isFile = attachment?.kind === "file";
+      const isVideo = attachment?.kind === "video";
+      const isBinary = isFile || isVideo;
       if (
-        (!isFile && attachment?.kind !== "image") ||
-        (isFile ? fileCount >= MAX_MODEL_FILES : imageCount >= MAX_MODEL_IMAGES)
+        (!isBinary && attachment?.kind !== "image") ||
+        (isBinary ? fileCount >= MAX_MODEL_FILES : imageCount >= MAX_MODEL_IMAGES)
       ) {
         continue;
       }
+      if (isVideo && ![
+        "/api/v1/media/download-video-binary",
+        "/api/v1/media/download-raw-video-binary",
+      ].includes(attachment?.downloadContext?.endpoint)) continue;
       if (!attachment?.downloadContext?.endpoint) {
         if (isFile) attachments[index] = { ...attachment, error: "file_download_context_missing" };
         continue;
       }
-      if (isFile) fileCount += 1;
+      if (isBinary) fileCount += 1;
       else imageCount += 1;
       try {
         const cached = await this.transports.pad.downloadInboundAttachment(
@@ -459,13 +465,13 @@ export class WebotApplication {
           this.config.dataDir,
           { request: (operation) => this.serializePadMediaRequest(message.sourceId, operation) },
         );
-        attachments[index] = isFile
+        attachments[index] = isBinary
           ? await markHydratedFile(attachment, cached)
           : markHydratedImage(attachment, cached);
       } catch (error) {
         attachments[index] = {
           ...attachment,
-          error: isFile ? "file_download_failed" : "image_download_failed",
+          error: isFile ? "file_download_failed" : isVideo ? "video_download_failed" : "image_download_failed",
         };
         this.logger.warn("pad inbound media cache failed", {
           sourceId: message.sourceId,
