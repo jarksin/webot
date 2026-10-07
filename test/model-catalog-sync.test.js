@@ -32,8 +32,11 @@ test("keeps canonical text models from a custom provider", () => {
       { id: "owner/gpt-6.1-sol" },
       { id: "gpt-image-2" },
       { id: "gpt-reserve" },
+      { id: "codex-auto-review" },
+      { id: "owner/codex-auto-review" },
+      { id: "codex-auto-review" },
     ],
-  }), ["gpt-6.1-sol", "company-gpt-6.1-sol"]);
+  }), ["gpt-6.1-sol", "company-gpt-6.1-sol", "codex-auto-review"]);
 });
 
 test("creates metadata for models absent from the prior catalog", () => {
@@ -84,6 +87,7 @@ test("refreshes the configured catalog from the provider model endpoint", async 
             data: [
               { id: "gpt-6.1-sol" },
               { id: "owner/gpt-6.1-sol" },
+              { id: "codex-auto-review" },
             ],
           }),
         };
@@ -91,11 +95,11 @@ test("refreshes the configured catalog from the provider model endpoint", async 
     },
   );
 
-  assert.equal(result.modelCount, 1);
+  assert.equal(result.modelCount, 2);
   assert.deepEqual(
     JSON.parse(await fs.readFile(catalogFile, "utf8")).models
       .map((entry) => entry.slug),
-    ["gpt-6.1-sol"],
+    ["codex-auto-review", "gpt-6.1-sol"],
   );
 });
 
@@ -117,7 +121,7 @@ test("adds requested available models without replacing existing entries", async
   }));
 
   const result = await addModelCatalogEntries(
-    ["gpt-6.1-sol", "company-gpt-6.1-sol"],
+    ["gpt-6.1-sol", "company-gpt-6.1-sol", "codex-auto-review"],
     { codexHome },
     {},
     {
@@ -128,6 +132,7 @@ test("adds requested available models without replacing existing entries", async
           data: [
             { id: "gpt-6.1-sol" },
             { id: "company-gpt-6.1-sol" },
+            { id: "codex-auto-review" },
           ],
         }),
       }),
@@ -137,10 +142,11 @@ test("adds requested available models without replacing existing entries", async
   assert.deepEqual(result.addedModels, [
     "gpt-6.1-sol",
     "company-gpt-6.1-sol",
+    "codex-auto-review",
   ]);
   assert.deepEqual(
     JSON.parse(await fs.readFile(catalogFile, "utf8")).models
       .map((entry) => entry.slug),
-    ["gpt-6-sol", "company-gpt-6.1-sol", "gpt-6.1-sol"],
+    ["gpt-6-sol", "codex-auto-review", "company-gpt-6.1-sol", "gpt-6.1-sol"],
   );
 });

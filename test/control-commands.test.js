@@ -116,6 +116,20 @@ test("applies model and effort overrides without invoking a provider", async () 
   assert.match(customModel.text, /claude-opus-5/);
   assert.equal(runtimeOverrides(caseStore, "case-1").model, "claude-opus-5");
 
+  const reviewModel = await applyControlCommand({
+    command: parseControlCommand("/model codex-auto-review"),
+    caseId: "case-1",
+    caseStore,
+    sessionStore,
+    config,
+    modelProbe: async () => {
+      assert.fail("an available review model must not need registration");
+    },
+  });
+  assert.match(reviewModel.text, /已切换到 codex-auto-review/);
+  assert.equal(runtimeOverrides(caseStore, "case-1").model, "codex-auto-review");
+  assert.equal(runtimeOverrides(caseStore, "case-2").model, "");
+
   const probedModel = await applyControlCommand({
     command: parseControlCommand("/model company-gpt-6.1-sol"),
     caseId: "case-1",
@@ -149,7 +163,7 @@ test("applies model and effort overrides without invoking a provider", async () 
   });
   assert.match(models.text, /claude-opus-5/);
   assert.doesNotMatch(models.text, /gpt-image-2/);
-  assert.doesNotMatch(models.text, /codex-auto-review/);
+  assert.match(models.text, /codex-auto-review/);
 
   const effort = await applyControlCommand({
     command: parseControlCommand("/effort low"),

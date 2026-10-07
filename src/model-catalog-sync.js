@@ -46,7 +46,7 @@ function visibleTextModelId(value) {
   const id = clean(value);
   return /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/.test(id)
     && !id.includes("/")
-    && !/^(?:codex-auto-review|gpt-reserve|gpt-image-)/i.test(id);
+    && !/^(?:gpt-reserve|gpt-image-)/i.test(id);
 }
 
 export function visibleTextModelIds(payload = {}) {

@@ -35,7 +35,7 @@ function catalogModels(file) {
     return (Array.isArray(value?.models) ? value.models : [])
       .map((entry) => clean(entry?.slug))
       .filter(validModel)
-      .filter((model) => !/^(?:gpt-image-|codex-auto-review$)/i.test(model));
+      .filter((model) => !/^gpt-image-/i.test(model));
   } catch {
     return [];
   }
