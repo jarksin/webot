@@ -7,7 +7,7 @@ import test from "node:test";
 import { markHydratedFile, modelFiles, readModelFiles } from "../src/inbound-files.js";
 import { PadTransport } from "../src/transports/pad.js";
 import { WebotApplication } from "../src/application.js";
-import { normalizePadEnvelope } from "../src/normalize.js";
+import { normalizePadEnvelope, padFileCDNDownloadContext } from "../src/normalize.js";
 import { createCodexProvider } from "../src/codex-provider.js";
 import { CaseStore } from "../src/case-store.js";
 import { CaseManager } from "../src/case-manager.js";
@@ -103,6 +103,63 @@ test("Pad files are downloaded once, validated, cached privately, and bypass the
   await pad.downloadInboundAttachment(message, file, directory);
   assert.deepEqual(await fs.readFile(first.localPath), data);
   assert.equal(calls.length, 3);
+});
+
+test("Pad file CDN capability survives normalization from the structured file", () => {
+  const [message] = normalizePadEnvelope({
+    schema: "wechatpad.message.v2", messages: [{
+      id: "cdn-file", type: 49, sender_id: "friend", recipient_id: "self",
+      conversation_id: "friend", file: {
+        name: file.filename, data_len: data.length, md5: file.md5,
+        cdn_attach_file_no: "synthetic-cdn-file", aes_key: "a".repeat(32),
+        download_context: {
+          endpoint: file.downloadContext.endpoint, attach_id: file.downloadContext.attachId,
+          user_name: "friend", data_len: data.length,
+        },
+      },
+    }],
+  }, { id: "source", selfId: "self" });
+  const context = message.attachments[0].downloadContext;
+  assert.equal(context.cdnAttachFileNo, "synthetic-cdn-file");
+  assert.equal(context.aesKey, "a".repeat(32));
+  assert.equal(context.md5, file.md5);
+});
+
+test("stored Pad file XML restores only its own CDN capability and caches verified bytes", async (t) => {
+  const directory = await temporary(t);
+  const rawContent = `<msg><appmsg><type>6</type><appattach><totallen>${data.length}</totallen>` +
+    `<attachid>${file.downloadContext.attachId}</attachid><cdnattachurl><![CDATA[synthetic-cdn-file]]></cdnattachurl>` +
+    `<aeskey>${"a".repeat(32)}</aeskey></appattach><md5>${file.md5}</md5></appmsg></msg>`;
+  let calls = 0;
+  const pad = transport(async (_url, options) => {
+    calls++;
+    const context = JSON.parse(options.body).file.download_context;
+    assert.equal(context.cdn_attach_file_no, "synthetic-cdn-file");
+    assert.equal(context.aes_key, "a".repeat(32));
+    assert.equal(context.md5, file.md5);
+    assert.equal(context.new_msg_id, file.downloadContext.newMsgId);
+    return new Response(data);
+  });
+  const message = { ...scope, messageId: "stored-cdn", rawContent };
+  const first = await pad.downloadInboundAttachment(message, file, directory);
+  const second = await pad.downloadInboundAttachment(message, file, directory);
+  assert.equal(first.localPath, second.localPath);
+  assert.equal(calls, 1);
+  assert.deepEqual(await fs.readFile(first.localPath), data);
+  for (const xml of [
+    rawContent.replace(file.downloadContext.attachId, "other-attachment"),
+    rawContent.replace("<type>6</type>", "<type>43</type>"),
+    rawContent.replace(`<totallen>${data.length}</totallen>`, "<totallen>1</totallen>"),
+  ]) assert.equal(padFileCDNDownloadContext(xml, file.downloadContext), file.downloadContext);
+  await assert.rejects(pad.downloadInboundAttachment({
+    ...message, messageId: "invalid-cdn",
+    rawContent: rawContent.replace("a".repeat(32), "missing"),
+  }, file, directory), /CDN download context/);
+  await assert.rejects(pad.downloadInboundAttachment({
+    ...message, messageId: "wrong-digest",
+    rawContent: rawContent.replace(file.md5, "b".repeat(32)),
+  }, file, directory), /attachment digest/);
+  assert.equal(calls, 1);
 });
 
 test("Pad files reject unsafe endpoints, missing context, oversized declarations, partial bytes and wrong digests", async (t) => {

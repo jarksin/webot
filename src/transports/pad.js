@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { sourceForMessage } from "../ingress-sources.js";
-import { normalizePadEnvelope } from "../normalize.js";
+import { normalizePadEnvelope, padFileCDNDownloadContext } from "../normalize.js";
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_VOICE_BYTES = 5 * 1024 * 1024;
@@ -111,12 +111,24 @@ function fileDownloadContextPayload(context = {}) {
   ) {
     throw new Error("file download context is missing or invalid (maximum 64 MiB)");
   }
+  const cdn = context.cdnAttachFileNo || context.aesKey;
+  if (cdn && (
+    !context.cdnAttachFileNo || !/^[a-f0-9]{32}$/i.test(String(context.aesKey)) ||
+    !/^[a-f0-9]{32}$/i.test(String(context.md5))
+  )) {
+    throw new Error("file CDN download context is missing or invalid");
+  }
   return {
     attach_id: String(context.attachId),
     user_name: String(context.userName),
     data_len: dataLen,
     ...(context.appId ? { app_id: String(context.appId) } : {}),
     ...(context.newMsgId ? { new_msg_id: String(context.newMsgId) } : {}),
+    ...(cdn ? {
+      cdn_attach_file_no: String(context.cdnAttachFileNo),
+      aes_key: String(context.aesKey),
+      md5: String(context.md5),
+    } : {}),
     ...(context.section ? { section: {
       start_pos: 0,
       data_len: Number(context.section.dataLen),
@@ -430,7 +442,9 @@ export class PadTransport {
 
   async downloadInboundAttachment(message, attachment, dataDir, options = {}) {
     const source = this.source(message);
-    const context = attachment?.downloadContext;
+    const context = attachment?.kind === "file"
+      ? padFileCDNDownloadContext(message.rawContent, attachment?.downloadContext)
+      : attachment?.downloadContext;
     const endpoint = String(context?.endpoint || "");
     const isFile = attachment?.kind === "file";
     const isVideo = attachment?.kind === "video";
@@ -445,6 +459,10 @@ export class PadTransport {
     }
     const payload = isVideo ? videoDownloadContextPayload(context) :
       isFile ? fileDownloadContextPayload(context) : imageDownloadContextPayload(context);
+    if (isFile && context.md5 && attachment.md5 &&
+      String(context.md5).toLowerCase() !== String(attachment.md5).toLowerCase()) {
+      throw new Error("file CDN context does not match the attachment digest");
+    }
     const limit = isVideo ? MAX_INBOUND_VIDEO_BYTES : isFile ? Number(context.dataLen) : MAX_INBOUND_IMAGE_BYTES;
     const fileExtension = path.extname(String(attachment.filename || "")).toLowerCase();
     const extension = /^\.[a-z0-9]{1,12}$/.test(fileExtension) ? fileExtension : ".bin";

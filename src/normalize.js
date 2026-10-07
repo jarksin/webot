@@ -33,6 +33,20 @@ function xmlTag(xml, tag) {
   return match ? decodeXmlText(match[1]).trim() : "";
 }
 
+export function padFileCDNDownloadContext(rawContent, context = {}) {
+  const xml = String(rawContent || "");
+  if (
+    !xml || xml.length > 128 * 1024 || xmlTag(xml, "type") !== "6" ||
+    xmlTag(xml, "attachid") !== String(context.attachId || "") ||
+    Number(xmlTag(xml, "totallen")) !== Number(context.dataLen)
+  ) return context;
+  const cdnAttachFileNo = xmlTag(xml, "cdnattachurl");
+  const aesKey = xmlTag(xml, "aeskey");
+  const md5 = xmlTag(xml, "md5");
+  if (!cdnAttachFileNo && !aesKey) return context;
+  return { ...context, cdnAttachFileNo, aesKey, md5 };
+}
+
 function objectValue(value) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value
@@ -88,6 +102,11 @@ function padDownloadContext(value) {
     rawDataLen: numberValue(context.raw_data_len ?? context.RawDataLen ?? context.rawDataLen),
     rawMD5: scalar(context.raw_md5 ?? context.RawMD5 ?? context.rawMD5),
     rawAESKey: scalar(context.raw_aes_key ?? context.RawAESKey ?? context.rawAESKey),
+    cdnAttachFileNo: scalar(
+      context.cdn_attach_file_no ?? context.CDNAttachFileNo ?? context.cdnAttachFileNo,
+    ),
+    aesKey: scalar(context.aes_key ?? context.AESKey ?? context.aesKey),
+    md5: scalar(context.md5 ?? context.MD5),
     cdnRawVideoFileNo: scalar(
       context.cdn_raw_video_file_no ?? context.CDNRawVideoFileNo ?? context.cdnRawVideoFileNo,
     ),
@@ -226,15 +245,25 @@ function structuredPadAttachments(message) {
     ) {
       filename = `${filename}.${extension}`;
     }
+    const downloadContext = padDownloadContext(
+      file.download_context ?? file.DownloadContext,
+    );
+    if (downloadContext) {
+      for (const [key, value] of [
+        ["cdnAttachFileNo", scalar(file.cdn_attach_file_no ?? file.CDNAttachFileNo)],
+        ["aesKey", scalar(file.aes_key ?? file.AESKey)],
+        ["md5", scalar(file.md5 ?? file.MD5)],
+      ]) {
+        if (value && !downloadContext[key]) downloadContext[key] = value;
+      }
+    }
     attachments.push({
       kind: "file",
       filename,
       size: numberValue(file.data_len ?? file.DataLen),
       fileExtension: extension,
       md5: scalar(file.md5 ?? file.MD5),
-      downloadContext: padDownloadContext(
-        file.download_context ?? file.DownloadContext,
-      ),
+      downloadContext,
     });
   }
   return attachments.map((attachment) =>
