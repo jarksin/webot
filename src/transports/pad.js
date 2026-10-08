@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { sourceForMessage } from "../ingress-sources.js";
-import { normalizePadEnvelope, padFileCDNDownloadContext } from "../normalize.js";
+import { normalizePadEnvelope, padFileCDNDownloadContext, padRecordMessage } from "../normalize.js";
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_VOICE_BYTES = 5 * 1024 * 1024;
@@ -133,6 +133,21 @@ function fileDownloadContextPayload(context = {}) {
       start_pos: 0,
       data_len: Number(context.section.dataLen),
     } } : {}),
+  };
+}
+
+function recordDownloadContextPayload(context = {}, limit) {
+  const size = Number(context.dataLen);
+  const type = Number(context.fileType);
+  if (!context.cdnFileNo || ![1, 5, 7].includes(type) ||
+    !/^[a-f0-9]{32}$/i.test(String(context.aesKey)) ||
+    !/^[a-f0-9]{32}$/i.test(String(context.md5)) ||
+    !Number.isSafeInteger(size) || size <= 0 || size > limit) {
+    throw new Error("record media download context is missing or invalid");
+  }
+  return {
+    cdn_file_no: String(context.cdnFileNo), file_type: type,
+    aes_key: String(context.aesKey), md5: String(context.md5), data_len: size,
   };
 }
 
@@ -440,6 +455,25 @@ export class PadTransport {
     return { ok: true, result };
   }
 
+  async parseInboundRecord(message, options = {}) {
+    if (!["19", "24"].includes(String(message?.app?.category)) ||
+      message.app.record || !message.rawContent) return message;
+    const source = this.source(message);
+    const parse = async () => {
+      const response = await this.fetch(padEndpointURL(source, "/api/v1/messages/parse-record"), {
+        method: "POST", headers: tokenHeaders(source.accessToken),
+        body: JSON.stringify({ content: message.rawContent }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      const body = await response.json();
+      const data = body?.Data ?? body?.data;
+      if (!padSucceeded(response, body) || !data?.record ||
+        !Array.isArray(data.record.items)) throw new Error("Pad note/chat-record parsing failed");
+      return padRecordMessage(message, data.record, String(data.display_text || ""));
+    };
+    return options.request ? options.request(parse) : parse();
+  }
+
   async downloadInboundAttachment(message, attachment, dataDir, options = {}) {
     const source = this.source(message);
     const context = attachment?.kind === "file"
@@ -448,18 +482,21 @@ export class PadTransport {
     const endpoint = String(context?.endpoint || "");
     const isFile = attachment?.kind === "file";
     const isVideo = attachment?.kind === "video";
+    const isRecord = endpoint === "/api/v1/media/download-record-binary" &&
+      ["image", "file"].includes(attachment?.kind);
     if (
-      !(isVideo
+      !(isRecord || (isVideo
         ? ["/api/v1/media/download-video-binary", "/api/v1/media/download-raw-video-binary"].includes(endpoint)
         : isFile
         ? endpoint === "/api/v1/media/download-file-binary"
-        : attachment?.kind === "image" && endpoint === "/api/v1/media/download-img-binary")
+        : attachment?.kind === "image" && endpoint === "/api/v1/media/download-img-binary"))
     ) {
       throw new Error(`attachment does not expose the complete ${isVideo ? "video" : isFile ? "file" : "image"} endpoint`);
     }
-    const payload = isVideo ? videoDownloadContextPayload(context) :
+    const payload = isRecord ? recordDownloadContextPayload(context, isFile ? MAX_FILE_BYTES : MAX_INBOUND_IMAGE_BYTES) :
+      isVideo ? videoDownloadContextPayload(context) :
       isFile ? fileDownloadContextPayload(context) : imageDownloadContextPayload(context);
-    if (isFile && context.md5 && attachment.md5 &&
+    if ((isFile || isRecord) && context.md5 && attachment.md5 &&
       String(context.md5).toLowerCase() !== String(attachment.md5).toLowerCase()) {
       throw new Error("file CDN context does not match the attachment digest");
     }
@@ -481,7 +518,7 @@ export class PadTransport {
         const info = fs.lstatSync(filePath);
         if (info.isFile() && info.size > 0 && info.size <= limit) {
           const data = fs.readFileSync(filePath);
-          if (isFile) verifyInboundFile(data, attachment, context);
+          if (isFile || isRecord) verifyInboundFile(data, { ...attachment, md5: context.md5 || attachment.md5 }, context);
           const type = isVideo ? inboundVideoType(data, context) : isFile
             ? { extension, mime: "application/octet-stream" }
             : inboundImageType(data);
@@ -497,7 +534,7 @@ export class PadTransport {
       const response = await this.fetch(padEndpointURL(source, endpoint), {
         method: "POST",
         headers: tokenHeaders(source.accessToken),
-        body: JSON.stringify(isVideo ? {
+        body: JSON.stringify(isRecord ? { record_item: { download_context: payload } } : isVideo ? {
           video: { download_context: payload },
         } : isFile ? {
           file: { name: attachment.filename, download_context: payload },
@@ -510,7 +547,7 @@ export class PadTransport {
         throw new Error(`Pad ${isVideo ? "video" : isFile ? "file" : "image"} download failed (${response.status})`);
       }
       const data = await inboundResponseBytes(response, limit);
-      if (isFile) verifyInboundFile(data, attachment, context);
+      if (isFile || isRecord) verifyInboundFile(data, { ...attachment, md5: context.md5 || attachment.md5 }, context);
       const type = isVideo ? inboundVideoType(data, context) : isFile
         ? { extension, mime: "application/octet-stream" }
         : inboundImageType(data);

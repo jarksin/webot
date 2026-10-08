@@ -432,6 +432,20 @@ export class WebotApplication {
   }
 
   async hydratePadMedia(message) {
+    if (["19", "24"].includes(String(message?.app?.category)) && !message.app.record &&
+      typeof this.transports.pad.parseInboundRecord === "function") {
+      try {
+        message = await this.transports.pad.parseInboundRecord(message, {
+          request: (operation) => this.serializePadMediaRequest(message.sourceId, operation),
+        });
+      } catch {
+        return {
+          ...message,
+          text: `[笔记/聊天记录正文读取失败] ${message.app?.title || ""}`.trim(),
+          app: { ...message.app, url: "", record_error: "record_parse_failed" },
+        };
+      }
+    }
     const attachments = Array.isArray(message.attachments)
       ? [...message.attachments]
       : [];

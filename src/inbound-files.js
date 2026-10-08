@@ -12,7 +12,7 @@ const TEXT_EXTENSIONS = new Set([
   ".md", ".markdown", ".txt", ".json", ".jsonl", ".csv", ".tsv",
   ".yaml", ".yml", ".xml", ".log", ".ini", ".toml", ".rst",
   ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".go",
-  ".sh", ".sql", ".html", ".css",
+  ".sh", ".sql", ".html", ".htm", ".css",
 ]);
 
 function decodeText(data, truncated) {

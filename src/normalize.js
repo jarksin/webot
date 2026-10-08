@@ -107,6 +107,9 @@ function padDownloadContext(value) {
     ),
     aesKey: scalar(context.aes_key ?? context.AESKey ?? context.aesKey),
     md5: scalar(context.md5 ?? context.MD5),
+    dataId: scalar(context.data_id ?? context.DataID ?? context.dataId),
+    fileType: numberValue(context.file_type ?? context.FileType ?? context.fileType),
+    cdnFileNo: scalar(context.cdn_file_no ?? context.CDNFileID ?? context.cdnFileNo),
     cdnRawVideoFileNo: scalar(
       context.cdn_raw_video_file_no ?? context.CDNRawVideoFileNo ?? context.cdnRawVideoFileNo,
     ),
@@ -182,6 +185,8 @@ function padReference(message) {
 
 function structuredPadAttachments(message) {
   const attachments = [];
+  const record = padAppMetadata(message)?.record;
+  if (record) attachments.push(...padRecordAttachments(record));
   const image = objectValue(message.image ?? message.Image);
   if (image) {
     attachments.push({
@@ -275,7 +280,65 @@ function structuredPadAttachments(message) {
   );
 }
 
+export function padRecordAttachments(record, depth = 0) {
+  if (!record || depth >= 16 || !Array.isArray(record.items)) return [];
+  return record.items.flatMap((item, index) => {
+    const type = numberValue(item.data_type);
+    const nested = padRecordAttachments(item.record, depth + 1);
+    if (type !== 2 && type !== 8) return nested;
+    const format = scalar(item.format).replace(/^\./, "");
+    let filename = scalar(item.title) || `record-${index + 1}`;
+    if (/^[a-z0-9]{1,12}$/i.test(format) &&
+      !filename.toLowerCase().endsWith(`.${format.toLowerCase()}`)) filename += `.${format}`;
+    return [{
+      kind: type === 2 ? "image" : "file",
+      filename,
+      size: numberValue(item.data_len),
+      md5: scalar(item.md5),
+      recordDataId: scalar(item.data_id),
+      downloadContext: padDownloadContext(item.download_context),
+    }, ...nested];
+  });
+}
+
+export function padRecordText(record, depth = 0) {
+  if (!record || depth >= 16 || !Array.isArray(record.items)) return "";
+  const prefix = record.kind === "note" ? "[笔记]" : "[聊天记录]";
+  const lines = [`${prefix} ${scalar(record.title)}`.trim()];
+  for (const [index, item] of record.items.entries()) {
+    const type = numberValue(item.data_type);
+    let text = type === 1 ? scalar(item.text || item.title) :
+      type === 2 ? `[图片 ${index + 1}]` :
+      type === 8 ? `[文件] ${scalar(item.title)}` :
+      `[条目类型 ${type}] ${scalar(item.title)} ${scalar(item.text)}`.trim();
+    if (item.sender_name) text = `${scalar(item.sender_name)}: ${text}`;
+    if (text.trim()) lines.push(text);
+    const nested = padRecordText(item.record, depth + 1);
+    if (nested) lines.push(nested);
+  }
+  if (!record.items.length && record.description) lines.push(scalar(record.description));
+  return lines.join("\n");
+}
+
+export function padRecordMessage(message, record, displayText = "") {
+  return {
+    ...message,
+    text: displayText || padRecordText(record),
+    app: { ...message.app, url: "", record },
+    attachments: padRecordAttachments(record),
+  };
+}
+
 function padContent(message, rawContent) {
+  const app = padAppMetadata(message);
+  if (["19", "24"].includes(String(app?.category))) {
+    if (app.record) return { text: padRecordText(app.record), attachments: structuredPadAttachments(message) };
+    const label = app.category === "24" ? "[笔记]" : "[聊天记录]";
+    return {
+      text: `${label} ${scalar(app.title)}\n${scalar(app.description)}`.trim(),
+      attachments: [],
+    };
+  }
   const structuredText = scalar(
     message.display_text ?? message.DisplayText ?? message.displayText,
   ).trim();
