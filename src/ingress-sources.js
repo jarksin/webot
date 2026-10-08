@@ -79,6 +79,10 @@ export function normalizeSource(value, env, defaults) {
             ? "legacy_default"
             : "",
     allowSelf: boolean(value.allow_self_chat ?? value.allowSelf, false),
+    selfChatWithoutPrefix: boolean(
+      value.self_chat_without_prefix ?? value.selfChatWithoutPrefix,
+      false,
+    ),
     selfChatPeers: new Set(
       stringList(value.self_chat_peers ?? value.selfChatPeers),
     ),
@@ -142,6 +146,7 @@ export function loadPadSources(env, defaults, configuredSources) {
         accessToken: defaults.accessToken,
         credentialSource: defaults.accessToken ? "legacy_default" : "",
         allowSelf: defaults.allowSelf,
+        selfChatWithoutPrefix: false,
         selfChatPeers: new Set(),
         mentionDisplayNames: {},
         acceptSelfChatPeerMessages: false,

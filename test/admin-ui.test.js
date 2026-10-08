@@ -130,6 +130,8 @@ test("account settings expose a saved channel activation command and keyword-onl
   assert.match(javascript, /nextStatus\.restart\?\.error/);
   assert.match(javascript, /source-keyword-only/);
   assert.match(javascript, /keywordOnly: document\.querySelector\("#source-keyword-only"\)\.checked/);
+  assert.match(javascript, /source-self-without-prefix/);
+  assert.match(javascript, /selfChatWithoutPrefix: document\.querySelector\("#source-self-without-prefix"\)\.checked/);
 });
 
 test("case workspace groups named sessions and reloads on runtime revision changes", () => {

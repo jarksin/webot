@@ -261,7 +261,13 @@ export function acceptedMessage(message, config) {
     return { accepted: false, reason: "sender-not-allowed" };
   }
 
-  if (source?.keywordOnly) {
+  const selfChatWithoutPrefix =
+    message.transport === "pad" &&
+    message.chatType === "private" &&
+    message.exactSelfChat === true &&
+    source?.allowSelf === true &&
+    source?.selfChatWithoutPrefix === true;
+  if (source?.keywordOnly && !selfChatWithoutPrefix) {
     const triggerText = message.chatType === "private"
       ? commandText
       : message.text.trim();

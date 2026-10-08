@@ -127,6 +127,94 @@ test("keyword-only Pad sources require both the allowlist and an explicit summon
   assert.equal(acceptedMessage(message, sourceConfig).reason, "source-disabled");
 });
 
+test("unprefixed Pad self chats are opt-in without relaxing other chat policies", () => {
+  const sourceConfig = loadConfig({}, {
+    pad: { sources: [{
+      id: "main",
+      selfId: "wxid_bot",
+      enabled: true,
+      allowSelf: true,
+      selfChatWithoutPrefix: true,
+      keywordOnly: true,
+      allowedChatIds: ["allowed@chatroom"],
+      allowedSenderIds: ["wxid_friend"],
+      selfChatPeers: ["wxid_peer"],
+      acceptSelfChatPeerMessages: true,
+      triggerKeywords: ["webot"],
+    }] },
+  });
+  const source = sourceConfig.pad.sources[0];
+  const self = {
+    transport: "pad",
+    sourceId: "main",
+    chatType: "private",
+    chatId: "wxid_bot",
+    senderId: "wxid_bot",
+    selfId: "wxid_bot",
+    direction: "outgoing",
+    selfConversation: true,
+    exactSelfChat: true,
+    text: "hello",
+    mentions: [],
+  };
+  assert.deepEqual(acceptedMessage(self, sourceConfig), {
+    accepted: true,
+    text: "hello",
+  });
+  assert.equal(acceptedMessage({ ...self, direction: "incoming" }, sourceConfig).accepted, true);
+  assert.equal(acceptedMessage({ ...self, text: "webot hello" }, sourceConfig).text, "hello");
+  for (const text of ["【AI】hello", "【AI 1/2】hello"]) {
+    assert.equal(acceptedMessage({ ...self, text }, sourceConfig).reason, "assistant-echo");
+  }
+  const privateMessage = {
+    ...self,
+    chatId: "wxid_friend",
+    senderId: "wxid_friend",
+    direction: "incoming",
+    selfConversation: false,
+    exactSelfChat: false,
+  };
+  const group = { ...privateMessage, chatType: "group", chatId: "allowed@chatroom" };
+  const peer = {
+    ...privateMessage,
+    chatId: "wxid_peer",
+    senderId: "wxid_peer",
+    selfPeer: true,
+    selfConversation: true,
+  };
+  for (const message of [privateMessage, group, peer]) {
+    assert.equal(acceptedMessage(message, sourceConfig).accepted, false);
+    assert.equal(acceptedMessage({ ...message, text: "webot hello" }, sourceConfig).text, "hello");
+  }
+  assert.equal(acceptedMessage({
+    ...privateMessage, senderId: "wxid_bot", direction: "outgoing",
+  }, sourceConfig).reason, "pad-outgoing");
+  assert.equal(acceptedMessage({
+    ...privateMessage, senderId: "wxid_stranger", chatId: "wxid_stranger", text: "webot hello",
+  }, sourceConfig).reason, "sender-not-allowed");
+  assert.equal(acceptedMessage({
+    ...group, chatId: "other@chatroom", text: "webot hello",
+  }, sourceConfig).reason, "chat-not-allowed");
+  source.ignoreAllowlist = true;
+  for (const message of [privateMessage, group]) {
+    assert.equal(acceptedMessage(message, sourceConfig).accepted, false);
+  }
+  source.blockedSenderIds.add("wxid_bot");
+  assert.equal(acceptedMessage(self, sourceConfig).reason, "sender-blocked");
+  source.blockedSenderIds.clear();
+  source.blockedChatIds.add("wxid_bot");
+  assert.equal(acceptedMessage(self, sourceConfig).reason, "chat-blocked");
+  source.blockedChatIds.clear();
+  source.allowSelf = false;
+  assert.equal(acceptedMessage(self, sourceConfig).reason, "self");
+  source.allowSelf = true;
+  source.enabled = false;
+  assert.equal(acceptedMessage(self, sourceConfig).reason, "source-disabled");
+  source.enabled = true;
+  source.selfChatWithoutPrefix = false;
+  assert.equal(acceptedMessage(self, sourceConfig).reason, "private-not-triggered");
+});
+
 test("keyword-only Pad sources can summon without an allowlist while retaining blocks", () => {
   const sourceConfig = loadConfig({}, {
     pad: { sources: [{

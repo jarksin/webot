@@ -135,6 +135,7 @@ export function serializeConfig(config) {
         accessToken: source.accessToken,
         accessTokenFile: source.accessTokenFile,
         allowSelf: source.allowSelf,
+        selfChatWithoutPrefix: source.selfChatWithoutPrefix,
         selfChatPeers: [...source.selfChatPeers],
         mentionDisplayNames: { ...source.mentionDisplayNames },
         acceptSelfChatPeerMessages: source.acceptSelfChatPeerMessages,

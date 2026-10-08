@@ -685,6 +685,7 @@ function accountEditor(source) {
         ${field("关联自有账号", "source-peers", listText(source.selfChatPeers), { textarea: true })}
       </div>
       ${toggle("允许账号自聊", "source-allow-self", source.allowSelf, "处理同账号人工消息；机器人回复使用 [AI] 标记防止回声")}
+      ${toggle("自聊免前缀", "source-self-without-prefix", source.selfChatWithoutPrefix === true, "仅在允许账号自聊时生效，不改变其他私聊与群聊的召唤词规则")}
       ${toggle("接收关联账号入站", "source-accept-peers", source.acceptSelfChatPeerMessages, "仅处理关联账号发来的入站副本")}
     </div>`;
 }
@@ -1080,6 +1081,7 @@ function readAccountForm() {
     botNames: parseList(document.querySelector("#source-bot-names").value),
     selfChatPeers: parseList(document.querySelector("#source-peers").value),
     allowSelf: document.querySelector("#source-allow-self").checked,
+    selfChatWithoutPrefix: document.querySelector("#source-self-without-prefix").checked,
     acceptSelfChatPeerMessages: document.querySelector("#source-accept-peers").checked,
   });
 }

@@ -31,6 +31,11 @@ private and group messages; a mention alone does not trigger a reply.
 Both settings are optional and leave existing account behavior unchanged when
 disabled. Group allowlists, blacklists and self-chat controls still apply.
 
+`selfChatWithoutPrefix` is an opt-in exception to `keywordOnly` for an account's
+own private self-chat. It requires `allowSelf`; associated accounts, other
+private chats and groups keep their existing trigger rules. Blacklists and
+assistant-echo filtering still apply.
+
 ## Local Example
 
 A local gateway may expose endpoints similar to:

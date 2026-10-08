@@ -16,6 +16,7 @@ test("loads source-scoped Pad policies and credentials", () => {
         self_wxid: "owner_wxid",
         access_token_env: "MAIN_TOKEN",
         allow_self_chat: true,
+        self_chat_without_prefix: true,
         accept_self_chat_peer_messages: false,
         self_chat_peers: ["wxid_small"]
       },
@@ -50,6 +51,7 @@ test("loads source-scoped Pad policies and credentials", () => {
   assert.equal(config.pad.sources[0].acceptSelfChatPeerMessages, false);
   assert.equal(config.pad.sources[0].ignoreAllowlist, false);
   assert.equal(config.pad.sources[0].keywordOnly, false);
+  assert.equal(config.pad.sources[0].selfChatWithoutPrefix, true);
   assert.equal(config.pad.sources[0].allowlistOnly, false);
   assert.equal(config.pad.sources[1].acceptSelfChatPeerMessages, true);
   assert.equal(
@@ -61,6 +63,7 @@ test("loads source-scoped Pad policies and credentials", () => {
   );
   assert.equal(config.pad.sources[1].ignoreAllowlist, true);
   assert.equal(config.pad.sources[1].keywordOnly, true);
+  assert.equal(config.pad.sources[1].selfChatWithoutPrefix, false);
   assert.equal(config.pad.sources[1].allowlistOnly, true);
   assert.deepEqual([...config.pad.sources[1].allowedChatIds], [
     "one@chatroom",
