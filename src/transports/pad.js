@@ -328,9 +328,15 @@ export function isSameAccountPrivateReply(message = {}, source = {}) {
 }
 
 export function formatPadReplyText(text, message = {}, source = {}) {
-  if (!source.strictPolicy) return String(text || "");
+  const selfGroupReply =
+    message.chatType === "group" &&
+    message.direction === "outgoing" &&
+    Boolean(source.selfId) &&
+    String(message.senderId || "").trim().toLowerCase() ===
+      String(source.selfId).trim().toLowerCase();
+  if (!source.strictPolicy && !selfGroupReply) return String(text || "");
   const clean = stripAiReplyPrefix(text);
-  return isSameAccountPrivateReply(message, source)
+  return selfGroupReply || isSameAccountPrivateReply(message, source)
     ? `【AI】${clean}`
     : clean;
 }

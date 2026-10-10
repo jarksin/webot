@@ -294,6 +294,86 @@ test("strict private allowlists preserve one peer conversation without keyword b
   }, sourceConfig).reason, "self-peer-outgoing");
 });
 
+test("owner Pad group summons allow only explicit source-account commands", () => {
+  const sourceConfig = loadConfig({}, {
+    policy: { ownerSenderIds: ["wxid_owner", "wxid_other_owner"] },
+    pad: { sources: [{
+      id: "main",
+      selfId: "wxid_owner",
+      allowSelf: true,
+      keywordOnly: true,
+      allowedChatIds: ["allowed@chatroom"],
+      blockedChatIds: ["blocked@chatroom"],
+      triggerKeywords: ["webot"],
+      botNames: ["Webot", "helper"],
+    }] },
+  });
+  const source = sourceConfig.pad.sources[0];
+  const message = {
+    transport: "pad", sourceId: "main", chatType: "group",
+    chatId: "allowed@chatroom", senderId: "wxid_owner", selfId: "wxid_owner",
+    direction: "outgoing", text: "@webot hello", mentions: [],
+  };
+  for (const text of ["@webot hello", "webot hello", "@Webot\u2005hello"]) {
+    assert.deepEqual(acceptedMessage({ ...message, text }, sourceConfig), {
+      accepted: true, text: "hello",
+    });
+  }
+  assert.equal(requesterAccess(message, sourceConfig.policy.ownerSenderIds), "owner");
+  assert.equal(acceptedMessage({
+    ...message, senderId: "WXID_OWNER",
+  }, sourceConfig).accepted, true);
+  for (const text of [
+    "hello", "ask @webot hello", "@webotany hello",
+    "【AI】@webot hello", "【AI 1/2】webot hello",
+    "[引用回复] hello\n引用：@webot hello",
+  ]) {
+    assert.equal(acceptedMessage({
+      ...message, text, mentions: ["wxid_owner"],
+    }, sourceConfig).reason, "pad-outgoing");
+  }
+  assert.equal(acceptedMessage({
+    ...message, text: "@helper hello",
+  }, sourceConfig).reason, "group-not-triggered");
+  for (const senderId of ["wxid_stranger", "wxid_other_owner"]) {
+    assert.equal(acceptedMessage({
+      ...message, senderId, senderName: "Owner",
+    }, sourceConfig).reason, "pad-outgoing");
+  }
+  assert.equal(acceptedMessage({
+    ...message, chatId: "other@chatroom",
+  }, sourceConfig).reason, "chat-not-allowed");
+  assert.equal(acceptedMessage({
+    ...message, chatId: "BLOCKED@chatroom",
+  }, sourceConfig).reason, "chat-blocked");
+  source.ignoreAllowlist = true;
+  assert.equal(acceptedMessage({
+    ...message, chatId: "other@chatroom",
+  }, sourceConfig).accepted, true);
+  assert.equal(acceptedMessage({
+    ...message, chatId: "blocked@chatroom",
+  }, sourceConfig).reason, "chat-blocked");
+  source.blockedSenderIds.add("wxid_owner");
+  assert.equal(acceptedMessage(message, sourceConfig).reason, "sender-blocked");
+  source.blockedSenderIds.clear();
+  sourceConfig.policy.blockedSenderIds.add("wxid_owner");
+  assert.equal(acceptedMessage(message, sourceConfig).reason, "blocked");
+  sourceConfig.policy.blockedSenderIds.clear();
+  source.allowSelf = false;
+  assert.equal(acceptedMessage(message, sourceConfig).reason, "pad-outgoing");
+  source.allowSelf = true;
+  source.enabled = false;
+  assert.equal(acceptedMessage(message, sourceConfig).reason, "source-disabled");
+  source.enabled = true;
+  sourceConfig.policy.ownerSenderIds.clear();
+  assert.equal(acceptedMessage(message, sourceConfig).reason, "pad-outgoing");
+  source.keywordOnly = false;
+  sourceConfig.policy.ownerSenderIds.add("wxid_owner");
+  assert.equal(acceptedMessage({
+    ...message, text: "@helper hello",
+  }, sourceConfig).text, "hello");
+});
+
 test("isolated peer ingress does not trigger the primary account or echo its own reply", () => {
   const sourceConfig = loadConfig({}, {
     pad: { sources: [

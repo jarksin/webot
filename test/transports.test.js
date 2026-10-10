@@ -166,6 +166,37 @@ test("Pad transport mention aliases override transient group nicknames", async (
   assert.equal(call.body.at, "huwatermelon");
 });
 
+test("Pad source-account group replies carry an assistant marker without a self mention", async () => {
+  const calls = [];
+  const source = {
+    id: "main", selfId: "wxid_owner", strictPolicy: true,
+    apiUrl: "http://pad.local/api", accessToken: "test-token",
+  };
+  const transport = new PadTransport({ sources: [source] }, "live", console,
+    async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return Response.json({ Code: 0 });
+    });
+  const message = {
+    sourceId: "main", chatType: "group", chatId: "room@chatroom",
+    senderId: "WXID_OWNER", direction: "outgoing",
+  };
+  await transport.send(message, "@webot hello");
+  assert.equal(calls[0].body.to, "room@chatroom");
+  assert.equal(calls[0].body.content, "【AI】@webot hello");
+  assert.equal(calls[0].body.at, "");
+  assert.equal(formatPadReplyText("【AI 1/2】hello", message, source), "【AI】hello");
+  assert.equal(formatPadReplyText("hello", message, {
+    ...source, strictPolicy: false,
+  }), "【AI】hello");
+  assert.equal(formatPadReplyText("hello", {
+    ...message, direction: "incoming",
+  }, source), "hello");
+  assert.equal(formatPadReplyText("hello", {
+    ...message, senderId: "wxid_member",
+  }, source), "hello");
+});
+
 test("Pad mention labels prefer safe sender names and never expose raw IDs", () => {
   assert.equal(
     formatPadMentionText("group reply", "晴耕雨读", "wxid_member"),

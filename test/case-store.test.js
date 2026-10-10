@@ -9,6 +9,10 @@ import {
 } from "../src/case-manager.js";
 import { caseIdFor, CaseStore } from "../src/case-store.js";
 import { SessionStore } from "../src/session-store.js";
+import { loadConfig } from "../src/config.js";
+import { normalizePadEnvelope } from "../src/normalize.js";
+import { requesterAccess } from "../src/security.js";
+import { PadTransport } from "../src/transports/pad.js";
 
 function message(id = "message-1") {
   return {
@@ -118,6 +122,69 @@ async function waitFor(check, timeoutMs = 1000) {
   }
   throw new Error("condition was not met");
 }
+
+test("owner outgoing group summons run a worker and send only to that group without echoing", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-owner-group-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  t.after(async () => {
+    caseStore.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const config = loadConfig({}, {
+    policy: { ownerSenderIds: ["wxid_owner"] },
+    caseManagement: { autoRun: true, autoSend: true, workerConcurrency: 1 },
+    pad: { sources: [{
+      id: "main", selfId: "wxid_owner", allowSelf: true,
+      keywordOnly: true, ignoreAllowlist: true, triggerKeywords: ["webot"],
+      apiUrl: "http://pad.local/api", accessToken: "test-token",
+    }] },
+  });
+  const source = config.pad.sources[0];
+  const normalize = (id, text) => normalizePadEnvelope({ Data: { messages: [{
+    MsgType: 1, NewMsgId: id, ChatRoomName: "room@chatroom",
+    FromUserName: "wxid_owner", ToUserName: "room@chatroom", Content: text,
+  }] } }, source)[0];
+  const calls = [];
+  let providerCalls = 0;
+  const manager = new CaseManager({
+    config,
+    requesterAccess: (message) => requesterAccess(message, config.policy.ownerSenderIds),
+    provider: { async reply(input) {
+      providerCalls += 1;
+      assert.equal(input.message.chatType, "group");
+      assert.equal(input.message.senderId, "wxid_owner");
+      return { text: "@webot reply" };
+    } },
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    caseStore,
+    transports: { pad: new PadTransport(config.pad, "live", console,
+      async (url, options) => {
+        calls.push({ url, body: JSON.parse(options.body) });
+        return Response.json({ Code: 0 });
+      }) },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  const summon = normalize("owner-group-summon", "@webot hello");
+  const received = await manager.receive(summon);
+  assert.equal(received.accepted, true);
+  assert.equal(received.caseId, "wechat:main:group:main:room@chatroom");
+  await waitFor(() => manager.status().active === 0);
+  const detail = caseStore.detail(received.caseId);
+  assert.equal(providerCalls, 1);
+  assert.equal(detail.status, "replied");
+  assert.equal(detail.drafts[0].status, "sent");
+  assert.equal(detail.drafts[0].outbound.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.to, "room@chatroom");
+  assert.equal(calls[0].body.content, "【AI】@webot reply");
+  assert.equal(calls[0].body.at, "");
+  assert.equal((await manager.receive(normalize(
+    "owner-group-echo", calls[0].body.content,
+  ))).reason, "pad-outgoing");
+  assert.equal((await manager.receive(summon)).reason, "duplicate");
+  assert.equal(providerCalls, 1);
+  assert.equal(calls.length, 1);
+});
 
 test("classifies only transient provider failures for automatic retry", () => {
   assert.equal(
@@ -339,7 +406,7 @@ test("persists a WeChat case, worker session, draft, and send result", async () 
   assert.equal(caseStore.listCases().length, 1);
 
   manager.enqueue(received.caseId, true);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await waitFor(() => manager.status().active === 0);
   const detail = caseStore.detail(received.caseId);
   assert.equal(detail.status, "draft_ready");
   assert.equal(detail.workerSession.status, "draft_ready");

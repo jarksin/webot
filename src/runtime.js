@@ -141,6 +141,19 @@ export function acceptedMessage(message, config) {
     !message.selfPeer &&
     !message.exactSelfChat &&
     privateTriggerPrefix;
+  const outgoingPadGroupCommand =
+    message.transport === "pad" &&
+    message.direction === "outgoing" &&
+    message.chatType === "group" &&
+    (source?.allowSelf ?? config.policy.allowSelf) === true &&
+    Boolean(source?.selfId) &&
+    String(message.senderId).trim().toLowerCase() ===
+      String(source.selfId).trim().toLowerCase() &&
+    hasCaseInsensitive(config.policy.ownerSenderIds, message.senderId) &&
+    hasBotNamePrefix(
+      message.text,
+      new Set([...triggerKeywords, ...botNames]),
+    );
   const outgoingTelegramCommand =
     message.transport === "telegram" &&
     message.direction === "outgoing" &&
@@ -185,7 +198,8 @@ export function acceptedMessage(message, config) {
     message.transport === "pad" &&
     message.direction === "outgoing" &&
     !message.exactSelfChat &&
-    !outgoingPrivateBotCommand
+    !outgoingPrivateBotCommand &&
+    !outgoingPadGroupCommand
   ) {
     return { accepted: false, reason: "pad-outgoing" };
   }
