@@ -476,6 +476,24 @@ export class CaseManager {
     }
   }
 
+  controlCommandForMessage(entry) {
+    return this.requesterAccess(entry.message) === "owner"
+      ? parseControlCommand(entry.text || entry.message?.text)
+      : null;
+  }
+
+  latestTaskMessage(caseId) {
+    let entry = this.caseStore.latestMessage(caseId);
+    while (entry) {
+      const command = this.controlCommandForMessage(entry);
+      if (!command) return entry;
+      // A manual rerun must not restore a task from a cleared context.
+      if (command.type === "clear") return null;
+      entry = this.caseStore.latestMessage(caseId, { beforeMessageId: entry.id });
+    }
+    return null;
+  }
+
   async run(caseId) {
     if (this.running.has(caseId)) return;
     const previousSession = this.caseStore.workerSession(caseId);
@@ -483,9 +501,9 @@ export class CaseManager {
     let pending = this.caseStore.pendingMessages(
       caseId,
       previousSession?.last_processed_message_id || 0,
-    );
+    ).filter((entry) => !this.controlCommandForMessage(entry));
     if (!pending.length && force) {
-      const latest = this.caseStore.latestMessage(caseId);
+      const latest = this.latestTaskMessage(caseId);
       if (latest) pending = [latest];
     }
     if (!pending.length) return;

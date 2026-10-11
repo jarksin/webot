@@ -1481,13 +1481,13 @@ export class CaseStore {
       .map((row) => ({ ...row, message: json(row.message_json, {}) }));
   }
 
-  latestMessage(caseId) {
+  latestMessage(caseId, { beforeMessageId = 0 } = {}) {
     const row = this.db.prepare(`
       SELECT * FROM messages
-      WHERE case_id=?
+      WHERE case_id=? AND (?=0 OR id<?)
       ORDER BY timestamp DESC, id DESC
       LIMIT 1
-    `).get(caseId);
+    `).get(caseId, Number(beforeMessageId), Number(beforeMessageId));
     return row ? { ...row, message: json(row.message_json, {}) } : null;
   }
 
