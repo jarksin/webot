@@ -1484,10 +1484,12 @@ export class CaseStore {
   latestMessage(caseId, { beforeMessageId = 0 } = {}) {
     const row = this.db.prepare(`
       SELECT * FROM messages
-      WHERE case_id=? AND (?=0 OR id<?)
+      WHERE case_id=? AND (?=0 OR (timestamp, id)<(
+        SELECT timestamp, id FROM messages WHERE case_id=? AND id=?
+      ))
       ORDER BY timestamp DESC, id DESC
       LIMIT 1
-    `).get(caseId, Number(beforeMessageId), Number(beforeMessageId));
+    `).get(caseId, Number(beforeMessageId), caseId, Number(beforeMessageId));
     return row ? { ...row, message: json(row.message_json, {}) } : null;
   }
 

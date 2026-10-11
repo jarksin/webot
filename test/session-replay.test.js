@@ -72,6 +72,21 @@ test("forced rerun with only control messages does not start a provider", async 
   assert.equal(f.requests.length, 0);
 });
 
+test("task lookup preserves timestamp order for late-arriving messages", async (t) => {
+  const f = await fixture(t);
+  const now = Date.now();
+  const control = f.caseStore.ingest({
+    ...f.message("/session"), timestamp: now,
+  }, undefined, { useActiveSession: true });
+  const task = f.caseStore.ingest({
+    ...f.message("late task"), timestamp: now - 1000,
+  }, undefined, { useActiveSession: true });
+  f.caseStore.markControlHandled(control.caseId, task.messageRow);
+  await f.force(control.caseId);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].message.text, "late task");
+});
+
 test("pending owner control messages are not included in a task prompt", async (t) => {
   const f = await fixture(t);
   const task = f.caseStore.ingest(f.message("finish the report"), undefined, {
