@@ -80,9 +80,9 @@ export function redactFilePaths(text, files) {
   return result;
 }
 
-export function modelFiles(message, mediaContext = []) {
-  const files = [];
-  const seen = new Set();
+export function modelFiles(message, mediaContext = [], existingFiles = []) {
+  const files = [...existingFiles];
+  const seen = new Set(files.map((file) => fileReferences.get(file)?.path));
   function add(current) {
     for (const attachment of current?.attachments || []) {
       const verified = hydratedFiles.get(attachment);

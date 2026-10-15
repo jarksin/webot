@@ -375,6 +375,11 @@ export class CaseStore {
       "input_cutoff_message_id",
       "INTEGER NOT NULL DEFAULT 0",
     );
+    ensureColumn(this.db, "messages", "control_handled", "INTEGER NOT NULL DEFAULT 0");
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS messages_case_pending
+      ON messages(case_id, control_handled, id)
+    `);
     ensureColumn(
       this.db,
       "drafts",
@@ -1520,7 +1525,7 @@ export class CaseStore {
   pendingMessages(caseId, afterMessageId = 0) {
     return this.db.prepare(`
       SELECT * FROM messages
-      WHERE case_id=? AND id>?
+      WHERE case_id=? AND id>? AND control_handled=0
       ORDER BY id ASC
     `).all(caseId, Number(afterMessageId || 0))
       .map((row) => ({ ...row, message: json(row.message_json, {}) }));
@@ -1820,9 +1825,32 @@ export class CaseStore {
     return true;
   }
 
-  markControlHandled(caseId, messageRowId) {
+  processedMessageCursor(caseId, processed) {
+    // Handled commands can be crossed, but never an unprocessed task.
+    const next = this.db.prepare(`
+      SELECT id FROM messages
+      WHERE case_id=? AND id>? AND control_handled=0
+      ORDER BY id LIMIT 1
+    `).get(caseId, processed);
+    const last = this.db.prepare(`
+      SELECT MAX(id) AS id FROM messages
+      WHERE case_id=? AND id>? AND control_handled=1 AND (?=0 OR id<?)
+    `).get(caseId, processed, next?.id || 0, next?.id || 0);
+    return Math.max(processed, Number(last?.id || 0));
+  }
+
+  markControlHandled(caseId, messageRowId, { discardPending = false } = {}) {
     const timestamp = now();
     const messageId = Number(messageRowId || 0);
+    this.db.prepare(`
+      UPDATE messages SET control_handled=1 WHERE case_id=? AND id=?
+    `).run(caseId, messageId);
+    const processed = this.processedMessageCursor(
+      caseId,
+      discardPending
+        ? messageId
+        : Number(this.workerSession(caseId)?.last_processed_message_id || 0),
+    );
     this.db.prepare(`
       INSERT INTO worker_sessions(
         case_id, status, run_count, finished_at, last_error,
@@ -1843,12 +1871,12 @@ export class CaseStore {
           worker_sessions.last_processed_message_id,
           excluded.last_processed_message_id
         ),
-        input_cutoff_message_id=MAX(
-          worker_sessions.input_cutoff_message_id,
-          excluded.input_cutoff_message_id
-        ),
+        input_cutoff_message_id=CASE
+          WHEN worker_sessions.status='running' THEN worker_sessions.input_cutoff_message_id
+          ELSE excluded.input_cutoff_message_id
+        END,
         updated_at=excluded.updated_at
-    `).run(caseId, timestamp, messageId, messageId, timestamp);
+    `).run(caseId, timestamp, processed, processed, timestamp);
   }
 
   addProgress(caseId, runCount, message, level = "info") {
@@ -1898,7 +1926,10 @@ export class CaseStore {
     processedThroughMessageId = 0,
   ) {
     const timestamp = now();
-    const processed = Number(processedThroughMessageId || 0);
+    const processed = this.processedMessageCursor(caseId, Math.max(
+      Number(processedThroughMessageId || 0),
+      Number(this.workerSession(caseId)?.last_processed_message_id || 0),
+    ));
     this.db.prepare(`
       UPDATE worker_sessions
       SET status=?, finished_at=?, last_error=?,
@@ -1931,7 +1962,7 @@ export class CaseStore {
         updated_at=?
       WHERE case_id=?
     `).run(
-      processed,
+      Number(processedThroughMessageId || 0),
       caseId,
       status,
       String(error || ""),

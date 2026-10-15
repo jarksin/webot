@@ -261,11 +261,12 @@ export async function runCodexAppServer(config, request) {
     request.onActiveTurn?.({
       threadId,
       turnId: activeTurnId,
-      async steer(text, clientUserMessageId = "") {
+      async steer(text, clientUserMessageId = "", images = []) {
+        if (completed || aborted) return { accepted: false, reason: "turn-ended" };
         const result = await client.request("turn/steer", {
           threadId,
           expectedTurnId: activeTurnId,
-          input: [{ type: "text", text: clean(text) }],
+          input: codexImageInput(clean(text), images),
           clientUserMessageId: clean(clientUserMessageId) || null,
         });
         return {

@@ -254,3 +254,73 @@ test("app-server sends native image input in fresh and resumed turns", async (t)
     assert.equal(result.text, "native image received");
   }
 });
+
+test("app-server steers native images and rejects steering after completion", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-image-steer-rpc-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const binary = path.join(directory, "codex");
+  await fs.copyFile(new URL("./fixtures/steer-app-server.cjs.fixture", import.meta.url), binary);
+  await fs.chmod(binary, 0o700);
+  let handle, steering;
+  const result = await runCodexAppServer({
+    codexBin: binary, codexHome: directory, workingDirectory: directory, timeoutMs: 3000,
+  }, {
+    prompt: "original",
+    onActiveTurn(active) {
+      handle = active;
+      steering = active.steer("follow-up", "followup", [{ path: "/test/followup.png" }]);
+    },
+  });
+  assert.equal((await steering).accepted, true);
+  assert.equal(result.text, "follow-up image received");
+  assert.equal((await handle.steer("too late")).accepted, false);
+});
+
+test("provider steers only verified images within the original requester scope", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-image-steer-provider-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const started = Promise.withResolvers();
+  const completion = Promise.withResolvers();
+  t.after(() => completion.resolve());
+  const inputs = [];
+  const provider = createCodexProvider({
+    codexBin: process.execPath, codexHome: directory,
+  }, {
+    requesterAccess: (message) => message.senderId === "owner" ? "owner" : "public",
+    runCodex: async (_config, request) => {
+      request.onActiveTurn({ async steer(text, id, images) {
+        inputs.push({ text, id, images });
+        return { accepted: true };
+      } });
+      started.resolve();
+      await completion.promise;
+      return { text: "done", sessionId: "thread" };
+    },
+  });
+  const run = provider.reply({
+    caseId: "images", message: { ...scope, text: "original" }, history: [],
+  });
+  await started.promise;
+  const quoted = {
+    ...scope, text: "look", reference: {
+      messageId: "photo", attachments: [
+        markHydratedImage({ kind: "image", downloadContext: { secret: "hidden" } },
+          { localPath: "/cache/verified.png" }),
+        { kind: "image", localPath: "/private/untrusted.png" },
+      ],
+    },
+  };
+  assert.equal((await provider.steer({
+    caseId: "images", text: "look", message: quoted, messageId: "followup",
+  })).accepted, true);
+  assert.deepEqual(inputs[0].images, [{ path: "/cache/verified.png", messageId: "photo" }]);
+  assert.doesNotMatch(inputs[0].text, /hidden|untrusted\.png|verified\.png/);
+  for (const extra of [{ chatId: "other" }, { sourceId: "other" }, { senderId: "owner" }]) {
+    assert.equal((await provider.steer({
+      caseId: "images", text: "wrong scope", message: { ...quoted, ...extra },
+    })).accepted, false);
+  }
+  assert.equal(inputs.length, 1);
+  completion.resolve();
+  await run;
+});

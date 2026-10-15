@@ -378,6 +378,61 @@ test("queued file then text retains metadata for on-demand reading and cannot be
   assert.equal((await readModelFiles(files, ["file-1"]))[0].text, text);
 });
 
+test("steered files get stable scoped IDs and can be read in the active conversation", async (t) => {
+  const directory = await temporary(t);
+  const firstPath = path.join(directory, "first.md");
+  const secondPath = path.join(directory, "second.md");
+  await fs.writeFile(firstPath, "unselected-original-text");
+  await fs.writeFile(secondPath, "selected-followup-text");
+  const verified = async (localPath, filename) =>
+    markHydratedFile({ kind: "file", filename }, {
+      localPath, size: (await fs.stat(localPath)).size,
+    });
+  const first = await verified(firstPath, "first.md");
+  const second = await verified(secondPath, "second.md");
+  const started = Promise.withResolvers();
+  const completion = Promise.withResolvers();
+  t.after(() => completion.resolve());
+  const inputs = [];
+  const requests = [];
+  const provider = createCodexProvider({
+    codexBin: process.execPath, codexHome: directory,
+  }, {
+    runCodex: async (_config, request) => {
+      requests.push(request);
+      if (requests.length === 1) {
+        request.onActiveTurn({ async steer(input) {
+          inputs.push(input);
+          return { accepted: true };
+        } });
+        started.resolve();
+        await completion.promise;
+        return { text: '{"read_files":["file-2"]}', sessionId: "thread" };
+      }
+      assert.equal(request.sessionId, "thread");
+      assert.match(request.prompt, /selected-followup-text/);
+      assert.doesNotMatch(request.prompt, /unselected-original-text/);
+      return { text: `Read ${secondPath}`, sessionId: "thread" };
+    },
+  });
+  const run = provider.reply({
+    caseId: "files", message: { ...scope, text: "original", attachments: [first] },
+    history: [],
+  });
+  await started.promise;
+  assert.equal((await provider.steer({
+    caseId: "files", text: "read the new file",
+    message: { ...scope, text: "read the new file", attachments: [second] },
+  })).accepted, true);
+  assert.match(inputs[0], /"id":"file-2"/);
+  assert.doesNotMatch(inputs[0], /selected-followup-text|unselected-original-text/);
+  completion.resolve();
+  const result = await run;
+  assert.match(result.text, /second\.md$/);
+  assert.equal(result.text.includes(directory), false);
+  assert.equal(requests.length, 2);
+});
+
 test("only model-selected attached text enters a continuation and its usage is retained", async (t) => {
   const directory = await temporary(t);
   const localPath = path.join(directory, "selected.md");

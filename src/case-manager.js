@@ -333,7 +333,9 @@ export class CaseManager {
         clean.deferToNextRun = true;
       } else {
         const reply = String(result.text || "").trim();
-        this.caseStore.markControlHandled(ingested.caseId, ingested.messageRow);
+        this.caseStore.markControlHandled(ingested.caseId, ingested.messageRow, {
+          discardPending: command.type === "stop" || command.type === "clear",
+        });
         const draftId = this.caseStore.addDraft(
           ingested.caseId,
           reply,
@@ -344,7 +346,9 @@ export class CaseManager {
             assistantConfigForMessage(this.config.assistant, clean).codexModel,
           {
             triggerMessageId: ingested.messageRow,
-            inputCutoffMessageId: ingested.messageRow,
+            inputCutoffMessageId: this.caseStore.workerSession(
+              ingested.caseId,
+            )?.last_processed_message_id || 0,
             outputSessionName: this.outputSessionName(
               result.outputCaseId || ingested.caseId,
             ),
@@ -372,20 +376,49 @@ export class CaseManager {
       let steered = false;
       if (
         activeRun &&
+        activeRun.acceptingFollowups &&
         !activeRun.controller.signal.aborted &&
         !this.rerun.has(ingested.caseId) &&
         !clean.deferToNextRun &&
-        !clean.attachments?.length &&
-        !clean.reference &&
+        ((!clean.attachments?.length && !clean.reference) ||
+          this.provider.supportsMediaSteering === true) &&
         typeof this.provider.steer === "function"
       ) {
-        const result = await this.provider.steer({
-          caseId: ingested.caseId,
-          text: clean.text,
-          messageId: String(ingested.messageRow),
+        const operation = activeRun.followups.then(async () => {
+          if (
+            !activeRun.acceptingFollowups ||
+            activeRun.controller.signal.aborted ||
+            this.rerun.has(ingested.caseId)
+          ) return { accepted: false };
+          try {
+            const message = this.provider.supportsMediaSteering === true
+              ? await this.hydrateTelegramMedia(clean)
+              : clean;
+            if (
+              !activeRun.acceptingFollowups ||
+              activeRun.controller.signal.aborted ||
+              this.running.get(ingested.caseId) !== activeRun
+            ) return { accepted: false, reason: "turn-ended" };
+            const result = await this.provider.steer({
+              caseId: ingested.caseId,
+              text: clean.text,
+              message,
+              messageId: String(ingested.messageRow),
+            });
+            if (result?.accepted && !activeRun.controller.signal.aborted) {
+              activeRun.includeMessage(ingested.messageRow);
+            } else {
+              this.rerun.add(ingested.caseId);
+            }
+            return result;
+          } catch (error) {
+            this.rerun.add(ingested.caseId);
+            return { accepted: false, error: error.message };
+          }
         });
+        activeRun.followups = operation;
+        const result = await operation;
         if (result?.accepted && !activeRun.controller.signal.aborted) {
-          activeRun.includeMessage(ingested.messageRow);
           steered = true;
           this.caseStore.addProgress(
             ingested.caseId,
@@ -402,7 +435,11 @@ export class CaseManager {
         }
       }
       if (activeRun && !steered) {
-        this.rerun.add(ingested.caseId);
+        if (this.running.get(ingested.caseId) === activeRun) {
+          this.rerun.add(ingested.caseId);
+        } else {
+          this.enqueue(ingested.caseId);
+        }
         this.caseStore.addProgress(
           ingested.caseId,
           0,
@@ -525,6 +562,8 @@ export class CaseManager {
       sessionScopeCaseId: namedSession?.scope_case_id || caseId,
       sessionName: namedSession?.name || "main",
       labelOutputs: false,
+      acceptingFollowups: true,
+      followups: Promise.resolve(),
       inputCutoffMessageId: () => completionCutoffMessageId,
       includeMessage(messageRow) {
         const id = Number(messageRow || 0);
@@ -653,6 +692,8 @@ export class CaseManager {
           await waitForRetry(delayMs, controller.signal);
         }
       }
+      currentRun.acceptingFollowups = false;
+      await currentRun.followups;
       const result = normalizedProviderResult(providerResult);
       const reply = String(result?.text || "").trim();
       const owner = this.requesterAccess(trigger.message) === "owner";
@@ -784,6 +825,7 @@ export class CaseManager {
       );
       if (!stopped) throw error;
     } finally {
+      currentRun.acceptingFollowups = false;
       this.running.delete(caseId);
       if (this.rerun.delete(caseId)) this.enqueue(caseId);
     }
