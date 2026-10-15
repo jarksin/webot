@@ -1686,7 +1686,7 @@ async function reloadForRuntimeRevisionChange() {
     restartExpectedRevision = "";
     showNotice(nextStatus.restart.error, true);
   }
-  if (restartStartedAt !== null && nextStatus.ok === true &&
+  if (restartStartedAt !== null && nextStatus.service === "webot" &&
       nextStatus.runtime?.startedAt &&
       nextStatus.runtime.startedAt !== restartStartedAt &&
       (!restartExpectedRevision || revision === restartExpectedRevision)) {

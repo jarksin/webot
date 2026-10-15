@@ -236,8 +236,12 @@ source change, or the local console's power-icon Restart control:
 | Confirmed console Restart | Stops running tasks before external reload. Stopped inputs are not automatically rerun; queued work, account configuration, and stored history are retained. |
 | `/stop` | Stops only the selected session's task; no service reload. |
 
-The console Restart control requires source mode, a configured enabled Pad
-account, ready ingress/settings, and the external broker. It uses an
+The console Restart control requires source mode, a connected enabled Pad
+account, ready settings, and the external broker. A confirmed manual restart
+can retain an already offline account, but must preserve all account identities,
+enabled states, and previously connected Pad and Telegram sources. Offline
+accounts remain reported as degraded; automatic activation still requires
+healthy ingress. The control uses an
 origin-bound, per-process console token and explicit confirmation. It can
 reload the current commit, not only a newer commit.
 

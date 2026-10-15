@@ -106,6 +106,8 @@ export class WebotApplication {
       env,
       ready: () => !this.pendingSettings && !this.settingsApplying &&
         this.status().ok === true,
+      restartReady: () => !this.pendingSettings && !this.settingsApplying &&
+        Boolean(this.connectedRestartSource()),
       idle: () => this.caseManager?.idle() === true,
       reserveIdle: () => this.caseManager?.reserveIdle(),
       onDeferredResult: (context, result, error) => {
@@ -136,6 +138,12 @@ export class WebotApplication {
     this.fetch = fetchImpl;
   }
 
+  connectedRestartSource() {
+    return this.status().padSources.find(
+      (source) => source.enabled && source.websocket?.connected === true,
+    );
+  }
+
   async requestRestart({ stopRunning = false } = {}) {
     if (this.restartOperation) return this.restartOperation;
     if (this.restartResult?.failed) this.restartResult = null;
@@ -147,9 +155,12 @@ export class WebotApplication {
     if (this.env.WEBOT_RUNTIME_MODE !== "source") {
       throw new Error("当前运行模式不支持源码重载");
     }
-    const source = this.config.pad.sources.find((item) => item.enabled);
+    const source = stopRunning
+      ? this.connectedRestartSource()
+      : this.config.pad.sources.find((item) => item.enabled);
     if (!source) throw new Error("受控重载需要已配置的 Pad 账号");
-    if (this.pendingSettings || this.settingsApplying || this.status().ok !== true) {
+    if (this.pendingSettings || this.settingsApplying ||
+        (!stopRunning && this.status().ok !== true)) {
       throw new Error("连接或配置尚未就绪，暂不能提交受控重载；请查看账号连接状态。");
     }
     this.restartOperation = (async () => {

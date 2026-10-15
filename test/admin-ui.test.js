@@ -143,6 +143,34 @@ test("case workspace groups named sessions and reloads on runtime revision chang
   assert.match(javascript, /window\.location\.reload\(\)/);
 });
 
+test("a reloaded revision refreshes the console even while an unrelated account is offline", async () => {
+  const source = javascript.slice(
+    javascript.indexOf("async function reloadForRuntimeRevisionChange("),
+    javascript.indexOf("window.setInterval(", javascript.indexOf("async function reloadForRuntimeRevisionChange(")),
+  );
+  for (const [revision, startedAt, service, expected] of [
+    ["new", 2, "webot", 1],
+    ["old", 2, "webot", 0],
+    ["new", 1, "webot", 0],
+    ["new", 2, "other", 0],
+  ]) {
+    let reloads = 0;
+    const context = vm.createContext({
+      api: async () => ({
+        ok: false, service, runtime: { sourceRevision: revision, startedAt },
+        restart: {}, ingress: { degradedSourceIds: ["pad:offline"] },
+      }),
+      restartStartedAt: 1, restartExpectedRevision: "new",
+      dirty: false, knowledgeDirty: false, agentDirty: false,
+      status: {}, pageRuntimeRevision: "old", runtimeUpdateNoticeRevision: "",
+      window: { location: { reload() { reloads++; } } },
+      showNotice() {}, renderRuntimeIdentity() {},
+    });
+    await vm.runInContext(`${source}; reloadForRuntimeRevisionChange()`, context);
+    assert.equal(reloads, expected);
+  }
+});
+
 test("case detail keeps Codex session usage above live progress", () => {
   assert.match(javascript, /Codex Live Progress/);
   assert.match(javascript, /waiting for first update/);

@@ -76,16 +76,71 @@ test("manual restart cancels deferred automatic submissions", async () => {
   assert.equal(submissions, 1);
 });
 
+test("only confirmed manual restart can proceed with degraded ingress", async () => {
+  let requests = 0;
+  const activation = createSourceActivator({
+    ready: () => false,
+    restartReady: () => true,
+    candidate: async () => ({ revision: "a".repeat(40), version: "0.6.43" }),
+    fetchImpl: async () => {
+      requests++;
+      return { ok: true, json: async () => ({ ok: true }) };
+    },
+    schedule: () => ({}),
+  });
+  assert.equal((await activation.activate({ caseId: "auto" })).pending, true);
+  await assert.rejects(
+    activation.restartFromConsole({ sourceId: "fixture" }), /尚未就绪/,
+  );
+  assert.equal(requests, 0);
+  assert.equal((await activation.restartFromConsole({
+    sourceId: "fixture", stopRunning: true,
+  })).requested, true);
+  assert.equal(requests, 1);
+});
+
 function restartApplication(restartFromConsole) {
   const app = Object.create(WebotApplication.prototype);
   app.env = { WEBOT_RUNTIME_MODE: "source" };
   app.config = { pad: { sources: [{ id: "fixture", enabled: true }] } };
   app.restartResult = null;
   app.restartOperation = null;
-  app.status = () => ({ ok: true });
+  app.status = () => ({
+    ok: true,
+    padSources: [{ id: "fixture", enabled: true, websocket: { connected: true } }],
+  });
   app.sourceActivator = { restartFromConsole };
   return app;
 }
+
+test("manual restart selects a connected Pad instead of an offline first account", async () => {
+  let submitted;
+  const app = restartApplication(async (options) => {
+    submitted = options;
+    return { requested: true };
+  });
+  app.config.pad.sources.unshift({ id: "offline", enabled: true });
+  app.status = () => ({
+    ok: false,
+    padSources: [
+      { id: "offline", enabled: true, websocket: { connected: false } },
+      { id: "disabled", enabled: false, websocket: { connected: true } },
+      { id: "fixture", enabled: true, websocket: { connected: true } },
+    ],
+  });
+  await assert.rejects(app.requestRestart(), /尚未就绪/);
+  assert.equal((await app.requestRestart({ stopRunning: true })).requested, true);
+  assert.deepEqual(submitted, { sourceId: "fixture", stopRunning: true });
+});
+
+test("manual restart still rejects pending settings and wholly offline ingress", async () => {
+  const app = restartApplication(() => assert.fail("must not submit"));
+  app.pendingSettings = {};
+  await assert.rejects(app.requestRestart({ stopRunning: true }), /尚未就绪/);
+  app.pendingSettings = null;
+  app.status = () => ({ ok: false, padSources: [] });
+  await assert.rejects(app.requestRestart({ stopRunning: true }), /Pad/);
+});
 
 test("duplicate clicks share one request and acceptance is not completion", async () => {
   let calls = 0;

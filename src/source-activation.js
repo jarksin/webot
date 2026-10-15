@@ -45,6 +45,7 @@ export function createSourceActivator({
   fetchImpl = fetch,
   candidate = sourceCandidate,
   ready = () => true,
+  restartReady = ready,
   idle = () => true,
   reserveIdle = () => ({ release() {} }),
   onDeferredResult = () => {},
@@ -165,7 +166,7 @@ export function createSourceActivator({
 
   return {
     async restartFromConsole({ sourceId, stopRunning = false }) {
-      if (!ready()) {
+      if (!(stopRunning ? restartReady() : ready())) {
         throw new Error("连接或配置尚未就绪，暂不能提交受控重载；请查看账号连接状态。");
       }
       const next = await candidate({ env, includeCurrent: true });
