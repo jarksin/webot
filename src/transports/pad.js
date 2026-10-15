@@ -430,7 +430,7 @@ export class PadTransport {
     }
 
     const payload = { ...body };
-    if (this.config.requireWriteConfirmation) {
+    if (this.config.requireWriteConfirmation || message.protocol === "qw_pad") {
       payload.confirm = true;
       payload.request_id = crypto.randomUUID();
     }
@@ -578,6 +578,13 @@ export class PadTransport {
 
   send(message, text) {
     const source = this.source(message);
+    if (message.protocol === "qw_pad") {
+      return this.request("/v1/messages/send-text", {
+        to: message.replyTarget || message.chatId,
+        content: formatPadReplyText(text, message, source),
+        is_room: message.chatType === "group",
+      }, message);
+    }
     const at = replyMention(message, source);
     const replyText = formatPadReplyText(text, message, source);
     let displayName = "";

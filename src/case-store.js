@@ -108,7 +108,7 @@ function ensureColumn(db, table, column, definition) {
 }
 
 export class CaseStore {
-  constructor(file) {
+  constructor(file, { recoverInterruptedRuns = true } = {}) {
     this.file = path.resolve(file);
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     this.db = new DatabaseSync(this.file);
@@ -414,8 +414,10 @@ export class CaseStore {
         )
       `);
     }
-    const recoveredAt = now();
-    this.db.exec(`
+    // A scoped operator replay must not reclaim workers owned by a live service.
+    if (recoverInterruptedRuns) {
+      const recoveredAt = now();
+      this.db.exec(`
       INSERT INTO progress(case_id, run_count, level, message, created_at)
       SELECT case_id, run_count, 'warn',
         'Webot 重启中断了 worker，Case 已恢复为待处理',
@@ -429,7 +431,8 @@ export class CaseStore {
       UPDATE cases
       SET status='new', last_error='', updated_at=${recoveredAt}
       WHERE status='running';
-    `);
+      `);
+    }
     this.groupContextWrites = 0;
     this.groupContextCounts = new Map();
     this.syncedMessageWrites = 0;

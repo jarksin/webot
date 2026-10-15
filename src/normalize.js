@@ -602,14 +602,15 @@ function padMentionIds(message) {
   ];
 }
 
-function normalizePadMessage(message, sourceValue) {
+function normalizePadMessage(message, sourceValue, protocol = "") {
   const source =
     typeof sourceValue === "string"
       ? { id: "default", displayName: "default", selfId: sourceValue }
       : sourceValue || { id: "default", displayName: "default", selfId: "" };
-  const messageType = Number(
-    scalar(message.MsgType ?? message.msg_type ?? message.type),
-  );
+  const qw = protocol === "qw_pad";
+  const messageType = qw
+    ? message.kind === "text" ? 1 : NaN
+    : Number(scalar(message.MsgType ?? message.msg_type ?? message.type));
   const selfId = scalar(source.selfId);
   const from = scalar(
     message.FromUserName ??
@@ -648,8 +649,8 @@ function normalizePadMessage(message, sourceValue) {
   const rawContent = scalar(
     message.Content ?? message.content ?? message.text ?? message.Text,
   );
-  const content = padContent(message, rawContent);
-  const app = padAppMetadata(message);
+  const content = qw ? { text: rawContent, attachments: [] } : padContent(message, rawContent);
+  const app = qw ? null : padAppMetadata(message);
   const preservedRawContent =
     rawContent &&
       (messageType === 49 || app || content.text !== rawContent)
@@ -699,6 +700,7 @@ function normalizePadMessage(message, sourceValue) {
 
   return {
     transport: "pad",
+    ...(qw ? { protocol, messageKind: String(message.kind || "") } : {}),
     sourceId: source.id,
     sourceName: source.displayName,
     messageType: Number.isInteger(messageType) ? messageType : null,
@@ -733,13 +735,15 @@ function normalizePadMessage(message, sourceValue) {
     ...(preservedRawContent ? { rawContent: preservedRawContent } : {}),
     ...(app ? { app } : {}),
     attachments: content.attachments,
-    reference: padReference(message),
+    reference: qw ? null : padReference(message),
     mentions: padMentionIds(message),
   };
 }
 
 export function normalizePadEnvelope(envelope, source = "") {
+  const protocol = envelope?.schema === "qw.message.v1" &&
+    envelope?.protocol === "qw_pad" ? "qw_pad" : "";
   return collectPadMessages(envelope).map((message) =>
-    normalizePadMessage(message, source),
+    normalizePadMessage(message, source, protocol),
   );
 }

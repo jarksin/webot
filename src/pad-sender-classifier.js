@@ -142,6 +142,11 @@ export class PadSenderClassifier {
     if (message?.transport !== "pad") {
       return { blocked: false };
     }
+    if (message.protocol === "qw_pad") {
+      return message.messageKind === "text" && message.messageType === 1
+        ? { blocked: false }
+        : { blocked: true, reason: "unsupported-message-type" };
+    }
     if (isPadInternalStatusMessage(message)) {
       return { blocked: true, reason: "internal-status-message" };
     }
