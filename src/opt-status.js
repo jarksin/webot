@@ -99,19 +99,29 @@ export async function probeOptSource(source) {
         }
       }
     }
-    const state = String(data.stage || "unknown");
+    const qw = data.protocol === "qw_pad";
+    const state = String((qw ? data.state : data.stage) || "unknown");
+    if (qw) online = data.online === true;
     const longLinkReady = Boolean(
       data.longLinkReady ?? data.long_link_ready,
     );
     return {
       id: source.id,
       displayName: source.displayName,
-      runtimeKind: "opt",
+      runtimeKind: qw ? "qw" : "opt",
       enabled: true,
       ready:
-        longLinkReady &&
-        state.toLowerCase() === "ready" &&
-        online !== false,
+        qw
+          ? [
+              data.online,
+              data.authenticated,
+              data.maintenance_running,
+              data.transport_connected,
+              data.binding_accepted,
+            ].every((value) => value === true)
+          : longLinkReady &&
+            state.toLowerCase() === "ready" &&
+            online !== false,
       online,
       state,
       loginState: state,
