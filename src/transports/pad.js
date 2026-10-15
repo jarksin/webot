@@ -430,7 +430,9 @@ export class PadTransport {
     }
 
     const payload = { ...body };
-    if (this.config.requireWriteConfirmation || message.protocol === "qw_pad") {
+    if (message.protocol === "qw_pad") {
+      payload.request_id = crypto.randomUUID();
+    } else if (this.config.requireWriteConfirmation) {
       payload.confirm = true;
       payload.request_id = crypto.randomUUID();
     }

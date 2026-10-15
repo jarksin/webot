@@ -80,8 +80,10 @@ test("QW text bypasses personal contact probes without permitting unknown kinds 
 
 test("QW text replies use the confirmed product API without personal Pad-only fields", async () => {
   const calls = [];
-  const transport = new PadTransport({ sources: [source] }, "live", console, async (url, options) => {
+  const transport = new PadTransport({ sources: [source], requireWriteConfirmation: true }, "live", console, async (url, options) => {
     calls.push({ url, options });
+    assert.deepEqual(Object.keys(JSON.parse(options.body)).sort(),
+      ["content", "is_room", "request_id", "to"]);
     return Response.json({ Code: 0, Success: true, Data: { msg_id: 7 } });
   });
   for (const isGroup of [false, true]) {
@@ -95,7 +97,7 @@ test("QW text replies use the confirmed product API without personal Pad-only fi
     assert.equal(body.to, isGroup ? "100" : "9007199254740997");
     assert.equal(body.content, "reply");
     assert.equal(body.is_room, isGroup);
-    assert.equal(body.confirm, true);
+    assert.equal(body.confirm, undefined);
     assert.ok(body.request_id.length >= 8);
     assert.equal(body.type, undefined);
     assert.equal(body.at, undefined);
@@ -119,7 +121,9 @@ test("keyword-only QW ingress creates a worker and sent draft exactly once", asy
     env: { WEBOT_DATA_DIR: directory }, settingsStore,
     logger: { info() {}, warn() {}, error() {} },
     fetchImpl: async (url, options) => {
-      calls.push({ url, body: JSON.parse(options.body) });
+      const body = JSON.parse(options.body);
+      assert.deepEqual(Object.keys(body).sort(), ["content", "is_room", "request_id", "to"]);
+      calls.push({ url, body });
       return Response.json({ Code: 0, Success: true, Data: { msg_id: 7 } });
     },
   });
