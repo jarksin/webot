@@ -32,6 +32,10 @@ Use vxUltra alone when your program only needs WeChat APIs. Add Webot when you
 want a conversational assistant with persistent sessions, knowledge, and task
 execution. Telegram uses its own bridge and does not require a WeChat gateway.
 
+Webot can connect an EgoPredictor digital twin through the WeChat channel, so
+the twin can be controlled from WeChat to handle online alerts and related
+operational work.
+
 ## Architecture
 
 ![Webot architecture: channels, trusted ingress, isolated sessions, assistant workers, and guarded delivery](docs/assets/webot-architecture.svg)
