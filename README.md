@@ -163,6 +163,7 @@ additional permissions.
 | --- | --- |
 | `/help` | Shows the control-command summary. |
 | `/status` | Shows the current named session and effective model. Alias: `/st`. |
+| `/quota` | Reads enabled CPA accounts' last-observed quota, reset/observation times, and availability without starting an assistant task or changing credentials. Alias: `/authquota`. Uses the same SSH host as the model probe (`WEBOT_CPA_SSH_HOST`, then `SEATALK_CPA_COMPANY_GATEWAY_SSH_HOST`, then the existing default). Missing quota is reported as unknown; this is not a vxUltra instance quota. |
 | `/session` | Shows the current session and available session actions. Aliases: `/session current`, `/session show`. |
 | `/sessions` | Lists sessions in this chat; the active one is marked. |
 | `/session new <name>` | Creates and switches to an isolated named session. Omit the name to generate one automatically. |

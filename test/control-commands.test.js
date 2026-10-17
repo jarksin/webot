@@ -62,7 +62,32 @@ test("parses stable owner control commands", () => {
   }
   assert.equal(parseControlCommand("/st task"), null);
   assert.equal(parseControlCommand("/status task"), null);
+  for (const text of ["/quota", "/authquota", " /QUOTA ", "/AUTHQUOTA"]) {
+    assert.deepEqual(parseControlCommand(text), { type: "quota", action: "show" });
+  }
+  assert.equal(parseControlCommand("/quota now"), null);
+  assert.equal(parseControlCommand("/quota\nrun task"), null);
   assert.equal(parseControlCommand("/unknown"), null);
+});
+
+test("quota commands query without Codex runtime or a model and hide raw failures", async () => {
+  let queries = 0;
+  const result = await applyControlCommand({
+    command: parseControlCommand("/quota"),
+    quotaQuery: async () => {
+      queries += 1;
+      return { ok: true, enabled: [{ name: "example", status: "active", quota: null }] };
+    },
+  });
+  assert.equal(queries, 1);
+  assert.match(result.text, /余量未知/);
+  assert.doesNotMatch(result.text, /NaN|undefined/);
+  const failure = await applyControlCommand({
+    command: parseControlCommand("/authquota"),
+    quotaQuery: async () => { throw new Error("Bearer synthetic-private-secret"); },
+  });
+  assert.match(failure.text, /额度查询失败/);
+  assert.doesNotMatch(failure.text, /Bearer|synthetic-private-secret/);
 });
 
 test("applies model and effort overrides without invoking a provider", async () => {

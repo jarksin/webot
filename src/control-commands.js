@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { codexRuntimeStatus } from "./codex-provider.js";
 import { probeAndAddModel } from "./model-catalog-probe.js";
+import { formatCpaQuota, queryCpaQuota } from "./cpa-quota.js";
 import {
   normalizeSessionName,
   parseSessionCommand,
@@ -99,6 +100,9 @@ export function parseControlCommand(value) {
   if (/^\/(?:st|status)\s*$/i.test(text)) {
     return { type: "status", action: "show" };
   }
+  if (/^\/(?:quota|authquota)\s*$/i.test(text)) {
+    return { type: "quota", action: "show" };
+  }
   if (/^\/help\s*$/i.test(text)) return { type: "help", action: "show" };
   return null;
 }
@@ -140,7 +144,15 @@ export async function applyControlCommand({
   env = process.env,
   stopped = false,
   modelProbe = probeAndAddModel,
+  quotaQuery = queryCpaQuota,
 }) {
+  if (command.type === "quota") {
+    try {
+      return { text: formatCpaQuota(await quotaQuery(env)) };
+    } catch {
+      return { text: "额度查询失败，暂未取得有效的额度数据，请稍后重试。" };
+    }
+  }
   const runtime = effectiveRuntime(caseStore, caseId, config, env);
   if (command.type === "session") {
     const current = caseStore.ensureSessionScope(scopeCaseId);
@@ -330,7 +342,7 @@ export async function applyControlCommand({
       "会话：/session、/sessions、/session new <名称>、"
       + "/session <名称>、/session delete <名称>。\n"
       + "运行：/models、/model [模型|default]、/effort [级别|default]、"
-      + "/st（/status）、/clear、/stop。\n"
+      + "/st（/status）、/quota（/authquota）、/clear、/stop。\n"
       + "也可用 /model <模型> <任务> 直接指定下一项任务。",
   };
 }

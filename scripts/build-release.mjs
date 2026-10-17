@@ -204,6 +204,10 @@ await fs.copyFile(
   path.join(root, "scripts", "telegram_bridge.py"),
   path.join(releaseDir, "scripts", "telegram_bridge.py"),
 );
+await fs.copyFile(
+  path.join(root, "scripts", "cpa-quota-query.cjs"),
+  path.join(releaseDir, "scripts", "cpa-quota-query.cjs"),
+);
 await fs.mkdir(path.join(releaseDir, "docs"), { recursive: true });
 await fs.copyFile(
   path.join(root, "docs", "wechatpad-gateway.md"),
@@ -223,6 +227,7 @@ const files = [
   "README.md",
   "AGENTS.example.md",
   path.join("scripts", "telegram_bridge.py"),
+  path.join("scripts", "cpa-quota-query.cjs"),
   path.join("docs", "wechatpad-gateway.md"),
   path.join("docs", "telegram.md"),
 ];

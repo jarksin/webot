@@ -24,17 +24,21 @@ export function parseRegistrationOutput(stdout, stderr = "") {
   throw new Error(clean(stderr || stdout || "invalid CPA model probe response").slice(0, 500));
 }
 
-export function runRemoteRegistration(model, env = process.env, options = {}) {
-  const requested = clean(model);
-  if (!validModel(requested)) {
-    return Promise.reject(new Error(`invalid model: ${requested}`));
-  }
-  const sshHost = clean(
+export function cpaSshHost(env = process.env, options = {}) {
+  return clean(
     options.sshHost
       || env.WEBOT_CPA_SSH_HOST
       || env.SEATALK_CPA_COMPANY_GATEWAY_SSH_HOST
       || "a30",
   );
+}
+
+export function runRemoteRegistration(model, env = process.env, options = {}) {
+  const requested = clean(model);
+  if (!validModel(requested)) {
+    return Promise.reject(new Error(`invalid model: ${requested}`));
+  }
+  const sshHost = cpaSshHost(env, options);
   const timeoutMs = Math.max(5000, Number(options.timeoutMs || 90_000));
   return new Promise((resolve, reject) => {
     const child = (options.spawn || spawn)("ssh", [

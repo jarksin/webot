@@ -95,6 +95,7 @@ export class CaseManager {
     requesterAccess = () => "public",
     hydratePadMedia = async (message) => message,
     afterOwnerRun = null,
+    quotaQuery,
     logger = console,
   }) {
     this.config = config;
@@ -103,6 +104,7 @@ export class CaseManager {
     this.caseStore = caseStore;
     this.transports = transports;
     this.requesterAccess = requesterAccess;
+    this.quotaQuery = quotaQuery;
     this.hydratePadMedia = hydratePadMedia;
     this.afterOwnerRun =
       typeof afterOwnerRun === "function" ? afterOwnerRun : null;
@@ -322,6 +324,7 @@ export class CaseManager {
         sessionStore: this.sessionStore,
         config: assistantConfigForMessage(this.config.assistant, clean),
         stopped,
+        quotaQuery: this.quotaQuery,
       });
       if (result.continueText) {
         clean.text = result.continueText;
