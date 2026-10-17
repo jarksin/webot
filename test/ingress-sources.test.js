@@ -137,3 +137,23 @@ test("does not reuse a legacy Pad token across source accounts", () => {
   assert.equal(config.pad.sources[1].accessToken, "");
   assert.equal(config.pad.sources[1].credentialSource, "");
 });
+
+test("an explicitly configured source token takes precedence over its token file", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "webot-sources-"));
+  const tokenPath = path.join(directory, "access-code");
+  fs.writeFileSync(tokenPath, "file-token\n");
+
+  const config = loadConfig({}, {
+    pad: {
+      sources: [{
+        id: "main",
+        selfId: "wxid_main",
+        accessToken: "inline-token",
+        accessTokenFile: tokenPath,
+      }],
+    },
+  });
+
+  assert.equal(config.pad.sources[0].accessToken, "inline-token");
+  assert.equal(config.pad.sources[0].credentialSource, "inline");
+});

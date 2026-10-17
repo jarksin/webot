@@ -721,6 +721,12 @@ export class WebotApplication {
 
   async updateSettings(next) {
     const candidate = this.settingsStore.merged(next);
+    for (const source of candidate.pad?.sources || []) {
+      if (String(source.accessToken || "").trim()) {
+        // An explicitly entered Access Code must not be shadowed by an old file.
+        source.accessTokenFile = "";
+      }
+    }
     const candidateConfig = loadConfig(this.env, candidate);
     createProvider(candidateConfig.assistant);
     const saved = await this.settingsStore.save(candidate);
@@ -832,6 +838,7 @@ export class WebotApplication {
   settings() {
     const settings = this.settingsStore.publicSettings(
       serializeConfig(this.config),
+      { preferFallback: true },
     );
     settings.assistant ||= {};
     settings.assistant.workingDirectory =

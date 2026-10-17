@@ -77,6 +77,60 @@ test("applies prompt and worker settings dynamically without draining active wor
   application.caseStore.close();
 });
 
+test("manual Access Code replaces an old source token file and is shown as configured", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-"));
+  const tokenFile = path.join(directory, "access-code");
+  await fs.writeFile(tokenFile, "old-file-token\n");
+  const settingsStore = new SettingsStore(path.join(directory, "settings.json"));
+  await settingsStore.save({
+    channels: ["pad"],
+    pad: {
+      sources: [{
+        id: "main",
+        selfId: "wxid_main",
+        enabled: false,
+        wsUrl: "ws://127.0.0.1:18102/ws/wxid_main",
+        apiUrl: "http://127.0.0.1:18102/api",
+        accessToken: "",
+        accessTokenFile: tokenFile,
+      }],
+    },
+  });
+  const application = new WebotApplication({
+    settingsStore,
+    env: {
+      ...process.env,
+      WEBOT_DATA_DIR: directory,
+      WEBOT_RUNTIME_MODE: "test",
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await application.initialize();
+
+  const result = await application.updateSettings({
+    pad: {
+      sources: [{
+        id: "main",
+        selfId: "wxid_main",
+        enabled: false,
+        wsUrl: "ws://127.0.0.1:18102/ws/wxid_main",
+        apiUrl: "http://127.0.0.1:18102/api",
+        accessToken: "new-inline-token",
+        accessTokenFile: tokenFile,
+      }],
+    },
+  });
+  const persisted = JSON.parse(
+    await fs.readFile(path.join(directory, "settings.json"), "utf8"),
+  );
+
+  assert.equal(persisted.pad.sources[0].accessToken, "new-inline-token");
+  assert.equal(persisted.pad.sources[0].accessTokenFile, "");
+  assert.equal(application.config.pad.sources[0].accessToken, "new-inline-token");
+  assert.equal(result.settings.pad.sources[0].accessTokenConfigured, true);
+  application.caseStore.close();
+});
+
 test("connector reloads wait for idle without preventing new tasks from running", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-drain-"));
   const settingsStore = new SettingsStore(path.join(directory, "settings.json"));

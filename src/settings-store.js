@@ -80,9 +80,11 @@ export class SettingsStore {
     return clone(this.settings);
   }
 
-  publicSettings(fallback = {}) {
+  publicSettings(fallback = {}, { preferFallback = false } = {}) {
     return redactSecrets(
-      Object.keys(this.settings).length ? this.settings : fallback,
+      preferFallback || !Object.keys(this.settings).length
+        ? fallback
+        : this.settings,
     );
   }
 

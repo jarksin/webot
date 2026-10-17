@@ -55,8 +55,8 @@ export function normalizeSource(value, env, defaults) {
       : "";
   const accessToken =
     environmentAccessToken ||
-    fileAccessToken ||
     inlineAccessToken ||
+    fileAccessToken ||
     defaultAccessToken;
   return {
     id,
@@ -71,10 +71,10 @@ export function normalizeSource(value, env, defaults) {
     accessToken,
     credentialSource: environmentAccessToken
       ? "environment"
-      : fileAccessToken
-        ? "file"
-        : inlineAccessToken
-          ? "inline"
+      : inlineAccessToken
+        ? "inline"
+        : fileAccessToken
+          ? "file"
           : defaultAccessToken
             ? "legacy_default"
             : "",

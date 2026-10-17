@@ -63,6 +63,34 @@ test("redacts secrets and preserves them by account id", async () => {
   assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
 });
 
+test("can redact the active runtime configuration instead of stale persisted settings", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-"));
+  const store = new SettingsStore(path.join(directory, "settings.json"));
+  await store.save({
+    pad: {
+      sources: [{
+        id: "main",
+        accessToken: "",
+        accessTokenFile: "/tmp/access-code",
+      }],
+    },
+  });
+
+  const publicValue = store.publicSettings({
+    pad: {
+      sources: [{
+        id: "main",
+        accessToken: "active-secret",
+        accessTokenFile: "/tmp/access-code",
+      }],
+    },
+  }, { preferFallback: true });
+
+  assert.equal(publicValue.pad.sources[0].accessToken, "");
+  assert.equal(publicValue.pad.sources[0].accessTokenConfigured, true);
+  assert.equal(publicValue.pad.sources[0].accessTokenFile, "/tmp/access-code");
+});
+
 test("merges partial settings without discarding unrelated sections", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-settings-"));
   const file = path.join(directory, "settings.json");

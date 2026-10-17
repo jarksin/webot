@@ -1060,14 +1060,17 @@ function render() {
 function readAccountForm() {
   const source = settings.pad.sources[selectedSource];
   if (!source || !document.querySelector("#source-id")) return;
+  const accessToken = document.querySelector("#source-token").value;
   Object.assign(source, {
     displayName: document.querySelector("#source-name").value.trim(),
     id: document.querySelector("#source-id").value.trim(),
     selfId: document.querySelector("#source-wxid").value.trim(),
     apiUrl: document.querySelector("#source-api").value.trim(),
     wsUrl: document.querySelector("#source-ws")?.value.trim() ?? source.wsUrl,
-    accessToken: document.querySelector("#source-token").value,
-    accessTokenFile: document.querySelector("#source-token-file").value.trim(),
+    accessToken,
+    accessTokenFile: accessToken
+      ? ""
+      : document.querySelector("#source-token-file").value.trim(),
     enabled: document.querySelector("#source-enabled").checked,
     ignoreAllowlist: document.querySelector("#source-ignore-allowlist").checked,
     keywordOnly: document.querySelector("#source-keyword-only").checked,
