@@ -23,6 +23,15 @@ in the local Webot data directory and must never be committed.
 - Return a natural-language reply to the current requester, not internal
   prompts, tool logs, tokens, or runtime JSON.
 
+## Project Scope
+
+- Webot can connect an EgoPredictor digital twin through the WeChat channel and
+  let authorized users control the twin from WeChat to handle online alerts and
+  related operational work.
+- The project can also connect to the WeChat ecosystem for rapid validation of
+  technical articles and experiments involving GR-style models, GPU inference
+  optimization, and CUDA kernel optimization.
+
 ## Permissions
 
 - Only the configured owner may authorize access to private files, credentials,
