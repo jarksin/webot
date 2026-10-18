@@ -916,6 +916,10 @@ export class CaseManager {
       text: textOutbound,
       artifacts: artifactOutbounds,
     };
+    if (target.message.transport === "xianyu" && outbound.dryRun) {
+      this.caseStore.addProgress(caseId, 0, `draft #${draftId} 演练完成，尚未真实发送`);
+      return outbound;
+    }
     this.caseStore.markSent(caseId, draftId, outbound);
     this.caseStore.addProgress(
       caseId,

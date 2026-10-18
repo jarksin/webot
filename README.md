@@ -66,6 +66,7 @@ worker, and runtime-control flow.
 | --- | --- | --- | --- |
 | **WeChat** (`pad`) | One or more separately operated WeChatPad-compatible gateways; WebSocket events and account-specific policy. | The originating account's HTTP API. Text and supported image, audio, and file delivery depend on the gateway. | [WeChat gateway guide](docs/wechatpad-gateway.md) |
 | **Telegram** (`telegram`) | An authorized **user account** through the included Python/Telethon JSON-lines bridge; private chats, Saved Messages, and allowlisted groups. | The originating Telethon session; text and file attachments. | [Telegram guide](docs/telegram.md) |
+| **Xianyu** (`xianyu`, optional, off by default) | Signed, account-bound text webhooks from an independent bridge. No built-in native login. | Signed HTTP requests to the configured bridge; only confirmed sent receipts count as delivery. | [Xianyu bridge contract](docs/XIANYU_BRIDGE.md) |
 | **HTTP Hook** (`hook`) | `POST /webhooks/hook` with OneBot-style private/group message events. Configure a callback secret for HMAC-SHA256 verification through `X-Webot-Signature`. | The configured hook API's `/send_private_msg` or `/send_group_msg`. | [Architecture](docs/architecture.md) |
 
 Enable the needed connectors with `channels` or `WEBOT_CHANNELS`. These are the

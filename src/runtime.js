@@ -1,5 +1,6 @@
 import { sourceForMessage } from "./ingress-sources.js";
 import { telegramSourceForMessage } from "./telegram-sources.js";
+import { xianyuMessageDecision } from "./xianyu-sources.js";
 
 function has(set, value) {
   return value && set.has(String(value));
@@ -108,6 +109,7 @@ export function acceptedMessage(message, config) {
   if (!message?.chatId || !message?.senderId) {
     return { accepted: false, reason: "empty" };
   }
+  if (message.transport === "xianyu") return xianyuMessageDecision(config, message);
   if (isEmptyAssistantPayload(message.text)) {
     return { accepted: false, reason: "empty-assistant-payload" };
   }

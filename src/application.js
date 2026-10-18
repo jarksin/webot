@@ -33,6 +33,7 @@ import {
   TelegramTransport,
 } from "./transports/telegram.js";
 import { WEBOT_VERSION } from "./version.js";
+import { XianyuTransport } from "./transports/xianyu.js";
 
 const DIRECTORY_DETAIL_BATCH_SIZE = 20;
 const PAD_BUSINESS_REQUEST_GAP_MS = 10_000;
@@ -67,6 +68,7 @@ function connectorSignature(config) {
     assistantWorkingDirectory: config.assistant.workingDirectory,
     pad: config.pad,
     telegram: config.telegram,
+    xianyu: config.xianyu,
   }));
 }
 
@@ -88,6 +90,7 @@ export class WebotApplication {
     this.padStatuses = new Map();
     this.padIngressCounts = new Map();
     this.telegramIngressCounts = new Map();
+    this.xianyuIngress = new Map();
     this.padSenderClassifier = null;
     this.transports = null;
     this.padMediaRequestTails = new Map();
@@ -268,6 +271,12 @@ export class WebotApplication {
         },
       ),
       telegram: telegramTransport,
+      xianyu: new XianyuTransport(
+        this.config.xianyu,
+        this.config.outboundMode,
+        this.fetch,
+        () => this.config.channels.has("xianyu"),
+      ),
     };
     this.transports = transports;
     this.runtime = new WebotRuntime({
@@ -376,6 +385,13 @@ export class WebotApplication {
     }
     try {
       const result = await this.caseManager.receive(message);
+      if (message.transport === "xianyu" && result.accepted) {
+        const previous = this.xianyuIngress.get(message.sourceId);
+        this.xianyuIngress.set(message.sourceId, {
+          inboundMessages: (previous?.inboundMessages || 0) + 1,
+          lastAcceptedAt: Date.now(),
+        });
+      }
       this.caseStore.markSyncedMessageResult(message, result);
       return result;
     } catch (error) {
@@ -790,6 +806,8 @@ export class WebotApplication {
     this.transports.pad.outboundMode = candidateConfig.outboundMode;
     this.transports.telegram.config = candidateConfig.telegram;
     this.transports.telegram.outboundMode = candidateConfig.outboundMode;
+    this.transports.xianyu.config = candidateConfig.xianyu;
+    this.transports.xianyu.outboundMode = candidateConfig.outboundMode;
     this.caseManager.sessionStore.maxEntries = Math.max(
       2,
       Number(candidateConfig.assistant.historyTurns || 12) * 2,
@@ -952,9 +970,32 @@ export class WebotApplication {
       enabledTelegramSources.length > 0 &&
       enabledTelegramSources.every((source) => source.ready)
     );
-    const ingressReady = padReady && telegramReady;
+    const xianyuSources = this.config.xianyu.sources.map((source) => ({
+      id: source.id,
+      accountId: source.accountId,
+      enabled: source.enabled,
+      ready: this.config.channels.has("xianyu") && source.enabled &&
+        Boolean(source.secret && source.bridgeUrl),
+      credentialReady: Boolean(source.secret),
+      credentialSource: source.credentialSource,
+      connectionState: "webhook",
+      connected: null,
+      loginState: "unverified",
+      inboundMessages: 0,
+      lastAcceptedAt: null,
+      ...this.xianyuIngress.get(source.id),
+      lastSentAt: this.transports?.xianyu?.receipts.get(source.id)?.lastSentAt || null,
+    }));
+    const enabledXianyuSources = this.config.channels.has("xianyu")
+      ? xianyuSources.filter((source) => source.enabled)
+      : [];
+    const xianyuReady = !this.config.channels.has("xianyu") ||
+      (enabledXianyuSources.length > 0 &&
+        enabledXianyuSources.every((source) => source.ready));
+    const ingressReady = padReady && telegramReady && xianyuReady;
     const configuredSources =
-      enabledPadSources.length + enabledTelegramSources.length;
+      enabledPadSources.length + enabledTelegramSources.length +
+      enabledXianyuSources.length;
     const connectedSources =
       enabledPadSources.filter((source) => source.ready).length +
       enabledTelegramSources.filter((source) => source.ready).length;
@@ -965,6 +1006,9 @@ export class WebotApplication {
       ...enabledTelegramSources
         .filter((source) => !source.ready)
         .map((source) => `telegram:${source.id}`),
+      ...enabledXianyuSources
+        .filter((source) => !source.ready)
+        .map((source) => `xianyu:${source.id}`),
     ];
     return {
       ok: ingressReady,
@@ -1003,6 +1047,7 @@ export class WebotApplication {
       },
       padSources,
       telegramSources,
+      xianyuSources,
     };
   }
 }

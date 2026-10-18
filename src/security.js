@@ -21,6 +21,7 @@ export function requesterAccess(
   ownerSenderIds = new Set(),
   config = null,
 ) {
+  if (message?.transport === "xianyu") return "public";
   const senderId = String(message?.senderId || "").trim().toLowerCase();
   const owner = senderId && [...ownerSenderIds].some(
     (candidate) => String(candidate || "").trim().toLowerCase() === senderId,

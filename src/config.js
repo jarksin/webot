@@ -2,6 +2,7 @@ import path from "node:path";
 import os from "node:os";
 import { loadPadSources } from "./ingress-sources.js";
 import { loadTelegramSources } from "./telegram-sources.js";
+import { loadXianyuSources } from "./xianyu-sources.js";
 
 function integer(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -304,5 +305,6 @@ export function loadConfig(env = process.env, settings = {}) {
     },
     pad,
     telegram,
+    xianyu: { sources: loadXianyuSources(env, settings.xianyu?.sources) },
   };
 }

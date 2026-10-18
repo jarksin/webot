@@ -60,6 +60,9 @@
     "requireWriteConfirmation": true,
     "sources": []
   },
+  "xianyu": {
+    "sources": []
+  },
   "telegram": {
     "sources": [
       {

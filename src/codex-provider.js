@@ -519,7 +519,9 @@ function promptFor({
   files = [],
 }) {
   const current = nonEmpty(message?.text);
-  const channel = message?.transport === "telegram" ? "Telegram" : "WeChat";
+  const channel = message?.transport === "xianyu"
+    ? "Xianyu"
+    : message?.transport === "telegram" ? "Telegram" : "WeChat";
   const blocks = [
     sessionId
       ? `Continue the existing conversation with this new ${channel} message.`
@@ -527,6 +529,11 @@ function promptFor({
     `Case: ${caseId || "unknown"}`,
     requesterBlock(access, message),
   ];
+  if (message?.transport === "xianyu") {
+    blocks.push(
+      "This is an isolated Xianyu customer conversation. Only text replies are supported; attachments must be empty. The transport does not establish native login status. Never claim login or delivery based on generating a reply.",
+    );
+  }
   if (!sessionId) {
     const count = Math.max(1, Number(currentMessageCount || 1));
     const previous = (history || []).slice(0, -count);

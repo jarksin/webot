@@ -2,6 +2,7 @@ import http from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { normalizeHookEvent } from "./normalize.js";
 import { validSignature } from "./security.js";
+import { normalizeXianyuEvent } from "./xianyu-sources.js";
 import {
   ADMIN_CSS,
   ADMIN_HTML,
@@ -424,6 +425,45 @@ export function createServer({
           return;
         }
         respond(response, 404, { ok: false, error: "not found" });
+        return;
+      }
+
+      const xianyuRoute = url.pathname.match(/^\/webhooks\/xianyu\/([A-Za-z0-9._-]+)$/);
+      if (request.method === "POST" && xianyuRoute) {
+        const source = currentConfig.xianyu?.sources.find(
+          (item) => item.id === xianyuRoute[1],
+        );
+        if (!source) {
+          respond(response, 404, { ok: false, error: "source not configured" });
+          return;
+        }
+        if (!currentConfig.channels.has("xianyu") || !source.enabled) {
+          respond(response, 503, { ok: false, error: "channel disabled" });
+          return;
+        }
+        const rawBody = await readBody(request, 128 * 1024);
+        if (!source.secret ||
+          !validSignature(rawBody, request.headers["x-webot-signature"], source.secret)) {
+          respond(response, 401, { ok: false, error: "invalid signature" });
+          return;
+        }
+        let message;
+        try {
+          message = normalizeXianyuEvent(JSON.parse(rawBody.toString("utf8")), source);
+        } catch {
+          respond(response, 400, { ok: false, error: "invalid or expired Xianyu event" });
+          return;
+        }
+        const result = await (application
+          ? application.receive(message)
+          : currentRuntime.receive(message));
+        respond(response, 202, {
+          ok: true,
+          results: [{
+            accepted: result.accepted === true,
+            ...(result.reason ? { reason: result.reason } : {}),
+          }],
+        });
         return;
       }
 

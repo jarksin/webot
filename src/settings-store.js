@@ -7,6 +7,7 @@ const SECRET_FIELDS = new Set([
   "apiHash",
   "llmApiKey",
   "webhookToken",
+  "secret",
 ]);
 
 function clone(value) {
@@ -94,6 +95,9 @@ export class SettingsStore {
 
   async save(next) {
     const merged = this.merged(next);
+    if (merged.xianyu?.sources?.some((source) => source?.secret)) {
+      throw new Error("Xianyu secret must use secretEnv or secretFile");
+    }
     await fs.mkdir(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const temporary = `${this.file}.${process.pid}.tmp`;
     await fs.writeFile(temporary, `${JSON.stringify(merged, null, 2)}\n`, {
@@ -178,6 +182,17 @@ export function serializeConfig(config) {
         privateNicknameAllowlist: [...source.privateNicknameAllowlist],
         triggerKeywords: [...source.triggerKeywords],
         botNames: [...source.botNames],
+      })),
+    },
+    xianyu: {
+      sources: (config.xianyu?.sources || []).map((source) => ({
+        id: source.id,
+        enabled: source.enabled,
+        bridgeUrl: source.bridgeUrl,
+        accountId: source.accountId,
+        secretEnv: source.secretEnv,
+        secretFile: source.secretFile,
+        secretConfigured: Boolean(source.secret),
       })),
     },
   };
