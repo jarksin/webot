@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { sourceForMessage } from "../ingress-sources.js";
 import { normalizePadEnvelope, padFileCDNDownloadContext, padRecordMessage } from "../normalize.js";
+import { QW_FILE_ENDPOINT, qwFileDownload } from "../qw-content.js";
 
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
 const MAX_VOICE_BYTES = 5 * 1024 * 1024;
@@ -483,6 +484,9 @@ export class PadTransport {
   }
 
   async downloadInboundAttachment(message, attachment, dataDir, options = {}) {
+    if (message.protocol === "qw_pad") {
+      return this.downloadQWFile(message, attachment, dataDir, options);
+    }
     const source = this.source(message);
     const context = attachment?.kind === "file"
       ? padFileCDNDownloadContext(message.rawContent, attachment?.downloadContext)
@@ -576,6 +580,84 @@ export class PadTransport {
       };
     };
     return options.request ? options.request(download) : download();
+  }
+
+  async downloadQWFile(message, attachment, dataDir, options = {}) {
+    const source = this.source(message);
+    const context = attachment?.downloadContext;
+    const payload = qwFileDownload(attachment, context);
+    if (attachment?.kind !== "file" || context?.endpoint !== QW_FILE_ENDPOINT || !payload ||
+      !source?.accessToken || !source.selfId || source.selfId !== message.selfId ||
+      source.id !== message.sourceId) {
+      throw new Error("QW file download context or source is missing or invalid (maximum 64 MiB)");
+    }
+    const endpoint = new URL(padEndpointURL(source, QW_FILE_ENDPOINT));
+    if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password ||
+      endpoint.pathname !== QW_FILE_ENDPOINT || endpoint.search || endpoint.hash) {
+      throw new Error("QW file download source is invalid");
+    }
+    const fileExtension = path.extname(attachment.filename).toLowerCase();
+    const extension = /^\.[a-z0-9]{1,12}$/.test(fileExtension) ? fileExtension : ".bin";
+    const directory = path.join(path.resolve(dataDir), "inbound-media", safeFileSegment(source.id, "default"));
+    const base = crypto.createHash("sha256").update(JSON.stringify([
+      "qw_pad", source.id, source.selfId, message.chatId, message.messageId, payload,
+    ])).digest("hex");
+    const filePath = path.join(directory, `${base}${extension}`);
+    const cached = () => ({ localPath: filePath, filename: attachment.filename,
+      mime: "application/octet-stream", size: payload.size });
+    try {
+      const info = fs.lstatSync(filePath);
+      if (info.isFile() && info.size === payload.size) return cached();
+    } catch {}
+    const request = options.request || ((operation) => operation());
+    const locator = await request(async () => {
+      const response = await this.fetch(endpoint.href, {
+        method: "POST", headers: tokenHeaders(source.accessToken),
+        body: JSON.stringify(payload), redirect: "manual", signal: AbortSignal.timeout(180_000),
+      });
+      if (response.redirected || (response.url && response.url !== endpoint.href) || !response.ok) {
+        throw new Error(`QW file download preparation failed (${response.status})`);
+      }
+      const body = JSON.parse((await inboundResponseBytes(response, 64 * 1024)).toString("utf8"));
+      if (!(body?.Code === 0 || body?.code === 0 || body?.errcode === 0) ||
+        !padSucceeded(response, body) || (body.errcode != null && body.errcode !== 0)) {
+        throw new Error("QW file download preparation was rejected");
+      }
+      const value = body.Data ?? body.data;
+      if (typeof value !== "string" ||
+        !/^\/api\/v1\/wxwork\/DownloadContent\?id=[A-Za-z0-9._~%!-]+$/.test(value)) {
+        throw new Error("QW file download locator must be a strict relative content URL");
+      }
+      const url = new URL(value, endpoint.origin);
+      const id = url.searchParams.get("id");
+      try { decodeURIComponent(value); } catch { throw new Error("QW file download locator is invalid"); }
+      if (url.origin !== endpoint.origin || !id || /[\x00-\x20\\]/.test(id) ||
+        url.pathname !== "/api/v1/wxwork/DownloadContent" || url.hash) {
+        throw new Error("QW file download locator is invalid");
+      }
+      return url;
+    });
+    const data = await request(async () => {
+      const response = await this.fetch(locator.href, {
+        method: "GET", headers: tokenHeaders(source.accessToken), redirect: "manual",
+        signal: AbortSignal.timeout(180_000),
+      });
+      if (response.redirected || (response.url && response.url !== locator.href) || !response.ok) {
+        throw new Error(`QW file content download failed (${response.status})`);
+      }
+      const bytes = await inboundResponseBytes(response, payload.size);
+      if (bytes.length !== payload.size) throw new Error("QW file download did not match its declared size");
+      return bytes;
+    });
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const temporary = `${filePath}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporary, data, { mode: 0o600, flag: "wx" });
+      fs.renameSync(temporary, filePath);
+    } finally {
+      try { fs.unlinkSync(temporary); } catch {}
+    }
+    return cached();
   }
 
   send(message, text) {

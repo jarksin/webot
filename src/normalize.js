@@ -1,3 +1,5 @@
+import { qwContent } from "./qw-content.js";
+
 function scalar(value) {
   if (value == null) return "";
   if (typeof value === "string" || typeof value === "number") {
@@ -608,8 +610,9 @@ function normalizePadMessage(message, sourceValue, protocol = "") {
       ? { id: "default", displayName: "default", selfId: sourceValue }
       : sourceValue || { id: "default", displayName: "default", selfId: "" };
   const qw = protocol === "qw_pad";
+  const structuredQW = qw ? qwContent(message) : null;
   const messageType = qw
-    ? message.kind === "text" ? 1 : NaN
+    ? structuredQW.type
     : Number(scalar(message.MsgType ?? message.msg_type ?? message.type));
   const selfId = scalar(source.selfId);
   const from = scalar(
@@ -649,14 +652,15 @@ function normalizePadMessage(message, sourceValue, protocol = "") {
   const rawContent = scalar(
     message.Content ?? message.content ?? message.text ?? message.Text,
   );
-  const content = qw ? { text: rawContent, attachments: [] } : padContent(message, rawContent);
+  const content = qw ? message.kind === "text"
+    ? { text: rawContent, attachments: [] } : structuredQW : padContent(message, rawContent);
   const app = qw ? null : padAppMetadata(message);
   const preservedRawContent =
-    rawContent &&
+    !qw && rawContent &&
       (messageType === 49 || app || content.text !== rawContent)
       ? rawContent
       : "";
-  const split = room
+  const split = room && (!qw || message.kind === "text")
     ? splitPadGroupContent(content.text)
     : { embeddedSender: "", text: content.text };
   const actualSender = scalar(
@@ -734,6 +738,7 @@ function normalizePadMessage(message, sourceValue, protocol = "") {
     text: split.text.trim(),
     ...(preservedRawContent ? { rawContent: preservedRawContent } : {}),
     ...(app ? { app } : {}),
+    ...(structuredQW?.link ? { link: structuredQW.link } : {}),
     attachments: content.attachments,
     reference: qw ? null : padReference(message),
     mentions: padMentionIds(message),

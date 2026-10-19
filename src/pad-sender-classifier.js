@@ -1,4 +1,5 @@
 import { sourceForMessage } from "./ingress-sources.js";
+import { qwFileMetadata, qwLinkMetadata } from "./qw-content.js";
 
 const DEFAULT_SYSTEM_ACCOUNT_IDS = new Set([
   "weixin",
@@ -143,7 +144,12 @@ export class PadSenderClassifier {
       return { blocked: false };
     }
     if (message.protocol === "qw_pad") {
-      return message.messageKind === "text" && message.messageType === 1
+      const file = message.attachments?.length === 1 && message.attachments[0];
+      const supported = (message.messageKind === "text" && message.messageType === 1) ||
+        (message.messageKind === "file" && message.messageType === 49 &&
+          file?.kind === "file" && qwFileMetadata(file)) ||
+        (message.messageKind === "link" && message.messageType === 49 && qwLinkMetadata(message.link));
+      return supported
         ? { blocked: false }
         : { blocked: true, reason: "unsupported-message-type" };
     }

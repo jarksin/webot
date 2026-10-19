@@ -402,7 +402,8 @@ function requesterMediaBlock(message, includePrivateContent = false) {
     ? message.attachments.map((attachment) => ({
         kind: nonEmpty(attachment?.kind) || "file",
         filename: nonEmpty(attachment?.filename),
-        size: Number(attachment?.size || 0) || undefined,
+        size: message?.protocol === "qw_pad" && typeof attachment?.size === "string"
+          ? attachment.size : Number(attachment?.size || 0) || undefined,
         width: Number(attachment?.width || 0) || undefined,
         height: Number(attachment?.height || 0) || undefined,
         durationMs: Number(attachment?.durationMs || 0) || undefined,
