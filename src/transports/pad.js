@@ -30,6 +30,12 @@ const AUDIO_FORMATS = new Map([
 ]);
 const DEFAULT_WEBSOCKET_CONNECT_TIMEOUT_MS = 15_000;
 const DEFAULT_WEBSOCKET_HEALTH_INTERVAL_MS = 30_000;
+// QW send-text may spend time in the native message pipeline before the
+// gateway can return its business response. The generic 30s Pad timeout can
+// abort that request after the server has admitted it, leaving the outcome
+// unknown and Webot with a retryable draft. Keep the QW request open long
+// enough to receive the one-shot response; this does not add retries.
+const QW_SEND_TIMEOUT_MS = 180_000;
 const WEBSOCKET_OPEN = 1;
 const MAX_INBOUND_IMAGE_BYTES = 32 * 1024 * 1024;
 const MAX_INBOUND_VIDEO_BYTES = 100 * 1024 * 1024;
@@ -667,7 +673,7 @@ export class PadTransport {
         to: message.replyTarget || message.chatId,
         content: formatPadReplyText(text, message, source),
         is_room: message.chatType === "group",
-      }, message);
+      }, message, { timeoutMs: QW_SEND_TIMEOUT_MS });
     }
     const at = replyMention(message, source);
     const replyText = formatPadReplyText(text, message, source);
