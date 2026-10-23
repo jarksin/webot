@@ -89,8 +89,9 @@ async function fixture(t, transport = "telegram", autoSend = true) {
     assert.equal(received.accepted, true);
     return received.caseId;
   }
-  async function start(caseId) {
-    const promise = manager.run(caseId);
+  async function start(caseId, scheduled = false) {
+    if (scheduled) manager.enqueue(caseId);
+    const promise = scheduled ? manager.runPromises.get(caseId) : manager.run(caseId);
     runs.add(promise);
     for (let index = 0; !requests.has(caseId) && index < 100; index += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -109,6 +110,27 @@ async function fixture(t, transport = "telegram", autoSend = true) {
   }
   return { caseStore, sessionStore, manager, sent, ingest, start };
 }
+
+test("backend switching waits for an active task and resets only its continuation", async (t) => {
+  const f = await fixture(t);
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "webot-switch-backend-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, "config.toml"), 'model = "test-model"\n');
+  await fs.writeFile(path.join(root, "auth.json"),
+    '{"auth_mode":"apikey","OPENAI_API_KEY":"synthetic-key"}');
+  f.manager.config.assistant.backends = { alternate: { codexHome: root } };
+  const caseId = await f.ingest();
+  const run = await f.start(caseId, true);
+  const switchPromise = f.ingest("test-self", "test-source", "/backend alternate");
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(f.caseStore.runtimeSetting(`assistant_backend:${caseId}`, ""), "");
+  await run.finish({ text: "finished old task", sessionId: "old-continuation" });
+  await switchPromise;
+  assert.equal(f.caseStore.runtimeSetting(`assistant_backend:${caseId}`, ""), "alternate");
+  assert.equal(f.caseStore.workerSession(caseId).codex_session_id, "");
+  assert.match(f.sent.at(-1).text, /alternate/);
+  assert.equal((await f.sessionStore.history(caseId)).length > 0, true);
+});
 
 for (const transport of ["telegram", "pad"]) {
   test(`${transport} labels overlapping sessions through the last completion`, async (t) => {

@@ -158,6 +158,8 @@ export function loadConfig(env = process.env, settings = {}) {
       allowSelf,
     },
     assistant: {
+      defaultBackend: String(assistantSettings.defaultBackend || "").trim(),
+      backends: assistantSettings.backends || {},
       mode: value(assistantSettings.mode, env.WEBOT_ASSISTANT || "codex"),
       systemPrompt: value(
         assistantSettings.systemPrompt,

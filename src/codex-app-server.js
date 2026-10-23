@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { codexImageInput } from "./inbound-images.js";
 import {
   codexRuntimeStatus,
+  childEnvironment,
   parseAssistantResult,
   resolveCodexBin,
 } from "./codex-provider.js";
@@ -174,10 +175,7 @@ export async function runCodexAppServer(config, request) {
   const client = new AppServerClient({
     binary: resolveCodexBin(config),
     cwd: runtime.effective.workingDirectory,
-    env: {
-      ...process.env,
-      CODEX_HOME: runtime.home,
-    },
+    env: childEnvironment(config),
     onNotification(message) {
       const params = message.params || {};
       if (

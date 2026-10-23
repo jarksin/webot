@@ -68,6 +68,18 @@ test("parses stable owner control commands", () => {
   assert.equal(parseControlCommand("/quota now"), null);
   assert.equal(parseControlCommand("/quota\nrun task"), null);
   assert.equal(parseControlCommand("/unknown"), null);
+  assert.deepEqual(parseControlCommand("/backend"), { type: "backend", action: "show" });
+  assert.deepEqual(parseControlCommand("/backend list"), { type: "backend", action: "list" });
+  assert.deepEqual(parseControlCommand("/backend OKAI-G1"), {
+    type: "backend", action: "set", backend: "okai-g1",
+  });
+  for (const name of ["default", "reset", "auto"]) {
+    assert.deepEqual(parseControlCommand(`/backend ${name}`), {
+      type: "backend", action: "reset",
+    });
+  }
+  assert.equal(parseControlCommand("/backend ../secret"), null);
+  assert.equal(parseControlCommand("/backend t4 task"), null);
 });
 
 test("quota commands query without Codex runtime or a model and hide raw failures", async () => {
@@ -212,6 +224,7 @@ test("applies model and effort overrides without invoking a provider", async () 
   assert.deepEqual(runtimeOverrides(caseStore, "case-1"), {
     model: "",
     reasoningEffort: "",
+    backend: "",
   });
   assert.deepEqual(await sessionStore.history("case-1"), []);
   caseStore.close();
@@ -388,7 +401,7 @@ test("switches preview both destination roles within twenty characters without o
   assert.equal(previews[1], "𠀀".repeat(19) + "…");
 });
 
-test("st and status show only the selected session and its effective model", async (t) => {
+test("st and status show the selected session, backend, and effective model", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-status-"));
   const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
   const sessionStore = new SessionStore(path.join(directory, "sessions"), 4);
@@ -408,13 +421,13 @@ test("st and status show only the selected session and its effective model", asy
       caseId: project.target_case_id,
       command: parseControlCommand(command),
     });
-    assert.equal(named.text, "当前 session：project-a\n当前模型：project-model");
+    assert.equal(named.text, "当前 session：project-a\n当前后端：default\n当前模型：project-model");
     const main = await applyControlCommand({
       ...common,
       caseId: scopeCaseId,
       command: parseControlCommand(command),
     });
-    assert.equal(main.text, "当前 session：main\n当前模型：main-model");
+    assert.equal(main.text, "当前 session：main\n当前后端：default\n当前模型：main-model");
   }
   caseStore.deleteRuntimeSetting(`assistant_model:${project.target_case_id}`);
   const defaults = await applyControlCommand({
@@ -422,5 +435,5 @@ test("st and status show only the selected session and its effective model", asy
     caseId: project.target_case_id,
     command: parseControlCommand("/st"),
   });
-  assert.equal(defaults.text, "当前 session：project-a\n当前模型：default-model");
+  assert.equal(defaults.text, "当前 session：project-a\n当前后端：default\n当前模型：default-model");
 });

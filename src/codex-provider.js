@@ -10,6 +10,7 @@ import {
 } from "./codex-session-progress.js";
 import { parseCodexSessionUsage } from "./codex-usage.js";
 import { assistantConfigForMessage } from "./assistant-routing.js";
+import { backendConfig } from "./assistant-backends.js";
 import { runCodexAppServer } from "./codex-app-server.js";
 import { modelImages } from "./inbound-images.js";
 import {
@@ -201,11 +202,17 @@ function runtimeFiles(config = {}, env = process.env) {
   };
 }
 
-function childEnvironment(config = {}, env = process.env) {
+export function childEnvironment(config = {}, env = process.env) {
   const files = runtimeFiles(config, env);
   const configText = readText(files.configFile);
   const auth = readJson(files.authFile);
   const output = { ...env, CODEX_HOME: files.home };
+  if (config.isolatedBackendAuth) {
+    delete output.OPENAI_BASE_URL;
+    for (const key of ["OPENAI_API_KEY", ...providerEnvKeys(configText)]) {
+      delete output[key];
+    }
+  }
   for (const key of ["OPENAI_API_KEY", ...providerEnvKeys(configText)]) {
     if (!nonEmpty(output[key]) && nonEmpty(auth[key])) output[key] = auth[key];
   }
@@ -843,7 +850,10 @@ export function createCodexProvider(config, options = {}) {
       onItem,
       runtimeOverrides = {},
     }) {
-      const routedConfig = assistantConfigForMessage(config, message);
+      const routedConfig = backendConfig(
+        assistantConfigForMessage(config, message),
+        runtimeOverrides.backend,
+      );
       const effectiveConfig = {
         ...routedConfig,
         codexModel:

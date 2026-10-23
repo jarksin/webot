@@ -27,6 +27,8 @@
     "timeoutMs": 0,
     "codexBin": "",
     "codexHome": "",
+    "defaultBackend": "",
+    "backends": {},
     "workingDirectory": "",
     "codexModel": "",
     "reasoningEffort": "",

@@ -179,7 +179,11 @@ additional permissions.
 | `/effort` | Shows the current reasoning effort. |
 | `/effort <level>` | Sets the session override: `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`. Actual support depends on the selected model/provider. |
 | `/effort default` | Removes the effort override. `reset` and `auto` are aliases. |
-| `/clear` | Resets the current assistant history, Codex continuation, and model/effort overrides. It does not delete archived messages or other named sessions. Aliases: `/new`, `/reset`; these forms also accept `session` or `case`. |
+| `/backend` | Shows the current session's backend. |
+| `/backend list` | Lists locally configured backend names, without endpoints or credentials. |
+| `/backend <name>` | Switches this session to a configured backend and its independent credentials after the current task finishes. The next task starts a new Codex continuation; chat history and model/effort overrides remain. |
+| `/backend default` | Removes the backend override. `reset` and `auto` are aliases. |
+| `/clear` | Resets the current assistant history, Codex continuation, and model/effort/backend overrides. It does not delete archived messages or other named sessions. Aliases: `/new`, `/reset`; these forms also accept `session` or `case`. |
 | `/stop` | Stops the current session's task; it does not restart Webot or stop other Cases. Also accepts `worker`, `task`, or `case` after the command. |
 
 Use **`/sessions`, not `/session list`**, to list sessions. Session names are
@@ -203,6 +207,19 @@ name, show the old-to-new transition, and preview the destination. Automatic
 media and group context are isolated by session; an explicit message quote
 can still reference a message in the same chat. Independent chats and chats
 with only one session stay unchanged.
+
+Backend profiles are owner-managed local settings. Set `assistant.defaultBackend`
+to a profile name and `assistant.backends` to a map of names to objects with an
+absolute `codexHome` path. Each home must contain its own `config.toml` (provider,
+endpoint and model catalog) and `auth.json` (its key or login credentials).
+Optional profile fields are `codexModel` for a backend-specific default and
+`cpaSshHost` for an explicitly configured CPA model-registration host. Without
+that host, unknown models on a named backend are not registered remotely.
+Two accounts or groups on the same endpoint should use separate profiles and
+separate homes. Backend selection is persisted per named session; no process
+restart or shared credential rewrite is needed. A missing profile or unreadable
+authentication file fails closed instead of falling back to another backend.
+Keep all profiles and credentials outside the repository.
 
 ## Self-Iteration and Guarded Reload
 

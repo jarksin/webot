@@ -151,7 +151,9 @@ export async function refreshModelCatalog(
     return { enabled: false, reason: "custom catalog or provider URL is not configured" };
   }
   const auth = readJson(runtime.authFile);
-  const apiKey = clean(env.OPENAI_API_KEY || auth.OPENAI_API_KEY);
+  const apiKey = clean(config.isolatedBackendAuth
+    ? auth.OPENAI_API_KEY
+    : env.OPENAI_API_KEY || auth.OPENAI_API_KEY);
   if (!apiKey) throw new Error("custom provider model sync has no API key");
   const response = await (options.fetch || globalThis.fetch)(
     `${runtime.baseUrl.replace(/\/+$/, "")}/models`,
@@ -190,7 +192,9 @@ export async function addModelCatalogEntries(
     throw new Error("custom catalog or provider URL is not configured");
   }
   const auth = readJson(runtime.authFile);
-  const apiKey = clean(env.OPENAI_API_KEY || auth.OPENAI_API_KEY);
+  const apiKey = clean(config.isolatedBackendAuth
+    ? auth.OPENAI_API_KEY
+    : env.OPENAI_API_KEY || auth.OPENAI_API_KEY);
   if (!apiKey) throw new Error("custom provider model probe has no API key");
   const requested = [...new Set(modelIds
     .map(clean)

@@ -150,3 +150,24 @@ test("adds requested available models without replacing existing entries", async
     ["gpt-6-sol", "codex-auto-review", "company-gpt-6.1-sol", "gpt-6.1-sol"],
   );
 });
+
+test("catalog operations on isolated backends never inherit another backend key", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "webot-catalog-auth-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  await fs.writeFile(path.join(home, "config.toml"),
+    'openai_base_url = "http://provider.test/v1"\nmodel_catalog_json = "catalog.json"\n');
+  await fs.writeFile(path.join(home, "auth.json"), '{"OPENAI_API_KEY":"profile-key"}');
+  await fs.writeFile(path.join(home, "catalog.json"),
+    JSON.stringify({ models: [template("gpt-test")] }));
+  const config = { codexHome: home, isolatedBackendAuth: true };
+  const env = { OPENAI_API_KEY: "unrelated-key" };
+  const options = { fetch: async (_url, init) => {
+    assert.equal(init.headers.authorization, "Bearer profile-key");
+    return { ok: true, json: async () => ({ data: [{ id: "gpt-test" }] }) };
+  } };
+  await refreshModelCatalog(config, env, options);
+  await addModelCatalogEntries(["gpt-test"], config, env, options);
+  await fs.writeFile(path.join(home, "auth.json"), "{}");
+  await assert.rejects(refreshModelCatalog(config, env, options), /no API key/);
+  await assert.rejects(addModelCatalogEntries(["gpt-test"], config, env, options), /no API key/);
+});

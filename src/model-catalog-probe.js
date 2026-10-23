@@ -98,7 +98,7 @@ export async function probeAndAddModel(
   const registration = await (options.runRemote || runRemoteRegistration)(
     model,
     env,
-    options,
+    { ...options, ...(config.cpaSshHost ? { sshHost: config.cpaSshHost } : {}) },
   );
   const exposedModels = Array.isArray(registration.exposed_models)
     ? registration.exposed_models.map(clean).filter(validModel)

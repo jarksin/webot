@@ -3,6 +3,7 @@ import path from "node:path";
 import { codexRuntimeStatus } from "./codex-provider.js";
 import { probeAndAddModel } from "./model-catalog-probe.js";
 import { formatCpaQuota, queryCpaQuota } from "./cpa-quota.js";
+import { backendConfig, backendName, backendNames } from "./assistant-backends.js";
 import {
   normalizeSessionName,
   parseSessionCommand,
@@ -66,6 +67,16 @@ export function parseControlCommand(value) {
   if (!text.startsWith("/")) return null;
   const session = parseSessionCommand(text);
   if (session) return session;
+  const backend = text.match(/^\/backend(?:\s+([a-z0-9][a-z0-9_-]{0,39}))?\s*$/i);
+  if (backend) {
+    const name = clean(backend[1]).toLowerCase();
+    if (!name) return { type: "backend", action: "show" };
+    if (name === "list") return { type: "backend", action: "list" };
+    if (["default", "reset", "auto"].includes(name)) {
+      return { type: "backend", action: "reset" };
+    }
+    return { type: "backend", action: "set", backend: name };
+  }
   if (
     /^\/(?:models|modes)\s*$/i.test(text)
     || /^\/model\s+list\s*$/i.test(text)
@@ -115,17 +126,23 @@ export function effortRuntimeKey(caseId) {
   return `assistant_effort:${clean(caseId)}`;
 }
 
+export function backendRuntimeKey(caseId) {
+  return `assistant_backend:${clean(caseId)}`;
+}
+
 export function runtimeOverrides(caseStore, caseId) {
   return {
     model: caseStore.runtimeSetting(modelRuntimeKey(caseId), ""),
     reasoningEffort: caseStore.runtimeSetting(effortRuntimeKey(caseId), ""),
+    backend: caseStore.runtimeSetting(backendRuntimeKey(caseId), ""),
   };
 }
 
 function effectiveRuntime(caseStore, caseId, config, env) {
-  const base = codexRuntimeStatus(config, env).effective;
   const overrides = runtimeOverrides(caseStore, caseId);
+  const base = codexRuntimeStatus(backendConfig(config, overrides.backend), env).effective;
   return {
+    backend: backendName(config, overrides.backend),
     model: overrides.model || base.model || "default",
     reasoningEffort: overrides.reasoningEffort || base.reasoningEffort || "default",
     serviceTier: base.serviceTier || "default",
@@ -153,7 +170,44 @@ export async function applyControlCommand({
       return { text: "额度查询失败，暂未取得有效的额度数据，请稍后重试。" };
     }
   }
-  const runtime = effectiveRuntime(caseStore, caseId, config, env);
+  if (command.type === "backend") {
+    const previous = caseStore.runtimeSetting(backendRuntimeKey(caseId), "");
+    const current = backendName(config, previous);
+    if (command.action === "show") {
+      return { text: `当前后端：${current}` };
+    }
+    if (command.action === "list") {
+      return {
+        text: `当前后端：${current}\n可用后端：${backendNames(config).join("、") || "未配置"}`
+          + "\n切换：/backend <名称>；恢复默认：/backend default。",
+      };
+    }
+    const next = command.action === "reset" ? "" : command.backend;
+    try {
+      backendConfig(config, next);
+    } catch (error) {
+      return { text: error.message };
+    }
+    if (next) caseStore.setRuntimeSetting(backendRuntimeKey(caseId), next);
+    else caseStore.deleteRuntimeSetting(backendRuntimeKey(caseId));
+    const selected = backendName(config, next);
+    if (selected !== current) caseStore.resetCodexSession(caseId);
+    return {
+      text: `当前会话后端：${selected}，使用该后端的独立认证。`
+        + (selected !== current
+          ? "下一条任务创建新的 Codex session，聊天历史保留。"
+          : "后端未改变。"),
+    };
+  }
+  let runtime;
+  try {
+    runtime = effectiveRuntime(caseStore, caseId, config, env);
+  } catch (error) {
+    // Recovery commands must remain available after a profile is removed.
+    if (!["clear", "help", "stop", "session"].includes(command.type)) {
+      return { text: error.message };
+    }
+  }
   if (command.type === "session") {
     const current = caseStore.ensureSessionScope(scopeCaseId);
     if (command.action === "invalid") {
@@ -185,7 +239,7 @@ export async function applyControlCommand({
         return {
           text:
             `已新建并切换 session「${current.name}」→「${created.name}」。`
-            + "该 session 的上下文、Codex session、模型和 effort 均独立。",
+            + "该 session 的上下文、Codex session、模型、effort 和后端均独立。",
           outputCaseId: caseId,
         };
       } catch (error) {
@@ -246,8 +300,11 @@ export async function applyControlCommand({
   }
 
   if (command.type === "model") {
+    const selectedConfig = backendConfig(
+      config, runtimeOverrides(caseStore, caseId).backend,
+    );
     if (command.action === "list") {
-      const models = availableModels(config, env);
+      const models = availableModels(selectedConfig, env);
       return {
         text: `当前模型：${runtime.model}\n\n可用模型：${models.join("、") || "未读取到本地模型目录"}`,
       };
@@ -263,20 +320,23 @@ export async function applyControlCommand({
       }
       return { text: `已清除会话模型覆盖，恢复为：${restored.model}` };
     }
-    let models = availableModels(config, env);
+    let models = availableModels(selectedConfig, env);
     let canonical = models.find(
       (model) => model.toLowerCase() === clean(command.model).toLowerCase(),
     );
     if (!canonical) {
       let probe;
       try {
-        probe = await modelProbe(command.model, config, env);
+        if (selectedConfig.isolatedBackendAuth && !selectedConfig.cpaSshHost) {
+          return { text: "当前后端的模型目录中没有该模型，请先更新该后端模型目录。" };
+        }
+        probe = await modelProbe(command.model, selectedConfig, env);
       } catch (error) {
         return {
           text: `模型 ${clean(command.model) || "参数"} 探测失败：${clean(error?.message || error).slice(0, 300)}`,
         };
       }
-      models = availableModels(config, env);
+      models = availableModels(selectedConfig, env);
       canonical = models.find(
         (model) => model.toLowerCase() === clean(probe.selected_model).toLowerCase(),
       );
@@ -317,6 +377,7 @@ export async function applyControlCommand({
     caseStore.resetCodexSession(caseId);
     caseStore.deleteRuntimeSetting(modelRuntimeKey(caseId));
     caseStore.deleteRuntimeSetting(effortRuntimeKey(caseId));
+    caseStore.deleteRuntimeSetting(backendRuntimeKey(caseId));
     await sessionStore.clear(caseId);
     const restored = effectiveRuntime(caseStore, caseId, config, env);
     return {
@@ -333,6 +394,7 @@ export async function applyControlCommand({
     return {
       text:
         `当前 session：${session?.name || "main"}\n`
+        + `当前后端：${runtime.backend}\n`
         + `当前模型：${runtime.model}`,
     };
   }
@@ -342,6 +404,7 @@ export async function applyControlCommand({
       "会话：/session、/sessions、/session new <名称>、"
       + "/session <名称>、/session delete <名称>。\n"
       + "运行：/models、/model [模型|default]、/effort [级别|default]、"
+      + "/backend [名称|list|default]、"
       + "/st（/status）、/quota（/authquota）、/clear、/stop。\n"
       + "也可用 /model <模型> <任务> 直接指定下一项任务。",
   };

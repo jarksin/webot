@@ -148,6 +148,16 @@ test("a native group self-mention does not grant public senders command access",
   assert.equal(f.requests[0].message.text, "/clear");
 });
 
+test("public backend commands cannot change backend selection", async (t) => {
+  const f = await fixture(t, "public");
+  const { caseId } = await f.manager.receive(f.message("/backend alternate"));
+  await f.force(caseId);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].message.text, "/backend alternate");
+  assert.equal(f.caseStore.runtimeSetting(`assistant_backend:${caseId}`, ""), "");
+  assert.equal(f.requests[0].runtimeOverrides.backend, "");
+});
+
 test("model commands with a task continue using the rewritten task text", async (t) => {
   const f = await fixture(t);
   const { caseId } = await f.manager.receive(

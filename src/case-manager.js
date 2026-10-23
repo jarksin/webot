@@ -34,7 +34,8 @@ function oversizedAttachmentFailure(error) {
 }
 
 function commandNeedsIdleWorker(command) {
-  return command?.type === "clear" || command?.type === "stop";
+  return command?.type === "clear" || command?.type === "stop" ||
+    (command?.type === "backend" && ["set", "reset"].includes(command.action));
 }
 
 function completedDraftText(text) {

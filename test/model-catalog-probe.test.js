@@ -34,3 +34,15 @@ test("registers remotely and appends exposed models", async () => {
   assert.equal(result.selected_model, "gpt-6.1-sol");
   assert.equal(result.catalog_model_count, 2);
 });
+
+test("backend model registration uses its configured SSH host", async () => {
+  let selectedHost;
+  await probeAndAddModel("gpt-test", { cpaSshHost: "backend-host" }, {}, {
+    runRemote: async (_model, _env, options) => {
+      selectedHost = options.sshHost;
+      return { ok: true, exposed_models: ["gpt-test"] };
+    },
+    addCatalog: async () => ({ addedModels: [], modelCount: 1 }),
+  });
+  assert.equal(selectedHost, "backend-host");
+});
