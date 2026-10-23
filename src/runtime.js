@@ -76,6 +76,17 @@ function privateTriggerText(message) {
 
 function stripMessageTrigger(message, triggers, botNames) {
   const text = String(message?.text || "").trim();
+  if (
+    message.transport === "pad" &&
+    message.chatType === "group" &&
+    message.selfId &&
+    message.mentions?.length === 1 &&
+    message.mentions[0] === message.selfId
+  ) {
+    // A single native self-mention may use an arbitrary group display name.
+    const mention = text.match(/^@[^@\r\n\u2005]+\u2005/);
+    if (mention) return stripTrigger(text.slice(mention[0].length), triggers, botNames);
+  }
   const command = privateTriggerText(message);
   const stripped = stripTrigger(command, triggers, botNames);
   if (command === text) return stripped;

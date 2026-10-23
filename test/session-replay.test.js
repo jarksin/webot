@@ -112,6 +112,42 @@ test("forced rerun does not resurrect a task from before clear", async (t) => {
   assert.deepEqual(await f.sessionStore.history(caseId), []);
 });
 
+test("group alias clear is handled without invoking the provider or clearing another chat", async (t) => {
+  const f = await fixture(t);
+  f.manager.config.pad.sources[0].allowedChatIds.add("room@chatroom");
+  const groupMessage = (text) => ({
+    ...f.message(text), chatType: "group", chatId: "room@chatroom",
+    conversationId: "group:source:room@chatroom",
+    selfConversation: false, exactSelfChat: false, mentions: ["self"],
+  });
+  const { caseId: privateCase } = await f.manager.receive(f.message("private task"));
+  await f.manager.run(privateCase);
+  const { caseId } = await f.manager.receive(
+    groupMessage("@group alias\u2005old group task"),
+  );
+  await f.manager.run(caseId);
+  await f.manager.receive(groupMessage("@group alias\u2005/clear"));
+  await f.force(caseId);
+  assert.equal(f.requests.length, 2);
+  assert.deepEqual(await f.sessionStore.history(caseId), []);
+  assert.notDeepEqual(await f.sessionStore.history(privateCase), []);
+});
+
+test("a native group self-mention does not grant public senders command access", async (t) => {
+  const f = await fixture(t, "public");
+  f.manager.config.pad.sources[0].allowedChatIds.add("room@chatroom");
+  const { caseId } = await f.manager.receive({
+    ...f.message("@group alias\u2005/clear"),
+    senderId: "public-sender", senderName: "Owner",
+    chatType: "group", chatId: "room@chatroom",
+    conversationId: "group:source:room@chatroom",
+    selfConversation: false, exactSelfChat: false, mentions: ["self"],
+  });
+  await f.force(caseId);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].message.text, "/clear");
+});
+
 test("model commands with a task continue using the rewritten task text", async (t) => {
   const f = await fixture(t);
   const { caseId } = await f.manager.receive(

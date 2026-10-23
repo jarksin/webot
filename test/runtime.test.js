@@ -60,6 +60,47 @@ test("requires a trigger in group chats", () => {
   );
 });
 
+test("native Pad self-mentions strip group aliases without guessing other mentions", () => {
+  const sourceConfig = loadConfig({}, {
+    pad: { sources: [{
+      id: "small", selfId: "wxid_bot", allowedChatIds: ["room@chatroom"],
+      botNames: ["Webot"], triggerKeywords: ["webot"],
+    }] },
+  });
+  const message = {
+    transport: "pad", sourceId: "small", chatType: "group",
+    chatId: "room@chatroom", senderId: "owner", selfId: "wxid_bot",
+    direction: "incoming", mentions: ["wxid_bot"],
+    text: "@group alias\u2005/clear",
+  };
+  for (const text of [
+    "@group alias\u2005/clear", "@\u5c0f\u53f7\u2005/clear",
+    "@another alias\u2005/status", "@group alias\u2005hello",
+  ]) {
+    assert.equal(
+      acceptedMessage({ ...message, text }, sourceConfig).text,
+      text.slice(text.indexOf("\u2005") + 1),
+    );
+  }
+  for (const text of [
+    "@group alias /clear", "@group alias\n/clear",
+    "ask @group alias\u2005/clear",
+  ]) {
+    assert.equal(acceptedMessage({ ...message, text }, sourceConfig).text, text);
+  }
+  const foreign = { ...message, mentions: ["wxid_other"] };
+  assert.equal(acceptedMessage(foreign, sourceConfig).accepted, false);
+  const ambiguous = { ...message, mentions: ["wxid_other", "wxid_bot"] };
+  assert.equal(acceptedMessage(ambiguous, sourceConfig).text, ambiguous.text);
+  const privateMessage = {
+    ...message, chatType: "private", chatId: "owner",
+  };
+  sourceConfig.pad.sources[0].allowedSenderIds.add("owner");
+  assert.equal(acceptedMessage(privateMessage, sourceConfig).text, message.text);
+  sourceConfig.pad.sources[0].keywordOnly = true;
+  assert.equal(acceptedMessage(message, sourceConfig).reason, "group-not-triggered");
+});
+
 test("keyword-only Pad sources require both the allowlist and an explicit summon", () => {
   const sourceConfig = loadConfig({}, {
     pad: { sources: [{
