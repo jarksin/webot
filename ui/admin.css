@@ -71,6 +71,7 @@ p { line-height: 1.5; }
 .header-toggle input { position: static; width: 15px; height: 15px; opacity: 1; pointer-events: auto; accent-color: #55d59a; }
 .service-state { min-width: 0; display: flex; align-items: center; gap: 8px; color: #d7e0ea; font-size: 11px; }
 .service-state code { color: #aab8c8; font-size: 10px; }
+.service-state .compact-button { min-height: 26px; padding: 0 7px; }
 .status-dot {
   width: 7px;
   height: 7px;
@@ -470,6 +471,8 @@ body.case-resizing { cursor: col-resize; user-select: none; }
   .switch-control.worker-on .switch-knob { transform: translateX(14px); }
   .service-state { gap: 5px; }
   .service-state code { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .service-state .compact-button { width: 29px; padding: 0; }
+  .service-state .compact-button span { display: none; }
   .toolbar { min-height: 48px; padding: 6px; gap: 5px; overflow-x: auto; }
   nav { gap: 4px; }
   .nav-item { min-width: 42px; padding: 0 8px; }

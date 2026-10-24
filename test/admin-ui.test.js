@@ -114,6 +114,14 @@ test("admin header owns worker and auto reply controls", () => {
   assert.doesNotMatch(javascript, /data-action="outbound-mode"/);
 });
 
+test("version area exposes an idle auto-update restart control", () => {
+  assert.match(html, /id="runtime-build"[\s\S]*id="auto-update-button"/);
+  assert.match(html, /自动更新重启/);
+  assert.match(javascript, /requestConsoleRestart\("idle"\)/);
+  assert.match(javascript, /body: JSON\.stringify\(\{ confirm: true, mode \}\)/);
+  assert.match(javascript, /任务空闲后自动更新并重启 Webot/);
+});
+
 test("account settings expose an allowlist bypass that keeps group triggers", () => {
   assert.match(javascript, /id="\$\{id\}"/);
   assert.match(javascript, /忽略白名单/);
@@ -141,6 +149,10 @@ test("case workspace groups named sessions and reloads on runtime revision chang
   assert.match(javascript, /class="case-session-select"/);
   assert.match(javascript, /reloadForRuntimeRevisionChange/);
   assert.match(javascript, /window\.location\.reload\(\)/);
+  assert.match(javascript, /webot-case-session-selections/);
+  assert.match(javascript, /window\.localStorage\.setItem/);
+  assert.match(javascript, /caseSelectionLoading/);
+  assert.match(javascript, /!caseSelectionLoading/);
 });
 
 test("a reloaded revision refreshes the console even while an unrelated account is offline", async () => {
