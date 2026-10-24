@@ -377,11 +377,17 @@ export async function applyControlCommand({
     caseStore.resetCodexSession(caseId);
     caseStore.deleteRuntimeSetting(modelRuntimeKey(caseId));
     caseStore.deleteRuntimeSetting(effortRuntimeKey(caseId));
-    caseStore.deleteRuntimeSetting(backendRuntimeKey(caseId));
     await sessionStore.clear(caseId);
-    const restored = effectiveRuntime(caseStore, caseId, config, env);
+    let details;
+    try {
+      const restored = effectiveRuntime(caseStore, caseId, config, env);
+      details = `当前后端：${restored.backend}，当前模型：${restored.model}。`;
+    } catch {
+      const selected = backendName(config, runtimeOverrides(caseStore, caseId).backend);
+      details = `当前后端：${selected}（配置未就绪，请用 /backend 切换可用后端）。`;
+    }
     return {
-      text: `已清理当前会话，下一条消息会创建新的 Codex session。当前模型：${restored.model}。`,
+      text: `已清理当前会话，保留后端选择，下一条消息会创建新的 Codex session。${details}`,
     };
   }
 

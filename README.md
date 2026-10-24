@@ -183,7 +183,7 @@ additional permissions.
 | `/backend list` | Lists locally configured backend names, without endpoints or credentials. |
 | `/backend <name>` | Switches this session to a configured backend and its independent credentials after the current task finishes. The next task starts a new Codex continuation; chat history and model/effort overrides remain. |
 | `/backend default` | Removes the backend override. `reset` and `auto` are aliases. |
-| `/clear` | Resets the current assistant history, Codex continuation, and model/effort/backend overrides. It does not delete archived messages or other named sessions. Aliases: `/new`, `/reset`; these forms also accept `session` or `case`. |
+| `/clear` | Resets the current assistant history, Codex continuation, and model/effort overrides, but preserves the selected backend and its credentials. Use `/backend default` to reset the backend explicitly. It does not delete archived messages or other named sessions. Aliases: `/new`, `/reset`; these forms also accept `session` or `case`. |
 | `/stop` | Stops the current session's task; it does not restart Webot or stop other Cases. Also accepts `worker`, `task`, or `case` after the command. |
 
 Use **`/sessions`, not `/session list`**, to list sessions. Session names are

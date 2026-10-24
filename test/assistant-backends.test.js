@@ -72,7 +72,7 @@ test("backend selection is persisted, isolated, and preserves history", async (t
   assert.deepEqual(resets, ["case-one", "case-one"]);
   await f.apply("/backend group-two");
   await f.apply("/clear");
-  assert.equal(runtimeOverrides(f.caseStore, "case-one").backend, "");
+  assert.equal(runtimeOverrides(f.caseStore, "case-one").backend, "group-two");
 });
 
 test("missing or invalid backend authentication never falls back or changes selection", async (t) => {
@@ -161,4 +161,38 @@ test("model discovery on non-CPA backends never probes an unrelated remote host"
   });
   assert.match(result.text, /模型目录/);
   assert.equal(runtimeOverrides(f.caseStore, "case-one").model, "");
+});
+
+for (const command of ["/clear", "/new", "/reset", "/clear session", "/reset case"]) {
+  test(`${command} clears context without changing backend or credentials`, async (t) => {
+    const f = await fixture(t);
+    await f.apply("/backend group-one");
+    await f.apply("/model group-one-only");
+    await f.apply("/effort high");
+    await f.sessionStore.append("case-one", "user", "old history");
+    const authFile = path.join(f.config.backends["group-one"].codexHome, "auth.json");
+    const before = await fs.readFile(authFile, "utf8");
+    const result = await f.apply(command);
+    assert.deepEqual(runtimeOverrides(f.caseStore, "case-one"), {
+      backend: "group-one", model: "", reasoningEffort: "",
+    });
+    assert.deepEqual(await f.sessionStore.history("case-one"), []);
+    assert.match(result.text, /保留后端选择/);
+    assert.match(result.text, /当前后端：group-one/);
+    assert.equal(await fs.readFile(authFile, "utf8"), before);
+    assert.match((await f.apply("/status")).text, /当前后端：group-one/);
+    await f.apply("/backend default");
+    assert.equal(runtimeOverrides(f.caseStore, "case-one").backend, "");
+  });
+}
+
+test("clear preserves an unavailable backend without silently falling back", async (t) => {
+  const f = await fixture(t);
+  await f.apply("/backend group-one");
+  await f.sessionStore.append("case-one", "user", "old history");
+  delete f.config.backends["group-one"];
+  const result = await f.apply("/clear");
+  assert.match(result.text, /group-one（配置未就绪/);
+  assert.equal(runtimeOverrides(f.caseStore, "case-one").backend, "group-one");
+  assert.deepEqual(await f.sessionStore.history("case-one"), []);
 });
