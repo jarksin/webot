@@ -39,6 +39,58 @@ function adminRequest(status, body) {
   });
 }
 
+function caseRefreshContext(api, focused = false) {
+  const source = javascript.slice(
+    javascript.indexOf("function caseSessionSelectFocused("),
+    javascript.indexOf("async function reloadForRuntimeRevisionChange("),
+  );
+  const context = vm.createContext({
+    api, caseSelectionRequest: 0, caseSelectionLoading: 0,
+    selectedCase: { case_id: "old" }, cases: [], caseTotal: 0,
+    caseHasMore: false, workers: {}, casePage: 0, casePageSize: 50,
+    caseHistoryExpanded: new Map(), caseListResizing: false, renders: 0,
+    captureCaseViewState() {},
+    document: { activeElement: { matches: () => focused } },
+  });
+  vm.runInContext(`${source}; function render() { renders++; }`, context);
+  return context;
+}
+
+test("polling does not replace an open session dropdown", async () => {
+  const context = caseRefreshContext(async () => ({ cases: [] }), true);
+  await vm.runInContext("refreshCases()", context);
+  assert.equal(context.renders, 0);
+});
+
+test("an old polling detail response cannot overwrite a newer session selection", async () => {
+  let resolveDetail;
+  const context = caseRefreshContext(async (path) => {
+    if (path.startsWith("/api/admin/cases?")) return { cases: [] };
+    return new Promise((resolve) => { resolveDetail = resolve; });
+  });
+  const pending = vm.runInContext("refreshCases(true)", context);
+  await new Promise((resolve) => setImmediate(resolve));
+  context.caseSelectionRequest++;
+  context.selectedCase = { case_id: "qw3" };
+  resolveDetail({ case: { case_id: "old" } });
+  await pending;
+  assert.equal(context.selectedCase.case_id, "qw3");
+  assert.equal(context.renders, 0);
+});
+
+test("an old polling list response cannot re-render during session selection", async () => {
+  let resolveList;
+  const context = caseRefreshContext(() => new Promise((resolve) => {
+    resolveList = resolve;
+  }));
+  const pending = vm.runInContext("refreshCases()", context);
+  context.caseSelectionRequest++;
+  resolveList({ cases: [{ case_id: "old" }] });
+  await pending;
+  assert.equal(context.cases.length, 0);
+  assert.equal(context.renders, 0);
+});
+
 test("offline channel status remains readable by admin initialization and polling", async () => {
   const snapshot = {
     ok: false,

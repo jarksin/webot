@@ -1713,11 +1713,18 @@ async function loadCase(caseId, options = {}) {
   }
 }
 
+function caseSessionSelectFocused() {
+  return Boolean(document.activeElement?.matches("[data-case-session]"));
+}
+
 async function refreshCases(includeDetail = false) {
+  const selectionRequest = caseSelectionRequest;
+  const selectedCaseId = selectedCase?.case_id;
   if (includeDetail) captureCaseViewState();
   const body = await api(
     `/api/admin/cases?limit=${casePageSize}&offset=${casePage * casePageSize}`,
   );
+  if (selectionRequest !== caseSelectionRequest || caseSelectionLoading) return;
   if (!body.cases?.length && casePage > 0 && Number(body.total || 0) > 0) {
     casePage = Math.max(0, Math.ceil(Number(body.total) / casePageSize) - 1);
     return refreshCases(includeDetail);
@@ -1726,15 +1733,17 @@ async function refreshCases(includeDetail = false) {
   caseTotal = Number(body.total || cases.length);
   caseHasMore = Boolean(body.hasMore);
   workers = body.workers || {};
-  if (includeDetail && selectedCase) {
-    const history = caseHistoryExpanded.get(selectedCase.case_id) ? "1" : "0";
-    selectedCase = (
+  if (includeDetail && selectedCaseId) {
+    const history = caseHistoryExpanded.get(selectedCaseId) ? "1" : "0";
+    const detail = (
       await api(
-        `/api/admin/case?caseId=${encodeURIComponent(selectedCase.case_id)}&history=${history}`,
+        `/api/admin/case?caseId=${encodeURIComponent(selectedCaseId)}&history=${history}`,
       )
     ).case;
+    if (selectionRequest !== caseSelectionRequest || caseSelectionLoading) return;
+    selectedCase = detail;
   }
-  if (!caseListResizing) render();
+  if (!caseListResizing && !caseSessionSelectFocused()) render();
 }
 
 async function reloadForRuntimeRevisionChange() {
@@ -1771,7 +1780,7 @@ async function reloadForRuntimeRevisionChange() {
 }
 
 window.setInterval(() => {
-  if (activeView === "cases" && !dirty && !caseListResizing && !caseSelectionLoading) {
+  if (activeView === "cases" && !dirty && !caseListResizing && !caseSelectionLoading && !caseSessionSelectFocused()) {
     refreshCases(Boolean(selectedCase)).catch(() => {});
   }
 }, 3000);
