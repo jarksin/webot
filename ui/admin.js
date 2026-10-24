@@ -73,6 +73,7 @@ const caseListMinWidth = 240;
 const caseListMaxWidth = 520;
 const caseDetailMinWidth = 420;
 const caseResizerWidth = 8;
+const caseSessionSelectionStorageKey = "webot-case-session-selections";
 const pageRuntimeRevision =
   document.querySelector('meta[name="webot-runtime-revision"]')?.content || "";
 let runtimeUpdateNoticeRevision = "";
@@ -81,6 +82,8 @@ let restartExpectedRevision = "";
 const caseHistoryExpanded = new Map();
 const caseViewStates = new Map();
 const caseSessionSelections = new Map();
+let caseSelectionLoading = 0;
+let caseSelectionRequest = 0;
 let caseListResizing = false;
 let caseWorkspaceResizeObserver = null;
 let agentDocument = null;
@@ -110,6 +113,41 @@ let capturedQuery = "";
 const content = document.querySelector("#content");
 const notice = document.querySelector("#notice");
 const saveState = document.querySelector("#save-state");
+
+try {
+  const storedSelections = JSON.parse(
+    window.localStorage.getItem(caseSessionSelectionStorageKey) || "{}",
+  );
+  if (storedSelections && typeof storedSelections === "object") {
+    for (const [rootCaseId, targetCaseId] of Object.entries(storedSelections)) {
+      if (rootCaseId && targetCaseId) {
+        caseSessionSelections.set(rootCaseId, String(targetCaseId));
+      }
+    }
+  }
+} catch {
+  // A blocked or malformed localStorage value should not prevent the console from loading.
+}
+
+function persistCaseSessionSelections() {
+  try {
+    window.localStorage.setItem(
+      caseSessionSelectionStorageKey,
+      JSON.stringify(Object.fromEntries(caseSessionSelections)),
+    );
+  } catch {
+    // Session selection remains available for this page even when storage is unavailable.
+  }
+}
+
+function rememberCaseSessionSelection(item) {
+  const namedSession = item?.namedSession;
+  const rootCaseId = namedSession?.scopeCaseId || item?.case_id || "";
+  const targetCaseId = item?.case_id || "";
+  if (!rootCaseId || !targetCaseId) return;
+  caseSessionSelections.set(rootCaseId, targetCaseId);
+  persistCaseSessionSelections();
+}
 
 function icons() {
   createIcons({ icons: iconSet, attrs: { "stroke-width": 1.8 } });
@@ -258,6 +296,10 @@ function caseSessionTarget(item) {
   const stored = caseSessionSelections.get(rootCaseId);
   if (stored && options.some((option) => option.targetCaseId === stored && option.exists)) {
     return stored;
+  }
+  if (stored) {
+    caseSessionSelections.delete(rootCaseId);
+    persistCaseSessionSelections();
   }
   if (
     selectedCase &&
@@ -1005,6 +1047,11 @@ function renderRuntimeIdentity() {
       ((status.restart?.pending === true || restartStartedAt !== null) &&
         status.restart?.stopRunning !== false);
   }
+  const autoUpdateButton = document.querySelector("#auto-update-button");
+  if (autoUpdateButton) {
+    autoUpdateButton.disabled = status.restart?.supported !== true ||
+      status.restart?.pending === true || restartStartedAt !== null;
+  }
 }
 
 function renderHeaderControls() {
@@ -1257,6 +1304,7 @@ document.addEventListener("change", async (event) => {
     const rootCaseId = event.target.dataset.caseSession;
     const targetCaseId = event.target.value;
     caseSessionSelections.set(rootCaseId, targetCaseId);
+    persistCaseSessionSelections();
     try {
       await loadCase(targetCaseId);
     } catch (error) {
@@ -1648,12 +1696,21 @@ document.addEventListener("click", async (event) => {
 async function loadCase(caseId, options = {}) {
   if (options.preserveView !== false) captureCaseViewState();
   const history = caseHistoryExpanded.get(caseId) ? "1" : "0";
-  selectedCase = (
-    await api(
-      `/api/admin/case?caseId=${encodeURIComponent(caseId)}&history=${history}`,
-    )
-  ).case;
-  render();
+  const requestId = ++caseSelectionRequest;
+  caseSelectionLoading += 1;
+  try {
+    const detail = (
+      await api(
+        `/api/admin/case?caseId=${encodeURIComponent(caseId)}&history=${history}`,
+      )
+    ).case;
+    if (requestId !== caseSelectionRequest) return;
+    selectedCase = detail;
+    rememberCaseSessionSelection(detail);
+    render();
+  } finally {
+    caseSelectionLoading = Math.max(0, caseSelectionLoading - 1);
+  }
 }
 
 async function refreshCases(includeDetail = false) {
@@ -1714,7 +1771,7 @@ async function reloadForRuntimeRevisionChange() {
 }
 
 window.setInterval(() => {
-  if (activeView === "cases" && !dirty && !caseListResizing) {
+  if (activeView === "cases" && !dirty && !caseListResizing && !caseSelectionLoading) {
     refreshCases(Boolean(selectedCase)).catch(() => {});
   }
 }, 3000);
@@ -1758,14 +1815,20 @@ document.querySelector("#refresh-button").addEventListener("click", () => {
   load().catch((error) => showNotice(error.message, true));
 });
 
-document.querySelector("#restart-button").addEventListener("click", async () => {
+async function requestConsoleRestart(mode) {
   readCurrentForm();
   if (dirty || knowledgeDirty || agentDirty) {
-    showNotice("请先保存当前编辑，再重载 Webot", true);
+    showNotice("请先保存当前编辑，再更新重启 Webot", true);
     return;
   }
-  if (!window.confirm("停止正在运行的任务并立即重启 Webot？被停止的任务不会自动重跑，排队消息、账号、配置和聊天记录会保留。")) return;
-  const button = document.querySelector("#restart-button");
+  const stopRunning = mode === "stop_running";
+  const prompt = stopRunning
+    ? "停止正在运行的任务并立即重启 Webot？被停止的任务不会自动重跑，排队消息、账号、配置和聊天记录会保留。"
+    : "任务空闲后自动更新并重启 Webot？运行中的任务会继续完成，排队消息会保留。";
+  if (!window.confirm(prompt)) return;
+  const button = document.querySelector(
+    stopRunning ? "#restart-button" : "#auto-update-button",
+  );
   button.disabled = true;
   try {
     const body = await api("/api/admin/service/restart", {
@@ -1773,18 +1836,26 @@ document.querySelector("#restart-button").addEventListener("click", async () => 
       headers: {
         "X-Webot-Restart-Token": document.querySelector('meta[name="webot-restart-token"]').content,
       },
-      body: JSON.stringify({ confirm: true, mode: "stop_running" }),
+      body: JSON.stringify({ confirm: true, mode }),
     });
-    restartStartedAt = status.runtime.startedAt;
+    restartStartedAt = status?.runtime?.startedAt || null;
     restartExpectedRevision = body.restart.revision || "";
     status.restart.pending = true;
-    status.restart.stopRunning = true;
+    status.restart.stopRunning = stopRunning;
     showNotice(body.restart.message, !(body.restart.requested || body.restart.pending));
     renderRuntimeIdentity();
   } catch (error) {
     showNotice(`未确认重载结果：${error.message}。请刷新状态后检查，勿重复提交。`, true);
   }
-});
+}
+
+document.querySelector("#restart-button").addEventListener("click", () =>
+  requestConsoleRestart("stop_running"),
+);
+
+document.querySelector("#auto-update-button").addEventListener("click", () =>
+  requestConsoleRestart("idle"),
+);
 
 load().catch((error) => {
   document.querySelector("#service-label").textContent = "服务不可用";
