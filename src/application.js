@@ -568,6 +568,56 @@ export class WebotApplication {
     return this.caseStore.syncedMessagePage(options);
   }
 
+  async replayCapturedMessage(sourceId, messageId) {
+    if (
+      typeof sourceId !== "string" || !sourceId.trim() ||
+      typeof messageId !== "string" || !messageId.trim()
+    ) {
+      throw new Error("请指定接入账号和原消息 ID");
+    }
+    const captured = this.caseStore.syncedMessageByMessageId(sourceId, messageId);
+    if (!captured) throw new Error("捕获消息不存在或已过期");
+    if (captured.accepted === true) {
+      return { accepted: false, reason: "duplicate" };
+    }
+    const transport = captured.metadata.transport;
+    if (!["pad", "telegram"].includes(transport)) {
+      throw new Error("该消息通道不支持重放");
+    }
+    const message = {
+      ...captured.metadata,
+      sourceId: captured.source_id,
+      conversationId: captured.conversation_id,
+      messageId: captured.message_id,
+      timestamp: captured.timestamp,
+      direction: captured.direction,
+      senderId: captured.sender_id,
+      senderName: captured.sender_name,
+      chatType: captured.chat_type,
+      chatId: captured.chat_id,
+      chatName: captured.chat_name,
+      text: captured.text,
+      attachments: captured.attachments,
+      mentions: captured.mentions,
+    };
+    const source = this.config[transport].sources.find((item) => item.id === sourceId);
+    let result;
+    if (!this.config.channels.has(transport)) {
+      result = { accepted: false, reason: "channel-disabled" };
+    } else if (!source) {
+      result = { accepted: false, reason: "source-not-configured" };
+    } else if (transport === "pad" && source.selfId !== message.selfId) {
+      result = { accepted: false, reason: "source-account-changed" };
+    } else {
+      result = await this.receive(message);
+    }
+    this.caseStore.markSyncedMessageResult(message, result);
+    if (result.accepted && result.caseId) {
+      this.caseStore.addProgress(result.caseId, 0, "从 All Captured 人工重放原消息");
+    }
+    return result;
+  }
+
   directory(options) {
     return this.caseStore.directory(options);
   }

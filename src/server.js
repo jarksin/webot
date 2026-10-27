@@ -314,6 +314,24 @@ export function createServer({
         }
         if (
           request.method === "POST" &&
+          url.pathname === "/api/admin/captured/replay"
+        ) {
+          const contentType = String(request.headers["content-type"] || "")
+            .split(";")[0].trim().toLowerCase();
+          if (contentType !== "application/json") {
+            respond(response, 415, { ok: false, error: "JSON body required" });
+            return;
+          }
+          const body = JSON.parse((await readBody(request)).toString("utf8"));
+          const result = await application.replayCapturedMessage(
+            body?.sourceId,
+            body?.messageId,
+          );
+          respond(response, 200, { ok: true, ...result });
+          return;
+        }
+        if (
+          request.method === "POST" &&
           url.pathname === "/api/admin/directory/sync"
         ) {
           const body = JSON.parse((await readBody(request)).toString("utf8"));

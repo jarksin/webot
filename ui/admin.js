@@ -12,6 +12,7 @@ import {
   Plus,
   Power,
   RefreshCw,
+  RotateCcw,
   Search,
   Save,
   Send,
@@ -36,6 +37,7 @@ const iconSet = {
   Plus,
   Power,
   RefreshCw,
+  RotateCcw,
   Search,
   Save,
   Send,
@@ -109,6 +111,7 @@ let capturedSource = "";
 let capturedChatType = "";
 let capturedResult = "";
 let capturedQuery = "";
+const capturedReplaying = new Set();
 
 const content = document.querySelector("#content");
 const notice = document.querySelector("#notice");
@@ -797,7 +800,7 @@ function renderCaptured() {
       </div>
       <div class="table-wrap captured-table">
         <table>
-          <thead><tr><th>时间</th><th>账号</th><th>会话</th><th>发送者</th><th>消息</th><th>处理结果</th></tr></thead>
+          <thead><tr><th>时间</th><th>账号</th><th>会话</th><th>发送者</th><th>消息</th><th>处理结果</th><th>操作</th></tr></thead>
           <tbody>
             ${capturedMessages.map((message) => `
               <tr>
@@ -816,8 +819,14 @@ function renderCaptured() {
                   <code>${escapeHtml(message.message_id)}</code>
                 </td>
                 <td>${badge(capturedResultLabel(message), capturedResultTone(message))}</td>
+                <td class="captured-actions">
+                  <button class="button secondary icon-only compact-button" data-action="captured-replay" data-captured-id="${Number(message.id)}"
+                    title="${message.accepted === true ? "已进入 Case，请在 Case 中重新运行" : "重放消息"}" aria-label="重放消息"
+                    ${message.accepted === true || capturedReplaying.has(message.id) ? "disabled" : ""}
+                    ${capturedReplaying.has(message.id) ? 'aria-busy="true"' : ""}><i data-lucide="rotate-ccw"></i></button>
+                </td>
               </tr>
-            `).join("") || `<tr><td colspan="6"><div class="empty compact"><div>没有匹配的捕获消息</div></div></td></tr>`}
+            `).join("") || `<tr><td colspan="7"><div class="empty compact"><div>没有匹配的捕获消息</div></div></td></tr>`}
           </tbody>
         </table>
       </div>
@@ -827,6 +836,37 @@ function renderCaptured() {
         <button class="button secondary compact-button" data-action="captured-next" ${capturedHasMore ? "" : "disabled"}>下一页</button>
       </div>
     </div>`;
+}
+
+async function replayCaptured(message) {
+  if (!message || message.accepted === true || capturedReplaying.has(message.id)) return;
+  if (!confirm("按当前配置重放这条消息？通过过滤后将进入 Case，并可能自动回复到原会话。")) return;
+  capturedReplaying.add(message.id);
+  render();
+  try {
+    const result = await api("/api/admin/captured/replay", {
+      method: "POST",
+      body: JSON.stringify({
+        sourceId: message.source_id,
+        messageId: message.message_id,
+      }),
+    });
+    if (result.accepted || result.reason === "duplicate") {
+      message.accepted = true;
+      message.decision = "accepted";
+      showNotice(result.reason === "duplicate"
+        ? "消息已进入 Case，未重复处理"
+        : result.queued ? "重放成功，消息已进入处理队列" : "重放成功，消息已进入 Case");
+    } else {
+      message.accepted = false;
+      message.decision = result.reason;
+      showNotice(`重放后仍被过滤：${result.reason || "rejected"}`, true);
+    }
+    await loadCaptured();
+  } finally {
+    capturedReplaying.delete(message.id);
+    if (activeView === "captured") render();
+  }
 }
 
 async function loadCaptured() {
@@ -1415,6 +1455,9 @@ document.addEventListener("click", async (event) => {
       capturedPage += 1;
       await loadCaptured();
       render();
+    } else if (action === "captured-replay") {
+      const id = Number(event.target.closest("[data-captured-id]").dataset.capturedId);
+      await replayCaptured(capturedMessages.find((message) => message.id === id));
     } else if (action === "add-source") {
       readAccountForm();
       settings.pad.sources.push({

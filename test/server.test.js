@@ -33,6 +33,46 @@ test("local channel activation API passes a source-scoped enable command", async
   assert.equal((await response.json()).apply.mode, "controlled-idle");
 });
 
+test("local captured replay API only passes stored message identifiers", async (context) => {
+  const commands = [];
+  const application = {
+    config: loadConfig({ WEBOT_HOST: "127.0.0.1", WEBOT_PORT: "0" }),
+    startConnectors() {},
+    stopConnectors() {},
+    async replayCapturedMessage(sourceId, messageId) {
+      commands.push({ sourceId, messageId });
+      return { accepted: true, caseId: "stored-case", queued: true };
+    },
+  };
+  const server = createServer({
+    application, logger: { info() {}, warn() {}, error() {} },
+  });
+  const address = await server.start();
+  context.after(() => server.stop());
+  const url = `http://127.0.0.1:${address.port}/api/admin/captured/replay`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sourceId: "small",
+      messageId: "6415032614165678096",
+      text: "must-not-replace-stored-text",
+      senderId: "forged-owner",
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    ok: true, accepted: true, caseId: "stored-case", queued: true,
+  });
+  assert.deepEqual(commands, [{ sourceId: "small", messageId: "6415032614165678096" }]);
+  const unsafeBody = await fetch(url, {
+    method: "POST",
+    body: JSON.stringify({ sourceId: "small", messageId: "6415032614165678096" }),
+  });
+  assert.equal(unsafeBody.status, 415);
+  assert.equal(commands.length, 1);
+});
+
 test("serves health and verifies signed Hook callbacks", async () => {
   const config = loadConfig({
     WEBOT_HOST: "127.0.0.1",

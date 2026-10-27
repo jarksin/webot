@@ -361,6 +361,9 @@ textarea { min-height: 86px; resize: vertical; line-height: 1.5; }
 .captured-table td strong, .captured-table td code { display: block; }
 .captured-table td code { margin-top: 3px; color: var(--muted); font-size: 9px; }
 .captured-time { white-space: nowrap; }
+.captured-actions { width: 48px; }
+.captured-actions button { width: 30px; height: 30px; }
+.captured-actions [aria-busy="true"] svg { animation: directory-spin 1s linear infinite; }
 .captured-message { width: 38%; }
 .captured-message p { max-height: 6.3em; margin: 0; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; line-height: 1.4; }
 .captured-pagination { justify-content: center; padding-top: 8px; }

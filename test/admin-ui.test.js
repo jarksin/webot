@@ -137,6 +137,94 @@ test("captured monitor exposes all Pad messages with filters and pagination", ()
   assert.match(css, /\.captured-table/);
 });
 
+function capturedReplayContext(overrides = {}) {
+  const source = javascript.slice(
+    javascript.indexOf("async function replayCaptured("),
+    javascript.indexOf("async function loadCaptured("),
+  );
+  return vm.createContext({
+    message: { id: 1, source_id: "small", message_id: "6415032614165678096", accepted: false },
+    capturedReplaying: new Set(),
+    activeView: "captured",
+    confirms: 0,
+    requests: [],
+    notices: [],
+    renders: 0,
+    confirm() { this.confirms++; return true; },
+    render() {},
+    loadCaptured: async () => {},
+    showNotice() {},
+    ...overrides,
+    replaySource: source,
+  });
+}
+
+test("captured replay controls render at the end of each row with duplicate protection", () => {
+  assert.match(javascript, /data-action="captured-replay"/);
+  assert.match(javascript, /data-lucide="rotate-ccw"/);
+  assert.match(javascript, /data-captured-id/);
+  assert.match(javascript, /message.accepted === true \|\| capturedReplaying.has\(message.id\)/);
+  assert.match(javascript, /colspan="7"/);
+  assert.match(css, /\.captured-actions button \{ width: 30px; height: 30px;/);
+});
+
+test("captured replay confirms and posts exact IDs while blocking double clicks", async () => {
+  let finish;
+  let confirmations = 0;
+  const requests = [];
+  const notices = [];
+  const context = capturedReplayContext({
+    confirm: () => { confirmations++; return true; },
+    api: async (path, options) => {
+      requests.push({ path, body: JSON.parse(options.body) });
+      return new Promise((resolve) => { finish = resolve; });
+    },
+    showNotice: (message) => notices.push(message),
+  });
+  vm.runInContext(context.replaySource, context);
+  const pending = vm.runInContext("replayCaptured(message)", context);
+  assert.equal(context.capturedReplaying.has(1), true);
+  await vm.runInContext("replayCaptured(message)", context);
+  assert.equal(confirmations, 1);
+  assert.deepEqual(requests, [{
+    path: "/api/admin/captured/replay",
+    body: { sourceId: "small", messageId: "6415032614165678096" },
+  }]);
+  finish({ accepted: true, queued: true });
+  await pending;
+  assert.equal(context.capturedReplaying.size, 0);
+  assert.equal(context.message.accepted, true);
+  assert.match(notices[0], /处理队列/);
+});
+
+test("cancelled, accepted, filtered, and failed replay controls retain usable state", async () => {
+  for (const mode of ["cancelled", "accepted", "filtered", "failed"]) {
+    let requests = 0;
+    const notices = [];
+    const context = capturedReplayContext({
+      confirm: () => mode !== "cancelled",
+      api: async () => {
+        requests++;
+        if (mode === "failed") throw new Error("offline");
+        return { accepted: false, reason: "chat-not-allowed" };
+      },
+      showNotice: (...notice) => notices.push(notice),
+    });
+    if (mode === "accepted") context.message.accepted = true;
+    vm.runInContext(context.replaySource, context);
+    const result = vm.runInContext("replayCaptured(message)", context);
+    if (mode === "failed") await assert.rejects(result, /offline/);
+    else await result;
+    assert.equal(context.capturedReplaying.size, 0);
+    assert.equal(requests, ["cancelled", "accepted"].includes(mode) ? 0 : 1);
+    if (mode === "filtered") {
+      assert.equal(context.message.decision, "chat-not-allowed");
+      assert.match(notices[0][0], /仍被过滤/);
+      assert.equal(notices[0][1], true);
+    }
+  }
+});
+
 test("account settings expose source blacklists and a searchable ID directory", () => {
   assert.match(javascript, /屏蔽用户 wxid/);
   assert.match(javascript, /屏蔽群聊 ID/);
