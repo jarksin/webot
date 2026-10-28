@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { normalizeGroupPolicies } from "./group-policy.js";
 
 function stringList(value) {
   const items = Array.isArray(value)
@@ -123,6 +124,7 @@ export function normalizeSource(value, env, defaults) {
     botNames: new Set(stringList(value.bot_names ?? value.botNames)),
     enabled: boolean(value.enabled, true),
     strictPolicy: true,
+    groupPolicies: normalizeGroupPolicies(value.groupPolicies),
   };
 }
 

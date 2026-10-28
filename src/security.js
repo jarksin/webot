@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { telegramSourceForMessage } from "./telegram-sources.js";
+import { groupPolicyForMessage } from "./group-policy.js";
 
 export function validSignature(rawBody, header, secret) {
   if (!secret) return true;
@@ -22,6 +23,7 @@ export function requesterAccess(
   config = null,
 ) {
   if (message?.transport === "xianyu") return "public";
+  if (groupPolicyForMessage(config, message)?.supportInstructions) return "support";
   const senderId = String(message?.senderId || "").trim().toLowerCase();
   const owner = senderId && [...ownerSenderIds].some(
     (candidate) => String(candidate || "").trim().toLowerCase() === senderId,

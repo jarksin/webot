@@ -1,6 +1,7 @@
 import { sourceForMessage } from "./ingress-sources.js";
 import { telegramSourceForMessage } from "./telegram-sources.js";
 import { xianyuMessageDecision } from "./xianyu-sources.js";
+import { groupPolicyForMessage, isAcknowledgement } from "./group-policy.js";
 
 function has(set, value) {
   return value && set.has(String(value));
@@ -137,6 +138,24 @@ export function acceptedMessage(message, config) {
     ? source.triggerKeywords
     : config.policy.groupTriggers;
   const commandText = privateTriggerText(message);
+  const groupPolicy = groupPolicyForMessage(config, message);
+  const mentioned = Boolean(
+    (message.selfId && message.mentions?.includes(message.selfId)) ||
+    [...botNames].some((name) => message.text.toLowerCase().includes(`@${name.toLowerCase()}`)),
+  );
+  if (groupPolicy) {
+    if (hasCaseInsensitive(groupPolicy.ignoredSenderIds, message.senderId)) {
+      return { accepted: false, reason: "group-sender-ignored" };
+    }
+    if (hasCaseInsensitive(groupPolicy.mentionOnlySenderIds, message.senderId) && !mentioned) {
+      return { accepted: false, reason: "group-mention-required" };
+    }
+    if (groupPolicy.ignoreAcknowledgements && isAcknowledgement(
+      stripMessageTrigger(message, triggerKeywords, botNames),
+    ) && !message.attachments?.length && !message.reference) {
+      return { accepted: false, reason: "group-acknowledgement" };
+    }
+  }
   const privateBotPrefix =
     message.chatType === "private" &&
     hasBotNamePrefix(commandText, botNames);
@@ -294,7 +313,7 @@ export function acceptedMessage(message, config) {
     message.exactSelfChat === true &&
     source?.allowSelf === true &&
     source?.selfChatWithoutPrefix === true;
-  if (source?.keywordOnly && !selfChatWithoutPrefix) {
+  if (source?.keywordOnly && !selfChatWithoutPrefix && !groupPolicy?.listenAll) {
     const triggerText = message.chatType === "private"
       ? commandText
       : message.text.trim();
@@ -306,7 +325,7 @@ export function acceptedMessage(message, config) {
         ...(message.chatType === "group" ? { retainGroupContext: true } : {}),
       };
     }
-  } else if (message.chatType === "group") {
+  } else if (message.chatType === "group" && !groupPolicy?.listenAll) {
     const lowerText = message.text.toLowerCase();
     const groupTriggers = source?.triggerKeywords?.size
       ? source.triggerKeywords

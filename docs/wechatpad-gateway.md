@@ -58,3 +58,25 @@ own documentation to obtain credentials and establish the account session.
 
 Webot sends normalized messages to assistant providers. Raw gateway envelopes
 and credentials are not included in assistant prompts.
+
+## Group Support Configuration
+
+An installation can add `groupPolicies` to a Pad source, keyed by exact group
+ID. The ordinary source allowlist and blocklist still apply. Each policy supports:
+
+- `listenAll`: accept group questions without a keyword or mention.
+- `ignoredSenderIds`: never trigger a reply for these stable sender IDs.
+- `mentionOnlySenderIds`: require a mention of the source account from these senders.
+- `ignoreAcknowledgements`: ignore standalone closings such as “好的” or “谢谢”; questions and attachments still trigger.
+- `batchWindowMs`: collect messages for a fixed window after the first trigger,
+  then process all pending messages after the case cursor in one run. Messages
+  arriving during a run form the next batch. The deadline survives reloads.
+- `supportInstructions`: an owner-authored, limited support delegation. In that
+  group Codex receives `support` access, without owner commands, private knowledge
+  or local artifact delivery. State exact source/log/account boundaries in the
+  installation's private AGENTS.md and policy. Group messages cannot extend them.
+
+`assistant.additionalWorkingDirectories` lists additional repository paths for
+workers while preserving the primary working directory. Paths and group/account
+identities belong in private settings, not the repository. Directory availability
+does not grant a requester permission to read it.

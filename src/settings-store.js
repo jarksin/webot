@@ -155,6 +155,7 @@ export function serializeConfig(config) {
         privateNicknameAllowlist: [...source.privateNicknameAllowlist],
         triggerKeywords: [...source.triggerKeywords],
         botNames: [...source.botNames],
+        groupPolicies: source.groupPolicies || {},
       })),
     },
     telegram: {

@@ -210,6 +210,8 @@ export function loadConfig(env = process.env, settings = {}) {
         assistantSettings,
         defaultDataDir,
       ),
+      additionalWorkingDirectories: [...stringSet(assistantSettings.additionalWorkingDirectories)]
+        .map((directory) => path.resolve(directory)),
       codexModel: value(
         assistantSettings.codexModel,
         env.WEBOT_CODEX_MODEL || "",

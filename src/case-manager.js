@@ -8,6 +8,7 @@ import {
 } from "./control-commands.js";
 import { assistantConfigForMessage } from "./assistant-routing.js";
 import { parseAssistantResult } from "./codex-provider.js";
+import { groupPolicyForMessage } from "./group-policy.js";
 
 function acceptsOwnerIntermediateItems(message) {
   return Boolean(
@@ -118,6 +119,7 @@ export class CaseManager {
     this.active = 0;
     this.draining = false;
     this.idleDrain = null;
+    this.batchTimers = new Map();
   }
 
   paused() {
@@ -138,7 +140,7 @@ export class CaseManager {
 
   idle() {
     return this.active === 0 && this.queue.length === 0 &&
-      this.rerun.size === 0 && !this.draining;
+      this.rerun.size === 0 && this.batchTimers.size === 0 && !this.draining;
   }
 
   reserveIdle({ leaseMs = 60_000, schedule = setTimeout, cancel = clearTimeout } = {}) {
@@ -375,6 +377,11 @@ export class CaseManager {
       }
     }
     await this.sessionStore.append(ingested.caseId, "user", clean.text);
+    if (this.caseSettings().autoRun !== false &&
+        groupPolicyForMessage(this.config, clean)?.batchWindowMs > 0) {
+      this.enqueue(ingested.caseId);
+      return { accepted: true, caseId: ingested.caseId, queued: true, batched: true };
+    }
     if (this.caseSettings().autoRun !== false) {
       const activeRun = this.running.get(ingested.caseId);
       let steered = false;
@@ -470,6 +477,34 @@ export class CaseManager {
 
   enqueue(caseId, force = false) {
     if (!this.caseStore.caseRow(caseId)) throw new Error("case not found");
+    const latest = this.caseStore.latestMessage?.(caseId);
+    const windowMs = groupPolicyForMessage(this.config, latest?.message)?.batchWindowMs || 0;
+    const key = `group_batch_due:${caseId}`;
+    if (!force && windowMs > 0) {
+      let due = Number(this.caseStore.runtimeSetting(key, "0"));
+      if (!due) {
+        due = Date.now() + windowMs;
+        this.caseStore.setRuntimeSetting(key, String(due));
+      }
+      if (due > Date.now()) {
+        if (!this.batchTimers.has(caseId)) {
+          this.batchTimers.set(caseId, setTimeout(() => {
+            this.batchTimers.delete(caseId);
+            this.enqueue(caseId);
+          }, due - Date.now()));
+          this.caseStore.addProgress(caseId, 0, `等待 ${windowMs / 1000} 秒合并群消息`);
+        }
+        return { queued: true, batched: true };
+      }
+    }
+    if (this.batchTimers.has(caseId)) {
+      clearTimeout(this.batchTimers.get(caseId));
+      this.batchTimers.delete(caseId);
+    }
+    if (this.running.has(caseId) && windowMs > 0 && !force) {
+      this.rerun.add(caseId);
+      return { queued: true, batched: true };
+    }
     if (this.running.has(caseId) || this.queue.includes(caseId)) {
       return { queued: false, reason: "already-queued" };
     }
@@ -509,7 +544,7 @@ export class CaseManager {
           });
         })
         .finally(() => {
-          this.runPromises.delete(caseId);
+          if (this.runPromises.get(caseId) === operation) this.runPromises.delete(caseId);
           this.active -= 1;
           this.drain();
         });
@@ -548,6 +583,7 @@ export class CaseManager {
       if (latest) pending = [latest];
     }
     if (!pending.length) return;
+    this.caseStore.setRuntimeSetting?.(`group_batch_due:${caseId}`, "0");
     const trigger = pending[pending.length - 1];
     const previousMessage = previousSession?.last_processed_message_id
       ? this.caseStore.messageByRowId(
@@ -622,7 +658,11 @@ export class CaseManager {
     try {
       const history = await this.sessionStore.history(caseId);
       const currentText = pending
-        .map((item) => String(item.text || item.message?.text || "").trim())
+        .map((item) => {
+          const text = String(item.text || item.message?.text || "").trim();
+          return groupPolicyForMessage(this.config, item.message)?.batchWindowMs > 0
+            ? `[${item.message.senderId}] ${text}` : text;
+        })
         .filter(Boolean)
         .join("\n");
       const mediaContext = await this.hydrateTelegramMediaContext(
@@ -931,6 +971,9 @@ export class CaseManager {
   }
 
   stop(caseId) {
+    clearTimeout(this.batchTimers.get(caseId));
+    this.batchTimers.delete(caseId);
+    this.caseStore.setRuntimeSetting?.(`group_batch_due:${caseId}`, "0");
     this.queue = this.queue.filter((queuedCaseId) => queuedCaseId !== caseId);
     this.rerun.delete(caseId);
     this.forced.delete(caseId);
@@ -948,6 +991,8 @@ export class CaseManager {
   }
 
   stopAll() {
+    for (const timer of this.batchTimers.values()) clearTimeout(timer);
+    this.batchTimers.clear();
     // A discarded manager must not later resume from an old restart lease.
     this.queue = [];
     this.rerun.clear();
@@ -961,7 +1006,7 @@ export class CaseManager {
       paused: this.paused(),
       draining: this.draining,
       active: this.active,
-      queued: this.queue.length + this.rerun.size,
+      queued: new Set([...this.queue, ...this.rerun, ...this.batchTimers.keys()]).size,
       runningCaseIds: [...this.running.keys()],
       stopRunningSupported: true,
     };

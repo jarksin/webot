@@ -23,6 +23,7 @@ import { requesterAccess } from "./security.js";
 import { createSourceActivator } from "./source-activation.js";
 import { telegramGroupIngressDecision } from "./telegram-sources.js";
 import { WorkspacePolicy } from "./workspace-policy.js";
+import { groupPolicyForMessage } from "./group-policy.js";
 import { HookTransport } from "./transports/hook.js";
 import {
   PadTransport,
@@ -207,6 +208,8 @@ export class WebotApplication {
       accessForMessage,
       provider: createProvider(config.assistant, {
         requesterAccess: accessForMessage,
+        supportInstructionsForMessage: (message) =>
+          groupPolicyForMessage(config, message)?.supportInstructions || "",
         searchKnowledge: (query, context) =>
           this.knowledgeBase.search(query, context),
         readAgentPolicy: () => this.workspacePolicy.read(),
