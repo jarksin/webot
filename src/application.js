@@ -267,6 +267,8 @@ export class WebotApplication {
         this.logger,
         this.fetch,
         {
+          scheduleBusinessRequest: (sourceId, operation) =>
+            this.serializePadMediaRequest(sourceId, operation),
           resolveMentionDisplayName: (message) =>
             configuredPadMentionDisplayName(this.config, message)
             || this.caseStore.directoryDisplayName(

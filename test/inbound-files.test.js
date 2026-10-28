@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { markHydratedFile, modelFiles, readModelFiles } from "../src/inbound-files.js";
+import { markHydratedFile, modelFiles, readModelFiles, convertModelFiles, isConversationConversion } from "../src/inbound-files.js";
 import { PadTransport } from "../src/transports/pad.js";
 import { WebotApplication } from "../src/application.js";
 import { normalizePadEnvelope, padFileCDNDownloadContext } from "../src/normalize.js";
@@ -202,7 +202,7 @@ test("verified chat files expose the same metadata and complete internal paths w
   };
   assert.deepEqual(modelFiles(current), [{
     id: "file-1", filename: "SKILL(1).md", size: data.length, mime: "",
-    status: "available", readableAsText: true, messageId: "current",
+    status: "available", readableAsText: true, convertibleToMp3: false, messageId: "current",
     localPath,
   }]);
   assert.equal(modelFiles(current)[0].text, undefined);
@@ -607,4 +607,98 @@ test("native app-server completes a metadata-first file read through the same co
   assert.equal(result.text, "selected file read successfully");
   assert.equal(result.sessionId, "file-test-thread");
   assert.deepEqual(result.artifacts, []);
+});
+
+
+test("SILK conversion rejects forged references, changed files and non-SILK data", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "voice.silk");
+  await fs.writeFile(localPath, "not a SILK stream");
+  const attachment = await markHydratedFile({ kind: "file", filename: "voice.silk" }, {
+    localPath, size: (await fs.stat(localPath)).size,
+  });
+  const files = modelFiles({ ...scope, attachments: [attachment] });
+  const run = async () => { throw new Error("decoder must not run"); };
+  await assert.rejects(convertModelFiles(files, [localPath], { message: scope, run }), /unknown attachment/);
+  await assert.rejects(convertModelFiles([{ id: "file-1", localPath }], ["file-1"], { run }), /unknown attachment/);
+  assert.equal((await convertModelFiles(files, ["file-1"], { run })).results[0].status, "invalid_silk_header");
+  await fs.unlink(localPath);
+  await fs.symlink(path.join(directory, "missing"), localPath);
+  assert.equal((await convertModelFiles(files, ["file-1"], { run })).results[0].status, "conversion_failed");
+});
+
+test("public SILK tool returns only its own conversation-scoped MP3 and hides internal tool turns", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "voice.silk");
+  const silk = Buffer.from("\x02#!SILK_V3fixture");
+  await fs.writeFile(localPath, silk);
+  const attachment = await markHydratedFile({ kind: "file", filename: "voice.silk" }, {
+    localPath, size: silk.length,
+  });
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  let turns = 0;
+  let intermediate = 0;
+  const message = { ...scope, text: "convert my SILK to MP3", attachments: [attachment] };
+  const provider = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+    requesterAccess: () => "public",
+    convertModelFiles: (files, ids, options) => convertModelFiles(files, ids, {
+      ...options,
+      run: async (_command, args) => {
+        const destination = args.at(-1);
+        await fs.writeFile(destination, destination.endsWith(".pcm") ? Buffer.alloc(48000) : "test mp3");
+      },
+    }),
+    runCodex: async (_config, request) => {
+      turns++;
+      if (turns === 1) {
+        assert.match(request.prompt, /convert_audio/);
+        assert.match(request.prompt, /"convertibleToMp3":true/);
+        await request.onItem?.({ text: '{"convert_audio":["file-1"]}' });
+        return { text: '{"convert_audio":["file-1"]}', sessionId: "audio-session" };
+      }
+      assert.match(request.prompt, /"status":"converted"/);
+      assert.doesNotMatch(request.prompt, /audio\.pcm|converted-/);
+      return { text: '{"reply_text":"Converted; MP3 attached.","attachments":[]}' };
+    },
+  });
+  const result = await provider.reply({ caseId: "audio", message, history: [], onItem: () => intermediate++ });
+  assert.equal(turns, 2);
+  assert.equal(intermediate, 0);
+  assert.equal(result.artifacts.length, 1);
+  const artifact = result.artifacts[0];
+  assert.equal(artifact.filename, "voice.mp3");
+  assert.equal(isConversationConversion(artifact, message), true);
+  assert.equal(isConversationConversion({ ...artifact }, message), false);
+  assert.equal(isConversationConversion(artifact, { ...message, chatId: "another" }), false);
+  assert.equal((await fs.stat(artifact.path)).mode & 0o777, 0o600);
+  const store = new CaseStore(path.join(directory, "delivery.sqlite"));
+  t.after(() => store.close());
+  const config = loadConfig({ WEBOT_DATA_DIR: directory }, {
+    channels: ["pad"], pad: { sources: [{
+      id: "source", apiUrl: "http://pad.invalid/api", selfId: "self",
+      allowedChatIds: ["friend"], allowedSenderIds: ["friend"],
+    }] },
+    caseManagement: { autoRun: true, autoSend: true, workerConcurrency: 1 },
+  });
+  const delivered = [];
+  const manager = new CaseManager({
+    config, caseStore: store,
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 10),
+    requesterAccess: () => "public",
+    transports: { pad: {
+      sendArtifact: async (_message, item) => { delivered.push(item); return { ok: true }; },
+      send: async () => ({ ok: true }),
+    } },
+    provider: { reply: async () => ({ ...result, artifacts: [artifact, { ...artifact }] }) },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+  await manager.receive({ ...message, messageId: "convert", timestamp: Date.now() });
+  const deadline = Date.now() + 3000;
+  while (manager.status().active && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(manager.status().active, 0);
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].path, artifact.path);
 });

@@ -314,3 +314,20 @@ Run `npm run privacy-check` before publishing. Bind administration and gateway
 APIs to loopback or a trusted private network, use explicit allowlists and
 callback secrets, and back up the private data directory before operational
 changes.
+
+
+### SILK attachment conversion
+
+All requesters can ask to convert their conversation's cached `.silk` file to
+MP3. The assistant uses `{"convert_audio":["file-1"]}` with framework-verified
+attachment IDs. The framework validates the unchanged input and SILK header,
+decodes with `pilk`, encodes with FFmpeg, and attaches only that conversation's
+generated MP3. Public requesters cannot supply paths or send arbitrary local
+files. Conversion is bounded to six files per turn, 5 MiB per input/output,
+16 MiB of decoded PCM, and 60 seconds per subprocess. Failed conversions return
+an explicit tool status without exposing paths or decoder logs.
+
+Install `pilk` in the service's Python environment and FFmpeg with `libmp3lame`.
+Optional `WEBOT_AUDIO_PYTHON` and `WEBOT_FFMPEG` environment variables select the
+installed executables; defaults are `python3` and `ffmpeg`. Missing decoders are
+reported as `decoder_unavailable`. Outputs stay in the private media cache.

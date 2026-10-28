@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isConversationConversion } from "./inbound-files.js";
 import { markHydratedImage } from "./inbound-images.js";
 import { acceptedMessage } from "./runtime.js";
 import {
@@ -744,8 +745,8 @@ export class CaseManager {
       const reply = String(result?.text || "").trim();
       const owner = this.requesterAccess(trigger.message) === "owner" &&
         !groupPolicyForMessage(this.config, trigger.message)?.supportInstructions;
-      const artifacts = owner && Array.isArray(result?.artifacts)
-        ? result.artifacts
+      const artifacts = Array.isArray(result?.artifacts)
+        ? result.artifacts.filter((artifact) => owner || isConversationConversion(artifact, trigger.message))
         : [];
       const explicitNoReply =
         result?.noReply === true &&
@@ -754,7 +755,7 @@ export class CaseManager {
       if (!reply && !explicitNoReply) {
         throw new Error("assistant returned no text");
       }
-      if (!owner && result?.artifacts?.length) {
+      if (!owner && result?.artifacts?.length > artifacts.length) {
         this.caseStore.addProgress(
           caseId,
           session.run_count,

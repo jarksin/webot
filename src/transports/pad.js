@@ -402,6 +402,7 @@ export class PadTransport {
     this.outboundMode = outboundMode;
     this.logger = logger;
     this.fetch = fetchImpl;
+    this.scheduleBusinessRequest = options.scheduleBusinessRequest;
     this.resolveMentionDisplayName =
       typeof options.resolveMentionDisplayName === "function"
         ? options.resolveMentionDisplayName
@@ -422,6 +423,10 @@ export class PadTransport {
 
   async request(path, body, message = {}, options = {}) {
     const source = this.source(message);
+    if (this.outboundMode === "live" && this.scheduleBusinessRequest && !options.scheduled) {
+      return this.scheduleBusinessRequest(source.id, () =>
+        this.request(path, body, message, { ...options, scheduled: true }));
+    }
     if (this.outboundMode !== "live") {
       this.logger.info("pad outbound dry-run", {
         path,

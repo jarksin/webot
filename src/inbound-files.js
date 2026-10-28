@@ -2,6 +2,17 @@ import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const runFile = promisify(execFile);
+const convertedArtifacts = new WeakMap();
+
+export function isConversationConversion(artifact, message) {
+  const scope = convertedArtifacts.get(artifact);
+  return Boolean(scope && scope.transport && scope.sourceId && scope.chatId && scope.transport === message?.transport &&
+    scope.sourceId === message?.sourceId && scope.chatId === message?.chatId);
+}
 
 const hydratedFiles = new WeakMap();
 const fileReferences = new WeakMap();
@@ -95,6 +106,7 @@ export function modelFiles(message, mediaContext = [], existingFiles = []) {
         mime: verified.mime,
         status: "available",
         readableAsText: verified.readableAsText,
+        convertibleToMp3: path.extname(verified.filename).toLowerCase() === ".silk",
         messageId: String(current.messageId || ""),
         localPath: verified.path,
       };
@@ -113,6 +125,89 @@ export function modelFiles(message, mediaContext = [], existingFiles = []) {
     ) add(prior);
   }
   return files;
+}
+
+// Only framework-created references can reach the decoder. Models never supply paths,
+// commands, codec flags, or output destinations. Outputs are fresh, private files.
+export async function convertModelFiles(files, ids, { message, signal, run = runFile } = {}) {
+  if (!Array.isArray(ids) || !ids.length || ids.length > MAX_MODEL_FILES ||
+      new Set(ids).size !== ids.length) throw new Error("invalid audio conversion request");
+  const selected = ids.map((id) => {
+    const reference = files.find((file) => file.id === id);
+    const verified = reference && fileReferences.get(reference);
+    if (!verified) throw new Error("unknown attachment reference");
+    return { reference, verified };
+  });
+  const results = [];
+  const artifacts = [];
+  for (const { reference, verified } of selected) {
+    const result = { id: reference.id, filename: verified.filename };
+    results.push(result);
+    if (path.extname(verified.filename).toLowerCase() !== ".silk") {
+      result.status = "unsupported_format";
+      continue;
+    }
+    if (verified.size > 5 * 1024 * 1024) {
+      result.status = "file_too_large";
+      continue;
+    }
+    let handle;
+    let directory;
+    try {
+      handle = await fs.open(verified.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const info = await handle.stat();
+      if (!info.isFile() || info.size !== verified.size || info.dev !== verified.dev ||
+          info.ino !== verified.ino || info.mtimeMs !== verified.mtimeMs) {
+        throw new Error("cached attachment changed");
+      }
+      const data = await handle.readFile();
+      const header = data[0] === 2 ? data.subarray(1, 10) : data.subarray(0, 9);
+      if (header.toString("ascii") !== "#!SILK_V3") {
+        result.status = "invalid_silk_header";
+        continue;
+      }
+      directory = await fs.mkdtemp(path.join(path.dirname(verified.path), "converted-"));
+      await fs.chmod(directory, 0o700);
+      const input = path.join(directory, "input.silk");
+      const pcm = path.join(directory, "audio.pcm");
+      const output = path.join(directory, "audio.mp3");
+      await fs.writeFile(input, data, { mode: 0o600 });
+      const options = { timeout: 60_000, maxBuffer: 64 * 1024, signal };
+      await run(process.env.WEBOT_AUDIO_PYTHON || "python3", ["-c",
+        "import resource,sys,pilk; resource.setrlimit(resource.RLIMIT_FSIZE,(16777216,16777216)); pilk.decode(sys.argv[1],sys.argv[2],24000)",
+        input, pcm], options);
+      const decoded = await fs.stat(pcm);
+      if (!decoded.size || decoded.size > 16 * 1024 * 1024) throw new Error("invalid PCM size");
+      await run(process.env.WEBOT_FFMPEG || "ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error",
+        "-f", "s16le", "-ar", "24000", "-ac", "1", "-i", pcm,
+        "-c:a", "libmp3lame", "-q:a", "4", output], options);
+      const encoded = await fs.stat(output);
+      if (!encoded.isFile() || !encoded.size || encoded.size > 5 * 1024 * 1024) {
+        throw new Error("invalid MP3 size");
+      }
+      await fs.chmod(output, 0o600);
+      const artifact = { path: output,
+        filename: `${path.basename(verified.filename, path.extname(verified.filename))}.mp3`,
+        kind: "file", mime: "audio/mpeg" };
+      convertedArtifacts.set(artifact, {
+        transport: message?.transport, sourceId: message?.sourceId, chatId: message?.chatId,
+      });
+      artifacts.push(artifact);
+      Object.assign(result, { status: "converted", outputFilename: artifact.filename,
+        durationSeconds: decoded.size / 48000, size: encoded.size,
+        delivery: "Framework will attach this MP3 to your final reply automatically." });
+      await fs.rm(input, { force: true });
+      await fs.rm(pcm, { force: true });
+    } catch (error) {
+      if (directory) await fs.rm(directory, { recursive: true, force: true });
+      if (signal?.aborted) throw error;
+      result.status = error.code === "ENOENT" || /No module named/.test(String(error.stderr))
+        ? "decoder_unavailable" : "conversion_failed";
+    } finally {
+      await handle?.close();
+    }
+  }
+  return { results, artifacts };
 }
 
 export async function readModelFiles(files, ids, {
