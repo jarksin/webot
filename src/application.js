@@ -37,6 +37,8 @@ import { WEBOT_VERSION } from "./version.js";
 import { XianyuTransport } from "./transports/xianyu.js";
 
 const DIRECTORY_DETAIL_BATCH_SIZE = 20;
+// A cold gateway contact page also resolves names and can take tens of seconds.
+const DIRECTORY_REQUEST_TIMEOUT_MS = 180_000;
 const PAD_BUSINESS_REQUEST_GAP_MS = 10_000;
 const DIRECTORY_MAX_LIST_PAGES = 20;
 
@@ -650,7 +652,7 @@ export class WebotApplication {
               "X-Access-Token": source.accessToken,
             },
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(15_000),
+            signal: AbortSignal.timeout(DIRECTORY_REQUEST_TIMEOUT_MS),
           },
         );
         const responseBody = await response.json();
