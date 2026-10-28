@@ -81,6 +81,56 @@ test("fixed ten second batches retain all pending messages and advance the curso
   assert.equal(store.workerSession(first.caseId).last_processed_message_id, 3);
 });
 
+test("mention-only contributors are retained only in allowed groups", () => {
+  const c = config();
+  const retained = acceptedMessage(message("note", "参数补充", { senderId: "owner" }), c);
+  assert.equal(retained.accepted, false);
+  assert.equal(retained.retainGroupContext, true);
+  c.pad.sources[0].groupPolicies.outside = c.pad.sources[0].groupPolicies.room;
+  const denied = acceptedMessage(message("outside", "私有消息", {
+    senderId: "owner", chatId: "outside", conversationId: "group:small:outside",
+  }), c);
+  assert.equal(denied.accepted, false);
+  assert.notEqual(denied.retainGroupContext, true);
+  c.policy.blockedSenderIds.add("owner");
+  assert.notEqual(acceptedMessage(message("blocked", "消息", { senderId: "owner" }), c).retainGroupContext, true);
+});
+
+test("a group batch includes other users and later non-triggering supplements without starting another reply", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-supplement-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const calls = [];
+  const manager = new CaseManager({
+    config: config(), caseStore: store,
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 12),
+    provider: { async reply(request) { calls.push(request); return { text: "answer" }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  const first = await manager.receive(message("question", "scene 怎么取", { senderId: "alice" }));
+  t.mock.timers.tick(4000);
+  await manager.receive(message("other-user", "补充：搜索返回没有来源字段", { senderId: "bob" }));
+  t.mock.timers.tick(5000);
+  const supplement = await manager.receive(message("owner-note", "补充：这是手机号搜索", { senderId: "owner" }));
+  assert.equal(supplement.accepted, false);
+  assert.equal(supplement.contextStored, true);
+  store.ingestGroupContext(message("other-room", "unrelated room", {
+    chatId: "elsewhere", conversationId: "group:small:elsewhere",
+  }));
+  store.ingestGroupContext(message("other-source", "unrelated source", { sourceId: "other" }));
+  t.mock.timers.tick(1000);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].currentMessageCount, 2);
+  assert.match(calls[0].message.text, /\[alice\] scene 怎么取[\s\S]*\[bob\] 补充/);
+  assert.deepEqual(calls[0].conversationContext.map((entry) => [entry.sender_id, entry.text]), [
+    ["owner", "补充：这是手机号搜索"],
+  ]);
+  assert.equal(store.workerSession(first.caseId).last_processed_message_id, 2);
+  assert.equal(manager.idle(), true);
+});
+
 test("support scope is trusted configuration and does not expose owner knowledge or owner identity", async () => {
   let request;
   const provider = createCodexProvider({ codexBin: process.execPath, additionalWorkingDirectories: ["/tmp/support-source"] }, {

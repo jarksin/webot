@@ -1225,10 +1225,19 @@ export class CaseStore {
       WHERE source_id=? AND message_id=?
       LIMIT 1
     `);
-    const upper = position.get(sourceId, String(message.messageId)) || {
+    let upper = position.get(sourceId, String(message.messageId)) || {
       id: Number.MAX_SAFE_INTEGER,
       timestamp: Number(message.timestamp || now()),
     };
+    if (options.includeLaterObserved) {
+      const latest = this.db.prepare(`
+        SELECT id, timestamp FROM group_context_messages
+        WHERE source_id=? AND conversation_id=?
+        ORDER BY timestamp DESC, id DESC LIMIT 1
+      `).get(sourceId, conversationId);
+      // Include supplements observed during the batch window after its trigger.
+      if (latest) upper = { timestamp: latest.timestamp, id: latest.id + 1 };
+    }
     const after = options.afterMessageId
       ? position.get(sourceId, String(options.afterMessageId))
       : null;

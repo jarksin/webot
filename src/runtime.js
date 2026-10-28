@@ -147,9 +147,6 @@ export function acceptedMessage(message, config) {
     if (hasCaseInsensitive(groupPolicy.ignoredSenderIds, message.senderId)) {
       return { accepted: false, reason: "group-sender-ignored" };
     }
-    if (hasCaseInsensitive(groupPolicy.mentionOnlySenderIds, message.senderId) && !mentioned) {
-      return { accepted: false, reason: "group-mention-required" };
-    }
     if (groupPolicy.ignoreAcknowledgements && isAcknowledgement(
       stripMessageTrigger(message, triggerKeywords, botNames),
     ) && !message.attachments?.length && !message.reference) {
@@ -305,6 +302,17 @@ export function acceptedMessage(message, config) {
     !has(config.policy.allowedSenderIds, message.senderId)
   ) {
     return { accepted: false, reason: "sender-not-allowed" };
+  }
+
+  // Retain non-triggering contributions only after source/chat access checks.
+  if (groupPolicy &&
+      hasCaseInsensitive(groupPolicy.mentionOnlySenderIds, message.senderId) &&
+      !mentioned) {
+    return {
+      accepted: false,
+      reason: "group-mention-required",
+      retainGroupContext: true,
+    };
   }
 
   const selfChatWithoutPrefix =
