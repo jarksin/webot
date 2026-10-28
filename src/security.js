@@ -23,12 +23,12 @@ export function requesterAccess(
   config = null,
 ) {
   if (message?.transport === "xianyu") return "public";
-  if (groupPolicyForMessage(config, message)?.supportInstructions) return "support";
   const senderId = String(message?.senderId || "").trim().toLowerCase();
   const owner = senderId && [...ownerSenderIds].some(
     (candidate) => String(candidate || "").trim().toLowerCase() === senderId,
   );
   if (owner) return "owner";
+  if (groupPolicyForMessage(config, message)?.supportInstructions) return "support";
   if (
     config &&
     message?.transport === "telegram" &&

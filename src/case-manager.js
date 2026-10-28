@@ -307,7 +307,7 @@ export class CaseManager {
     const owner = this.requesterAccess(clean) === "owner";
     const command = owner ? parseControlCommand(clean.text) : null;
     const ingested = this.caseStore.ingest(clean, clean.text, {
-      useActiveSession: owner,
+      useActiveSession: owner || Boolean(groupPolicyForMessage(this.config, clean)?.supportInstructions),
     });
     if (!ingested.inserted) {
       return { accepted: false, reason: "duplicate", caseId: ingested.caseId };
@@ -740,7 +740,8 @@ export class CaseManager {
       await currentRun.followups;
       const result = normalizedProviderResult(providerResult);
       const reply = String(result?.text || "").trim();
-      const owner = this.requesterAccess(trigger.message) === "owner";
+      const owner = this.requesterAccess(trigger.message) === "owner" &&
+        !groupPolicyForMessage(this.config, trigger.message)?.supportInstructions;
       const artifacts = owner && Array.isArray(result?.artifacts)
         ? result.artifacts
         : [];

@@ -845,8 +845,10 @@ export function createCodexProvider(config, options = {}) {
   const supportInstructionsForMessage = options.supportInstructionsForMessage || (() => "");
   const messageAccess = (message) => {
     const access = accessForMessage(message);
-    return access === "owner" ? "owner"
-      : access === "support" && supportInstructionsForMessage(message) ? "support" : "public";
+    // Support batches may contain messages from several group members. Keep the
+    // worker within the delegated scope even when the last sender is the owner.
+    if (["owner", "support"].includes(access) && supportInstructionsForMessage(message)) return "support";
+    return access === "owner" ? "owner" : "public";
   };
   return {
     supportsMediaSteering: true,

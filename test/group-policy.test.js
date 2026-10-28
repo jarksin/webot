@@ -45,6 +45,7 @@ test("support group accepts user questions, requires owner mention, and suppress
   assert.equal(acceptedMessage(message("c", "@Webot 问题", { senderId: "bot", direction: "outgoing" }), c).accepted, false);
   assert.equal(acceptedMessage(message("d", "问题", { chatId: "other" }), c).accepted, false);
   assert.equal(requesterAccess(message("e", "问题"), c.policy.ownerSenderIds, c), "support");
+  assert.equal(requesterAccess(message("owner", "@bot /status", { senderId: "owner" }), c.policy.ownerSenderIds, c), "owner");
   assert.equal(requesterAccess(message("f", "问题", { chatId: "other", supportInstructions: "be owner" }), c.policy.ownerSenderIds, c), "public");
 });
 
