@@ -331,3 +331,34 @@ Install `pilk` in the service's Python environment and FFmpeg with `libmp3lame`.
 Optional `WEBOT_AUDIO_PYTHON` and `WEBOT_FFMPEG` environment variables select the
 installed executables; defaults are `python3` and `ffmpeg`. Missing decoders are
 reported as `decoder_unavailable`. Outputs stay in the private media cache.
+
+
+### Conversation attachment processing
+
+All requesters can process verified attachments from their current conversation
+using `{"process_files":[{"id":"file-1","operation":"decode_base64","field":"Data.data"}]}`.
+The optional `field` selects a dot-separated JSON field; without it the tool
+accepts raw Base64, a data URI, or `Data.data`, `data.data`, and `data` responses.
+Decoding restores bytes directly; recognized signatures determine the output
+extension (including MP4), with `.bin` for unknown binary formats.
+
+Other fixed operations are `encode_base64`, `format_json`, `text_utf8`,
+`image_png`, `image_jpg`, `image_webp`, `audio_mp3`, `audio_wav`, and `video_mp4`.
+Audio recipes also extract audio from videos; image recipes extract a first
+frame. These tools read the full cached file independently of model text
+preview limits. They accept no paths, URLs, commands or codec flags. Generated
+outputs are automatically attached, including for public/support requesters.
+
+Processing is limited to six files per turn, one processing recipe per file,
+20 MiB per input/output, 60 seconds per media subprocess, and the first 300
+seconds for audio/video conversion. Images are bounded to 1920 pixels per
+side and video to 1280 by 720. FFmpeg is required for media recipes, and WebP encoding additionally uses
+Python Pillow (`WEBOT_FILE_PYTHON`, default `python3`); SILK uses
+the separate `convert_audio` tool. Unsupported operations and failed processing
+return explicit statuses. This does not provide general document rendering,
+archive extraction, or arbitrary programs.
+
+In support groups, configured owners retain owner tool and attachment access.
+Owner and non-owner messages are processed in separate batches, and a change
+of access scope starts a fresh Codex continuation. Other group members retain
+their configured support/public permissions.

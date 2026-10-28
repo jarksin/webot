@@ -1,5 +1,5 @@
 import path from "node:path";
-import { markHydratedImage, MAX_MODEL_IMAGES } from "./inbound-images.js";
+import { MAX_MODEL_IMAGES } from "./inbound-images.js";
 import { markHydratedFile, MAX_MODEL_FILES } from "./inbound-files.js";
 import { CaseManager } from "./case-manager.js";
 import { CaseStore } from "./case-store.js";
@@ -513,9 +513,7 @@ export class WebotApplication {
           this.config.dataDir,
           { request: (operation) => this.serializePadMediaRequest(message.sourceId, operation) },
         );
-        attachments[index] = isBinary
-          ? await markHydratedFile(attachment, cached)
-          : markHydratedImage(attachment, cached);
+        attachments[index] = await markHydratedFile(attachment, cached);
       } catch (error) {
         attachments[index] = {
           ...attachment,

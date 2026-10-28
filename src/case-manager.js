@@ -585,6 +585,14 @@ export class CaseManager {
     }
     if (!pending.length) return;
     this.caseStore.setRuntimeSetting?.(`group_batch_due:${caseId}`, "0");
+    // Never mix an owner's instructions with support/public requests under the
+    // last sender's authority. Process contiguous access scopes in arrival order.
+    const access = this.requesterAccess(pending[0].message);
+    const boundary = pending.findIndex((entry) => this.requesterAccess(entry.message) !== access);
+    if (boundary > 0) {
+      pending = pending.slice(0, boundary);
+      this.rerun.add(caseId);
+    }
     const trigger = pending[pending.length - 1];
     const previousMessage = previousSession?.last_processed_message_id
       ? this.caseStore.messageByRowId(
@@ -697,7 +705,8 @@ export class CaseManager {
       this.caseStore.addProgress(caseId, session.run_count, "正在生成 draft");
       const providerRequest = {
         caseId,
-        codexSessionId: session.codex_session_id || "",
+        codexSessionId: previousMessage && this.requesterAccess(previousMessage.message) !== access
+          ? "" : session.codex_session_id || "",
         message: currentMessage,
         history,
         conversationContext,
@@ -743,8 +752,7 @@ export class CaseManager {
       await currentRun.followups;
       const result = normalizedProviderResult(providerResult);
       const reply = String(result?.text || "").trim();
-      const owner = this.requesterAccess(trigger.message) === "owner" &&
-        !groupPolicyForMessage(this.config, trigger.message)?.supportInstructions;
+      const owner = this.requesterAccess(trigger.message) === "owner";
       const artifacts = Array.isArray(result?.artifacts)
         ? result.artifacts.filter((artifact) => owner || isConversationConversion(artifact, trigger.message))
         : [];

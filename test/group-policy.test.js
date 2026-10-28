@@ -186,3 +186,45 @@ test("reload preserves the batch deadline and running workers leave later messag
   assert.equal(calls[1].message.text, "[user] next");
   assert.equal(store.workerSession(received.caseId).last_processed_message_id, 2);
 });
+
+test("owner keeps full tool access in a support group", async () => {
+  let request;
+  const provider = createCodexProvider({ codexBin: process.execPath }, {
+    requesterAccess: () => "owner",
+    supportInstructionsForMessage: () => "Read-only diagnostics for ordinary group members.",
+    searchKnowledge: async (_, context) => { assert.equal(context.access, "owner"); return []; },
+    runCodex: async (_, input) => { request = input; return { text: '{"reply_text":"done","attachments":[]}' }; },
+  });
+  await provider.reply({ caseId: "case", message: message("owner", "@bot convert the file", { senderId: "owner" }), history: [] });
+  assert.match(request.prompt, /Access level: owner/);
+  assert.doesNotMatch(request.instancePolicy, /Trusted installation support delegation/);
+});
+
+test("mixed owner and support requests run separately and do not reuse privileged continuations", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-access-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const c = config();
+  const calls = [];
+  const manager = new CaseManager({
+    config: c, caseStore: store,
+    requesterAccess: (m) => requesterAccess(m, c.policy.ownerSenderIds, c),
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 12),
+    provider: { async reply(request) { calls.push(request); return { text: "answer", sessionId: "session-" + calls.length }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  await manager.receive(message("1", "support request"));
+  await manager.receive(message("2", "owner request", { senderId: "owner", mentions: ["bot"] }));
+  await manager.receive(message("3", "another support request"));
+  for (let i = 0; i < 3; i++) {
+    t.mock.timers.tick(10000);
+    await Promise.all(manager.runPromises.values());
+  }
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map((r) => [r.message.senderId, r.currentMessageCount, r.codexSessionId]), [
+    ["user", 1, ""], ["owner", 1, ""], ["user", 1, ""],
+  ]);
+  assert.equal(calls[0].message.text.includes("owner request"), false);
+  assert.equal(manager.idle(), true);
+});

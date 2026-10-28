@@ -41,6 +41,9 @@ in the local Webot data directory and must never be committed.
   control interface and check the result; do not treat the worker's own
   process-restart restriction as a ban on cross-service operations.
 - Other requesters receive public information and general assistance only.
+  Owner-authorized framework attachment tools may process verified files from
+  their own conversation and return their generated outputs without granting
+  arbitrary filesystem, shell, or service access.
 - Read current state before any write and preserve a rollback path.
 - Require explicit confirmation for high-impact or irreversible operations.
 - Never disclose credentials, access tokens, cookies, signing material, or

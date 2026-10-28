@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { markHydratedFile, modelFiles, readModelFiles, convertModelFiles, isConversationConversion } from "../src/inbound-files.js";
+import { markHydratedFile, modelFiles, readModelFiles, convertModelFiles, isConversationConversion, processModelFiles, ATTACHMENT_OPERATIONS } from "../src/inbound-files.js";
 import { PadTransport } from "../src/transports/pad.js";
 import { WebotApplication } from "../src/application.js";
 import { normalizePadEnvelope, padFileCDNDownloadContext } from "../src/normalize.js";
@@ -202,7 +202,7 @@ test("verified chat files expose the same metadata and complete internal paths w
   };
   assert.deepEqual(modelFiles(current), [{
     id: "file-1", filename: "SKILL(1).md", size: data.length, mime: "",
-    status: "available", readableAsText: true, convertibleToMp3: false, messageId: "current",
+    status: "available", readableAsText: true, convertibleToMp3: false, processingOperations: ATTACHMENT_OPERATIONS, messageId: "current",
     localPath,
   }]);
   assert.equal(modelFiles(current)[0].text, undefined);
@@ -701,4 +701,93 @@ test("public SILK tool returns only its own conversation-scoped MP3 and hides in
   assert.equal(manager.status().active, 0);
   assert.equal(delivered.length, 1);
   assert.equal(delivered[0].path, artifact.path);
+});
+
+test("attachment processing decodes the complete JSON payload and preserves scoped delivery", async (t) => {
+  const directory = await temporary(t);
+  const video = Buffer.concat([Buffer.from([0,0,0,24]), Buffer.from("ftypmp42"), Buffer.alloc(150000, 7)]);
+  const content = Buffer.from(JSON.stringify({ Data: { data: video.toString("base64") } }));
+  const localPath = path.join(directory, "response.txt");
+  await fs.writeFile(localPath, content);
+  const attachment = await markHydratedFile({ kind: "file", filename: "response.txt" }, { localPath, size: content.length });
+  const message = { ...scope, text: "Convert to video", attachments: [attachment] };
+  const files = modelFiles(message);
+  assert.equal((await readModelFiles(files, ["file-1"]))[0].truncated, true);
+  let turns = 0;
+  const provider = createCodexProvider({ codexBin: process.execPath }, {
+    requesterAccess: () => "support", supportInstructionsForMessage: () => "Read-only service diagnostics.",
+    runCodex: async (_config, request) => {
+      if (++turns === 1) {
+        assert.match(request.prompt, /process_files/);
+        await request.onItem?.({ text: '{"process_files":[{"id":"file-1","operation":"decode_base64","field":"Data.data"}]}' });
+        return { text: '{"process_files":[{"id":"file-1","operation":"decode_base64","field":"Data.data"}]}', sessionId: "test" };
+      }
+      assert.match(request.prompt, /"status":"converted"/);
+      assert.doesNotMatch(request.prompt, /processed-/);
+      return { text: '{"reply_text":"Video file attached","attachments":[]}' };
+    },
+  });
+  let exposed = 0;
+  const result = await provider.reply({ caseId: "convert", message, history: [], onItem: () => exposed++ });
+  assert.equal(turns, 2);
+  assert.equal(exposed, 0);
+  assert.equal(result.artifacts.length, 1);
+  const artifact = result.artifacts[0];
+  assert.equal(artifact.filename, "response.mp4");
+  assert.deepEqual(await fs.readFile(artifact.path), video);
+  assert.equal(isConversationConversion(artifact, message), true);
+  assert.equal(isConversationConversion(artifact, { ...message, sourceId: "other" }), false);
+  assert.equal(isConversationConversion({ ...artifact }, message), false);
+  assert.equal((await fs.stat(artifact.path)).mode & 0o777, 0o600);
+});
+
+test("attachment processing rejects commands, forged or changed files, invalid data and oversized input", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "data.txt");
+  await fs.writeFile(localPath, "not base64!!");
+  const attachment = await markHydratedFile({ kind: "file", filename: "data.txt" }, { localPath, size: 12 });
+  const files = modelFiles({ ...scope, attachments: [attachment] });
+  const request = { id: "file-1", operation: "decode_base64" };
+  assert.equal((await processModelFiles(files, [request])).results[0].status, "processing_failed");
+  await assert.rejects(processModelFiles([{ ...files[0] }], [request]), /unknown attachment/);
+  await assert.rejects(processModelFiles(files, [{ ...request, command: "id" }]), /invalid attachment/);
+  await assert.rejects(processModelFiles(files, [{ ...request, operation: "shell" }]), /invalid attachment/);
+  await assert.rejects(processModelFiles(files, [{ ...request, field: "../../secret" }]), /invalid attachment/);
+  await assert.rejects(processModelFiles(files, [request, request]), /invalid attachment/);
+  await fs.unlink(localPath);
+  await fs.symlink(path.join(directory, "missing"), localPath);
+  assert.equal((await processModelFiles(files, [request])).results[0].status, "processing_failed");
+  const big = path.join(directory, "big.txt");
+  await fs.writeFile(big, "");
+  await fs.truncate(big, 21 * 1024 * 1024);
+  const large = await markHydratedFile({ kind: "file", filename: "big.txt" }, { localPath: big, size: 21 * 1024 * 1024 });
+  const refs = modelFiles({ ...scope, attachments: [large] });
+  assert.equal((await processModelFiles(refs, [request])).results[0].status, "file_too_large");
+});
+
+test("media processing passes only fixed local recipes and cleans failed subprocess outputs", async (t) => {
+  const directory = await temporary(t);
+  const localPath = path.join(directory, "image.png");
+  const png = Buffer.from([137,80,78,71,13,10,26,10,0]);
+  await fs.writeFile(localPath, png);
+  const attachment = await markHydratedFile({ kind: "image", filename: "image.png" }, { localPath, size: png.length });
+  const files = modelFiles({ ...scope, attachments: [attachment] });
+  let destination;
+  const converted = await processModelFiles(files, [{ id: "file-1", operation: "image_jpg" }], {
+    message: scope, run: async (_bin, args, options) => {
+      assert.equal(args[args.indexOf("-protocol_whitelist") + 1], "file,pipe");
+      assert.equal(args[args.indexOf("-f") + 1], "png_pipe");
+      assert.equal(options.timeout, 60000);
+      destination = args.at(-1);
+      await fs.writeFile(destination, Buffer.from([255,216,255,0]));
+    },
+  });
+  assert.equal(converted.results[0].status, "converted");
+  assert.equal(converted.artifacts[0].filename, "image.jpg");
+  const failed = await processModelFiles(files, [{ id: "file-1", operation: "image_jpg" }], {
+    run: async (_bin, args) => { destination = args.at(-1); throw new Error("private decoder log"); },
+  });
+  assert.equal(failed.results[0].status, "processing_failed");
+  assert.doesNotMatch(JSON.stringify(failed), /private decoder|processed-/);
+  await assert.rejects(fs.stat(path.dirname(destination)), { code: "ENOENT" });
 });

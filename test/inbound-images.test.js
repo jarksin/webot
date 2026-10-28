@@ -116,7 +116,9 @@ test("unquoted Pad image context is bounded to recent incoming images of this se
   assert.equal(rows[0].message.attachments[0].downloadContext.msgId, 7);
 });
 
-test("framework hydrates public plain and referenced Pad images; errors are safe", async () => {
+test("framework hydrates public plain and referenced Pad images; errors are safe", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-hydrate-image-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const app = Object.create(WebotApplication.prototype);
   app.config = { dataDir: "/cache" };
   app.logger = { warn() {} };
@@ -125,7 +127,9 @@ test("framework hydrates public plain and referenced Pad images; errors are safe
   app.transports = { pad: { async downloadInboundAttachment(message) {
     requested.push(message.messageId);
     if (message.messageId === "failed") throw new Error("sensitive-token");
-    return { localPath: `/cache/${message.messageId}.png`, mime: "image/png" };
+    const localPath = path.join(directory, `${message.messageId}.png`);
+    await fs.writeFile(localPath, png);
+    return { localPath, size: png.length, mime: "image/png" };
   } } };
   const hydrated = await app.hydratePadMedia({
     ...scope, messageId: "plain", attachments: [attachment],
