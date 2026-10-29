@@ -48,13 +48,19 @@ Friend acceptance requires a gateway type-37 event with an accept-ready,
 persisted `friend_request_id`. Red packets require type-49 app subtype 2001
 and the original XML; the receive response supplies the context for opening.
 The fixed account-scoped v1 APIs are used through the shared per-source request
-queue, including its ten-second minimum interval. These actions do not start
-an assistant task. After successful acceptance, `autoFriendReplyText` sends a
-private introduction to the applicant. After successful opening,
-`autoRedPacketReplyText` sends thanks in the original conversation, mentioning
-the sender in a group. The administration console exposes both switches and
-reply texts per account. The default replies are a Webot introduction and
-“感谢老板”; an empty text disables that reply.
+queue, including its ten-second minimum interval. The administration console
+exposes the two account switches. After successful acceptance or opening,
+the assistant receives a confirmed platform event and composes its reply using
+the current local AGENTS.md and relevant approved public knowledge. Put tone
+and introduction/thanks preferences there; reply text is not a fixed template
+or a per-account text setting.
+
+Event composition uses public access, no resumed user session, no chat history,
+and no raw friend tickets or packet XML. Only generated text can be sent.
+Introductions go privately to the applicant; thanks go to the original
+conversation, mentioning the packet sender in a group. The assistant may choose
+silence. Generation failure never falls back to a fixed reply, and activation
+waits for in-progress reply generation.
 
 Attempts and outcomes are retained in private runtime state and the captured
 message decision. Replayed events cannot repeat an attempted operation,

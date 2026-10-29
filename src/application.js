@@ -99,6 +99,7 @@ export class WebotApplication {
     this.transports = null;
     this.padMediaRequestTails = new Map();
     this.padMediaLastRequestAt = new Map();
+    this.padAutomaticReplies = 0;
     this.caseStore = null;
     this.caseManager = null;
     this.workspacePolicy = null;
@@ -115,8 +116,8 @@ export class WebotApplication {
         this.status().ok === true,
       restartReady: () => !this.pendingSettings && !this.settingsApplying &&
         Boolean(this.connectedRestartSource()),
-      idle: () => this.caseManager?.idle() === true,
-      reserveIdle: () => this.caseManager?.reserveIdle(),
+      idle: () => !this.padAutomaticReplies && this.caseManager?.idle() === true,
+      reserveIdle: () => !this.padAutomaticReplies && this.caseManager?.reserveIdle(),
       onDeferredResult: (context, result, error) => {
         if (context.console) {
           this.restartResult = error
@@ -200,9 +201,9 @@ export class WebotApplication {
     await this.applySettings(settings);
   }
 
-  providerFor(config) {
+  providerFor(config, { publicOnly = false } = {}) {
     const accessForMessage = (message) =>
-      requesterAccess(
+      publicOnly ? "public" : requesterAccess(
         message,
         config.policy.ownerSenderIds,
         config,
@@ -218,6 +219,32 @@ export class WebotApplication {
         readAgentPolicy: () => this.workspacePolicy.read(),
       }),
     };
+  }
+
+  async generatePadAutoReply(message, operation, actionId) {
+    const { provider } = this.providerFor(this.config, { publicOnly: true });
+    // Pass only confirmed event facts. Request tickets, packet XML and incoming
+    // instructions are not needed to compose a social acknowledgement.
+    const event = {
+      transport: "pad", sourceId: message.sourceId, sourceName: message.sourceName,
+      selfId: message.selfId, senderId: message.senderId, senderName: message.senderName,
+      chatType: message.chatType, chatId: message.chatId, chatName: message.chatName,
+      messageType: 1, messageId: `automatic:${actionId}`, timestamp: Date.now(),
+      text: operation === "accept_friend"
+        ? "[平台事件] 本账号已成功通过这位用户的好友申请。"
+        : "[平台事件] 本账号已成功领取这位用户发送的红包。",
+    };
+    this.padAutomaticReplies += 1;
+    try {
+      const reply = await provider.reply({
+        caseId: `automatic:${message.sourceId}:${actionId}`,
+        message: event, history: [], conversationContext: [], mediaContext: [],
+        currentMessageCount: 1, signal: AbortSignal.timeout(120_000),
+      });
+      return String(typeof reply === "string" ? reply : reply?.text || "").trim();
+    } finally {
+      this.padAutomaticReplies -= 1;
+    }
   }
 
   async applySettings(settings) {
@@ -385,6 +412,7 @@ export class WebotApplication {
     const automatic = await handlePadAutoAction(message, {
       config: this.config, caseStore: this.caseStore,
       transport: this.transports.pad, logger: this.logger,
+      generateReply: (...args) => this.generatePadAutoReply(...args),
     });
     if (automatic) {
       this.caseStore.markSyncedMessageResult(message, automatic);
@@ -821,7 +849,7 @@ export class WebotApplication {
         apply: { mode: "dynamic", reasons: [] },
       };
     }
-    const reservation = this.caseManager?.idle()
+    const reservation = !this.padAutomaticReplies && this.caseManager?.idle()
       ? this.caseManager.reserveIdle()
       : null;
     if (this.caseManager && !reservation) {
@@ -886,7 +914,7 @@ export class WebotApplication {
     const applyWhenIdle = async () => {
       this.settingsApplyTimer = null;
       if (!this.pendingSettings) return;
-      if (!this.caseManager?.idle()) {
+      if (this.padAutomaticReplies || !this.caseManager?.idle()) {
         this.settingsApplyTimer = setTimeout(applyWhenIdle, 100);
         this.settingsApplyTimer.unref?.();
         return;
@@ -1102,7 +1130,11 @@ export class WebotApplication {
       agentFile: this.workspacePolicy.file,
       knowledgeBase: this.knowledgeBase.status(),
       cases: this.caseStore.stats(),
-      workers: this.caseManager.status(),
+      workers: {
+        ...this.caseManager.status(),
+        active: this.caseManager.status().active + this.padAutomaticReplies,
+        automaticReplies: this.padAutomaticReplies,
+      },
       ingress: {
         ready: ingressReady,
         configuredSources,

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 // Account policy authorizes these two operations independently of chat triggers.
 // Claim before sending: uncertain outcomes must never be retried on WS replay.
-export async function handlePadAutoAction(message, { config, caseStore, transport, logger }) {
+export async function handlePadAutoAction(message, { config, caseStore, transport, logger, generateReply }) {
   if (message.transport !== "pad" || message.protocol === "qw_pad" ||
       message.direction !== "incoming" || !config.channels.has("pad")) return null;
   const source = config.pad.sources.find((item) => item.id === message.sourceId);
@@ -56,22 +56,25 @@ export async function handlePadAutoAction(message, { config, caseStore, transpor
     }
     record("succeeded");
     logger.info("pad automatic action completed", { sourceId: source.id, operation, messageId: message.messageId });
-    const replyText = friend ? source.autoFriendReplyText : source.autoRedPacketReplyText;
-    if (replyText) {
-      record("succeeded", "", "attempting");
-      try {
-        const replyMessage = friend ? {
-          ...message, chatType: "private", chatId: sender, replyTarget: sender,
-        } : message;
-        await transport.send(replyMessage, replyText);
-        record("succeeded", "", "succeeded");
-      } catch (error) {
-        record("succeeded", String(error.message || error).slice(0, 500), "failed_or_uncertain");
-        logger.error("pad automatic action succeeded but reply failed; inspect gateway before retrying", {
-          sourceId: source.id, operation, messageId: message.messageId,
-        });
-        return result("succeeded_reply_failed_or_uncertain");
+    record("succeeded", "", "attempting");
+    try {
+      const replyMessage = friend ? {
+        ...message, chatType: "private", chatId: sender, replyTarget: sender,
+        senderId: sender, senderName: message.friendRequest.display_name || message.senderName,
+      } : message;
+      const replyText = await generateReply(replyMessage, operation, hash);
+      if (!replyText) {
+        record("succeeded", "", "suppressed");
+        return result("succeeded_reply_suppressed");
       }
+      await transport.send(replyMessage, replyText);
+      record("succeeded", "", "succeeded");
+    } catch (error) {
+      record("succeeded", String(error.message || error).slice(0, 500), "failed_or_uncertain");
+      logger.error("pad automatic action succeeded but reply failed; inspect gateway before retrying", {
+        sourceId: source.id, operation, messageId: message.messageId,
+      });
+      return result("succeeded_reply_failed_or_uncertain");
     }
     return result("succeeded");
   } catch (error) {
