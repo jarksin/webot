@@ -700,10 +700,8 @@ export class PadTransport {
     if (!displayName) {
       displayName = cleanPadMentionDisplayName(message.senderName, at);
     }
-    let content = at
-      ? formatPadMentionText(replyText, displayName, at)
-      : replyText;
-    const mentionIds = new Set(at ? [at] : []);
+    let content = replyText;
+    const mentionIds = new Set();
     if (message.chatType === "group") {
       for (const [target, alias] of Object.entries(source.mentionDisplayNames || {})) {
         const name = cleanPadMentionDisplayName(alias, target);
@@ -716,12 +714,21 @@ export class PadTransport {
         });
       }
     }
+    // Explicitly addressing someone takes precedence over the default reply
+    // mention. An escalation should target that person, not the questioner.
+    if (!mentionIds.size && at) {
+      mentionIds.add(at);
+      content = formatPadMentionText(content, displayName, at);
+    }
     return this.request("/v1/messages/send-text", {
       to: message.replyTarget || message.chatId,
       content,
       type: 1,
       at: [...mentionIds].join(","),
-    }, message);
+    }, message).then((outbound) => ({
+      ...outbound,
+      mentionedUserIds: [...mentionIds],
+    }));
   }
 
   sendImage(chatId, base64, message = {}) {

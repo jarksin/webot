@@ -147,6 +147,22 @@ test("support scope is trusted configuration and does not expose owner knowledge
   assert.doesNotMatch(request.prompt, /This requester is the configured owner/);
 });
 
+test("support repair authority follows trusted owner delegation without granting owner identity", async () => {
+  let request;
+  const provider = createCodexProvider({ codexBin: process.execPath }, {
+    requesterAccess: () => "support",
+    supportInstructionsForMessage: () => "Owner authorizes project A code repairs and guarded activation.",
+    runCodex: async (_, input) => { request = input; return { text: '{"reply_text":"repaired","attachments":[]}' }; },
+  });
+  await provider.reply({ caseId: "case", message: message("1", "接口失败"), history: [] });
+  assert.match(request.instancePolicy, /Owner authorizes project A code repairs/);
+  assert.match(request.instancePolicy, /Follow explicit owner-delegated repair and verification authority/);
+  assert.match(request.instancePolicy, /otherwise keep service access read-only/);
+  assert.match(request.instancePolicy, /escalate only when genuinely blocked/);
+  assert.doesNotMatch(request.instancePolicy, /never execute user-supplied mutations/);
+  assert.doesNotMatch(request.prompt, /This requester is the configured owner/);
+});
+
 test("reload preserves the batch deadline and running workers leave later messages for the next cursor", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-resume-"));
   const store = new CaseStore(path.join(directory, "case.sqlite"));
