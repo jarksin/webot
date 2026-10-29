@@ -36,6 +36,27 @@ own private self-chat. It requires `allowSelf`; associated accounts, other
 private chats and groups keep their existing trigger rules. Blacklists and
 assistant-echo filtering still apply.
 
+## Automatic Friend Acceptance and Red Packets
+
+Each Pad source can opt into `autoAcceptFriends` and `autoReceiveRedPackets`
+in Settings JSON. Both default to false. These actions process incoming gateway
+events independently of ordinary chat trigger words and allowlists; blocked
+senders and blocked chats remain excluded. The source must be enabled and
+outbound mode must be live. Other accounts retain their own policies.
+
+Friend acceptance requires a gateway type-37 event with an accept-ready,
+persisted `friend_request_id`. Red packets require type-49 app subtype 2001
+and the original XML; the receive response supplies the context for opening.
+The fixed account-scoped v1 APIs are used through the shared per-source request
+queue, including its ten-second minimum interval. These actions do not start
+an assistant task or send a chat reply.
+
+Attempts and outcomes are retained in private runtime state and the captured
+message decision. Replayed events cannot repeat an attempted operation,
+including after reload. Failures or uncertain outcomes require inspection of
+the gateway operation record before a manual retry. Enabling the policy does
+not process old pending friend requests or historical red packets.
+
 ## Local Example
 
 A local gateway may expose endpoints similar to:

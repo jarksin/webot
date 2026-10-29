@@ -14,6 +14,7 @@ import { configuredPadMentionDisplayName } from "./ingress-sources.js";
 import { KnowledgeBaseCloud } from "./kb-cloud.js";
 import { probeOptSource } from "./opt-status.js";
 import { PadSenderClassifier } from "./pad-sender-classifier.js";
+import { handlePadAutoAction } from "./pad-auto-actions.js";
 import { createProvider } from "./providers.js";
 import { codexRuntimeStatus } from "./codex-provider.js";
 import { WebotRuntime } from "./runtime.js";
@@ -380,6 +381,14 @@ export class WebotApplication {
         maxMessages: contextSettings.maxMessages,
       });
       this.caseStore.observeIdentity(message);
+    }
+    const automatic = await handlePadAutoAction(message, {
+      config: this.config, caseStore: this.caseStore,
+      transport: this.transports.pad, logger: this.logger,
+    });
+    if (automatic) {
+      this.caseStore.markSyncedMessageResult(message, automatic);
+      return automatic;
     }
     message = this.hydrateReferencedMessage(message);
     if (message.transport === "pad") {

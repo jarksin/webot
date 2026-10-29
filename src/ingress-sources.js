@@ -80,6 +80,8 @@ export function normalizeSource(value, env, defaults) {
             ? "legacy_default"
             : "",
     allowSelf: boolean(value.allow_self_chat ?? value.allowSelf, false),
+    autoAcceptFriends: boolean(value.autoAcceptFriends, false),
+    autoReceiveRedPackets: boolean(value.autoReceiveRedPackets, false),
     selfChatWithoutPrefix: boolean(
       value.self_chat_without_prefix ?? value.selfChatWithoutPrefix,
       false,

@@ -141,6 +141,8 @@ export function serializeConfig(config) {
         accessToken: source.accessToken,
         accessTokenFile: source.accessTokenFile,
         allowSelf: source.allowSelf,
+        autoAcceptFriends: source.autoAcceptFriends,
+        autoReceiveRedPackets: source.autoReceiveRedPackets,
         selfChatWithoutPrefix: source.selfChatWithoutPrefix,
         selfChatPeers: [...source.selfChatPeers],
         mentionDisplayNames: { ...source.mentionDisplayNames },

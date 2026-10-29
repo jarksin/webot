@@ -738,6 +738,8 @@ function normalizePadMessage(message, sourceValue, protocol = "") {
     text: split.text.trim(),
     ...(preservedRawContent ? { rawContent: preservedRawContent } : {}),
     ...(app ? { app } : {}),
+    ...(messageType === 37 && objectValue(message.friend_request)
+      ? { friendRequest: message.friend_request } : {}),
     ...(structuredQW?.link ? { link: structuredQW.link } : {}),
     attachments: content.attachments,
     reference: qw ? null : padReference(message),
