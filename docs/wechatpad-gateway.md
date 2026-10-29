@@ -112,6 +112,11 @@ ID. The ordinary source allowlist and blocklist still apply. Each policy support
 - `ignoredSenderIds`: never trigger a reply for these stable sender IDs.
 - `mentionOnlySenderIds`: require a mention of the source account from these senders.
 - `ignoreAcknowledgements`: ignore standalone closings such as “好的” or “谢谢”; questions and attachments still trigger.
+- `humanReplyGraceMs` and `humanReplySenderIds`: wait for a quiet period before
+  creating a customer case. A reply from a configured human sender in the same
+  source/group cancels the pending messages. Owner requests bypass this wait.
+  This grace period replaces the initial batch delay; messages remain in the
+  retained stream even when no case is created.
 - `batchWindowMs`: collect messages for a fixed window after the first trigger,
   then process all pending messages after the case cursor in one run. Messages
   arriving during a run form the next batch. The deadline survives reloads.
