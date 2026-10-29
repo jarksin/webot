@@ -19,7 +19,11 @@ function fixture() {
       setRuntimeSetting: (key, value) => states.set(key, value) },
     transport: { request: async (...args) => {
       calls.push(args);
-      return { ok: true, result: { Data: { sendUserName: "sender", timingIdentifier: "timing" } } };
+      const data = args[0] === "/v1/contacts/accept-request"
+        ? { ok: true, status: "accepted", friend_request_id: args[1].friend_request_id }
+        : args[0] === "/v1/payments/receive-red-packet"
+          ? { ok: true, sendUserName: "sender", timingIdentifier: "timing" } : { ok: true };
+      return { ok: true, result: { Code: 0, Success: true, Data: data } };
     }, send: async (...args) => { replies.push(args); } },
     generateReply: async (...args) => {
       generations.push(args);
@@ -203,4 +207,39 @@ test("generation failure preserves the successful action without sending a canne
   assert.equal(state.replyStatus, "failed_or_uncertain");
   await handlePadAutoAction(f.message, f.dependencies);
   assert.equal(f.calls.length, 1);
+});
+
+test("friend welcome requires a positive acceptance acknowledgement for the same request", async () => {
+  for (const response of [
+    { ok: true, result: {} },
+    { ok: true, result: { ok: false } },
+    { ok: true, dryRun: true, result: { ok: true, status: "accepted", friend_request_id: "request-1" } },
+    { ok: true, result: { Code: 1, Data: { ok: true, status: "accepted", friend_request_id: "request-1" } } },
+    { ok: true, result: { Data: { ok: true, status: "pending", friend_request_id: "request-1" } } },
+    { ok: true, result: { Data: { ok: true, status: "accepted", friend_request_id: "other-request" } } },
+  ]) {
+    const f = fixture();
+    f.dependencies.transport.request = async () => response;
+    assert.match((await handlePadAutoAction(f.message, f.dependencies)).reason, /failed_or_uncertain/);
+    assert.equal(f.generations.length, 0);
+    assert.equal(f.replies.length, 0);
+  }
+});
+
+test("packet receive success alone cannot trigger thanks if opening fails or lacks acknowledgement", async () => {
+  for (const failure of ["timeout", "missing-ack", "negative-ack"]) {
+    const f = fixture();
+    Object.assign(f.message, { messageType: 49, rawContent: "<packet/>",
+      app: { red_packet: { app_message_type: 2001, pay_message_id: "packet-1" } } });
+    f.dependencies.transport.request = async (route) => {
+      if (route.endsWith("/receive-red-packet")) {
+        return { ok: true, result: { Data: { ok: true, sendUserName: "sender", timingIdentifier: "timing" } } };
+      }
+      if (failure === "timeout") throw new Error("open timeout");
+      return { ok: true, result: { Data: failure === "missing-ack" ? {} : { ok: false } } };
+    };
+    assert.match((await handlePadAutoAction(f.message, f.dependencies)).reason, /failed_or_uncertain/);
+    assert.equal(f.generations.length, 0);
+    assert.equal(f.replies.length, 0);
+  }
 });

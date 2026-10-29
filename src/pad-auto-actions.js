@@ -1,5 +1,16 @@
 import crypto from "node:crypto";
 
+function confirmedActionData(response) {
+  const body = response?.result;
+  const data = body?.Data ?? body;
+  if (response?.ok !== true || response.dryRun || !body ||
+      body.Success === false || (body.Code != null && Number(body.Code) !== 0) ||
+      data?.ok !== true) {
+    throw new Error("Gateway did not confirm successful execution");
+  }
+  return data;
+}
+
 // Account policy authorizes these two operations independently of chat triggers.
 // Claim before sending: uncertain outcomes must never be retried on WS replay.
 export async function handlePadAutoAction(message, { config, caseStore, transport, logger, generateReply }) {
@@ -33,10 +44,14 @@ export async function handlePadAutoAction(message, { config, caseStore, transpor
         record("missing_request_context");
         return result("missing_request_context");
       }
-      await transport.request("/v1/contacts/accept-request", {
+      const response = await transport.request("/v1/contacts/accept-request", {
         confirm: true, request_id: `webot-friend-${hash}`,
         friend_request_id: identity,
       }, message);
+      const accepted = confirmedActionData(response);
+      if (accepted.status !== "accepted" || accepted.friend_request_id !== identity) {
+        throw new Error("Gateway did not confirm this friend request was accepted");
+      }
     } else {
       if (!message.rawContent) {
         record("missing_packet_xml");
@@ -45,14 +60,15 @@ export async function handlePadAutoAction(message, { config, caseStore, transpor
       const response = await transport.request("/v1/payments/receive-red-packet", {
         confirm: true, request_id: `webot-receive-${hash}`, Xml: message.rawContent,
       }, message);
-      const received = response.result?.Data ?? response.result;
+      const received = confirmedActionData(response);
       if (!received?.sendUserName || !received?.timingIdentifier) {
         throw new Error("Missing red-packet open context");
       }
-      await transport.request("/v1/payments/open-red-packet", {
+      const opened = await transport.request("/v1/payments/open-red-packet", {
         confirm: true, request_id: `webot-open-${hash}`, Xml: message.rawContent,
         SendUserName: received.sendUserName, TimingIdentifier: received.timingIdentifier,
       }, message);
+      confirmedActionData(opened);
     }
     record("succeeded");
     logger.info("pad automatic action completed", { sourceId: source.id, operation, messageId: message.messageId });

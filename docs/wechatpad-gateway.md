@@ -55,6 +55,12 @@ the current local AGENTS.md and relevant approved public knowledge. Put tone
 and introduction/thanks preferences there; reply text is not a fixed template
 or a per-account text setting.
 
+Replies require an explicit successful operation acknowledgement from the
+gateway. Friend acceptance must confirm `accepted` for the exact request ID;
+red packets must complete opening, not merely return receive parameters.
+An empty response, negative acknowledgement, timeout or uncertain result does
+not trigger reply generation or sending.
+
 Event composition uses public access, no resumed user session, no chat history,
 and no raw friend tickets or packet XML. Only generated text can be sent.
 Introductions go privately to the applicant; thanks go to the original
