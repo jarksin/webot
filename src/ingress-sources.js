@@ -82,6 +82,9 @@ export function normalizeSource(value, env, defaults) {
     allowSelf: boolean(value.allow_self_chat ?? value.allowSelf, false),
     autoAcceptFriends: boolean(value.autoAcceptFriends, false),
     autoReceiveRedPackets: boolean(value.autoReceiveRedPackets, false),
+    autoFriendReplyText: String(value.autoFriendReplyText ??
+      "你好，我是 Webot，一个 AI 助手，可以帮你解答问题、整理信息。需要帮忙时，发消息带上“Webot”就可以叫我。").trim(),
+    autoRedPacketReplyText: String(value.autoRedPacketReplyText ?? "感谢老板").trim(),
     selfChatWithoutPrefix: boolean(
       value.self_chat_without_prefix ?? value.selfChatWithoutPrefix,
       false,

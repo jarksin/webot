@@ -718,6 +718,10 @@ function accountEditor(source) {
       <h2>监听与触发规则</h2>
       ${toggle("自动通过好友申请", "source-auto-accept-friends", source.autoAcceptFriends === true, "处理本账号的新好友申请，无需召唤词；屏蔽用户除外")}
       ${toggle("自动领取红包", "source-auto-receive-red-packets", source.autoReceiveRedPackets === true, "领取本账号收到的私聊与群聊红包；屏蔽用户和群聊除外")}
+      <div class="form-grid">
+        ${field("通过好友后的自我介绍", "source-auto-friend-reply", source.autoFriendReplyText, { textarea: true, note: "成功通过后私聊发送；留空不发送" })}
+        ${field("领取红包后的感谢语", "source-auto-red-packet-reply", source.autoRedPacketReplyText, { textarea: true, note: "成功领取后在原会话发送，群聊会 @ 发红包的人；留空不发送" })}
+      </div>
       ${toggle("忽略白名单", "source-ignore-allowlist", source.ignoreAllowlist === true, "允许所有个人私聊；所有群聊均可通过 @ 或触发词触发，系统账号、公众号和黑名单仍过滤")}
       ${toggle("仅召唤词触发", "source-keyword-only", source.keywordOnly === true, "私聊与群聊均需召唤词，不以 @ 或机器人名称绕过白名单")}
       ${toggle("严格私聊白名单", "source-allowlist-only", source.allowlistOnly === true, "非白名单私聊不通过召唤词触发")}
@@ -1163,6 +1167,8 @@ function readAccountForm() {
     enabled: document.querySelector("#source-enabled").checked,
     autoAcceptFriends: document.querySelector("#source-auto-accept-friends").checked,
     autoReceiveRedPackets: document.querySelector("#source-auto-receive-red-packets").checked,
+    autoFriendReplyText: document.querySelector("#source-auto-friend-reply").value.trim(),
+    autoRedPacketReplyText: document.querySelector("#source-auto-red-packet-reply").value.trim(),
     ignoreAllowlist: document.querySelector("#source-ignore-allowlist").checked,
     keywordOnly: document.querySelector("#source-keyword-only").checked,
     allowlistOnly: document.querySelector("#source-allowlist-only").checked,

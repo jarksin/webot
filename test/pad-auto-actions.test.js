@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { handlePadAutoAction } from "../src/pad-auto-actions.js";
 import { normalizePadEnvelope } from "../src/normalize.js";
 import { normalizeSource } from "../src/ingress-sources.js";
+import { PadTransport } from "../src/transports/pad.js";
 
 function fixture() {
   const source = normalizeSource({ id: "fixture", selfId: "bot", enabled: true,
     autoAcceptFriends: true, autoReceiveRedPackets: true }, {}, {});
   const calls = [];
+  const replies = [];
   const states = new Map();
   const dependencies = {
     config: { channels: new Set(["pad"]), pad: { sources: [source] }, outboundMode: "live" },
@@ -16,13 +18,13 @@ function fixture() {
     transport: { request: async (...args) => {
       calls.push(args);
       return { ok: true, result: { Data: { sendUserName: "sender", timingIdentifier: "timing" } } };
-    } },
+    }, send: async (...args) => { replies.push(args); } },
     logger: { info() {}, error() {} },
   };
   const message = { transport: "pad", sourceId: source.id, direction: "incoming",
     senderId: "sender", chatId: "sender", messageId: "event-1", messageType: 37,
     friendRequest: { friend_request_id: "request-1", accept_ready: true, from_user_name: "sender" } };
-  return { source, calls, states, dependencies, message };
+  return { source, calls, replies, states, dependencies, message };
 }
 
 test("accepts a persisted friend request once, even with concurrent WS duplicates", async () => {
@@ -33,6 +35,10 @@ test("accepts a persisted friend request once, even with concurrent WS duplicate
   assert.equal(f.calls[0][1].friend_request_id, "request-1");
   assert.equal(f.calls[0][2].sourceId, "fixture");
   assert.equal(JSON.parse([...f.states.values()][0]).status, "succeeded");
+  assert.equal(JSON.parse([...f.states.values()][0]).replyStatus, "succeeded");
+  assert.equal(f.replies.length, 1);
+  assert.equal(f.replies[0][0].replyTarget, "sender");
+  assert.match(f.replies[0][1], /我是 Webot/);
 });
 
 test("receives then opens a packet with gateway-provided timing context; replay is suppressed", async () => {
@@ -47,6 +53,8 @@ test("receives then opens a packet with gateway-provided timing context; replay 
   assert.equal(f.calls[1][1].TimingIdentifier, "timing");
   assert.equal(f.calls[1][1].SendUserName, "sender");
   assert.equal(f.calls[1][1].Xml, "<packet/>");
+  assert.equal(f.replies.length, 1);
+  assert.equal(f.replies[0][1], "感谢老板");
 });
 
 test("failures and uncertain responses are recorded and never automatically retried", async () => {
@@ -55,6 +63,7 @@ test("failures and uncertain responses are recorded and never automatically retr
   assert.match((await handlePadAutoAction(f.message, f.dependencies)).reason, /failed_or_uncertain/);
   assert.match((await handlePadAutoAction(f.message, f.dependencies)).reason, /already_attempted/);
   assert.equal(JSON.parse([...f.states.values()][0]).error, "timeout");
+  assert.equal(f.replies.length, 0);
 });
 
 test("requires the enabled source policy and inbound direction, respects blocks and dry-run", async () => {
@@ -99,4 +108,54 @@ test("does not open a packet without returned timing context or treat a transfer
   assert.match((await handlePadAutoAction(f.message, f.dependencies)).reason, /failed_or_uncertain/);
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0][0], "/v1/payments/receive-red-packet");
+  assert.equal(f.replies.length, 0);
+});
+
+test("welcomes the applicant rather than the system event chat; custom and empty texts are respected", async () => {
+  const f = fixture();
+  f.source.autoFriendReplyText = "你好，我是小水瓜。";
+  f.message.chatId = "fmessage";
+  f.message.replyTarget = "fmessage";
+  await handlePadAutoAction(f.message, f.dependencies);
+  assert.equal(f.replies[0][0].chatType, "private");
+  assert.equal(f.replies[0][0].replyTarget, "sender");
+  assert.equal(f.replies[0][1], "你好，我是小水瓜。");
+  const silent = fixture();
+  silent.source.autoFriendReplyText = "";
+  await handlePadAutoAction(silent.message, silent.dependencies);
+  assert.equal(silent.calls.length, 1);
+  assert.equal(silent.replies.length, 0);
+});
+
+test("a failed welcome keeps acceptance successful and replay cannot repeat either operation", async () => {
+  const f = fixture();
+  f.dependencies.transport.send = async () => { throw new Error("reply timeout"); };
+  assert.match((await handlePadAutoAction(f.message, f.dependencies)).reason, /succeeded_reply_failed/);
+  const state = JSON.parse([...f.states.values()][0]);
+  assert.equal(state.status, "succeeded");
+  assert.equal(state.replyStatus, "failed_or_uncertain");
+  await handlePadAutoAction(f.message, f.dependencies);
+  assert.equal(f.calls.length, 1);
+});
+
+test("group packet thanks use the source transport and mention the packet sender after opening", async () => {
+  const f = fixture();
+  const sends = [];
+  f.source.apiUrl = "http://fixture.invalid/api";
+  const pad = new PadTransport({ sources: [f.source] }, "live", f.dependencies.logger,
+    async (url, options) => {
+      assert.equal(f.calls.length, 2, "thanks must follow successful opening");
+      sends.push({ url, body: JSON.parse(options.body) });
+      return { ok: true, text: async () => JSON.stringify({ Code: 0, Success: true }) };
+    });
+  f.dependencies.transport.send = (...args) => pad.send(...args);
+  Object.assign(f.message, { messageType: 49, rawContent: "<packet/>",
+    chatType: "group", chatId: "room@chatroom", replyTarget: "room@chatroom",
+    app: { red_packet: { app_message_type: 2001, pay_message_id: "packet-1" } } });
+  await handlePadAutoAction(f.message, f.dependencies);
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].url, "http://fixture.invalid/api/v1/messages/send-text");
+  assert.equal(sends[0].body.to, "room@chatroom");
+  assert.equal(sends[0].body.at, "sender");
+  assert.match(sends[0].body.content, /感谢老板/);
 });

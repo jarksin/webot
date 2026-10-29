@@ -24,12 +24,12 @@ export async function handlePadAutoAction(message, { config, caseStore, transpor
     .update(JSON.stringify([source.id, operation, identity || message.messageId])).digest("hex");
   const key = `pad_auto_action:${hash}`;
   if (caseStore.runtimeSetting(key, "")) return result("already_attempted");
-  const record = (status, error = "") => caseStore.setRuntimeSetting(key,
-    JSON.stringify({ sourceId: source.id, messageId: message.messageId, operation, status, error, at: Date.now() }));
+  const record = (status, error = "", replyStatus = "") => caseStore.setRuntimeSetting(key,
+    JSON.stringify({ sourceId: source.id, messageId: message.messageId, operation, status, error, replyStatus, at: Date.now() }));
   record("attempting");
   try {
     if (friend) {
-      if (!identity || message.friendRequest.accept_ready !== true) {
+      if (!identity || message.friendRequest.accept_ready !== true || !message.friendRequest.from_user_name) {
         record("missing_request_context");
         return result("missing_request_context");
       }
@@ -56,6 +56,23 @@ export async function handlePadAutoAction(message, { config, caseStore, transpor
     }
     record("succeeded");
     logger.info("pad automatic action completed", { sourceId: source.id, operation, messageId: message.messageId });
+    const replyText = friend ? source.autoFriendReplyText : source.autoRedPacketReplyText;
+    if (replyText) {
+      record("succeeded", "", "attempting");
+      try {
+        const replyMessage = friend ? {
+          ...message, chatType: "private", chatId: sender, replyTarget: sender,
+        } : message;
+        await transport.send(replyMessage, replyText);
+        record("succeeded", "", "succeeded");
+      } catch (error) {
+        record("succeeded", String(error.message || error).slice(0, 500), "failed_or_uncertain");
+        logger.error("pad automatic action succeeded but reply failed; inspect gateway before retrying", {
+          sourceId: source.id, operation, messageId: message.messageId,
+        });
+        return result("succeeded_reply_failed_or_uncertain");
+      }
+    }
     return result("succeeded");
   } catch (error) {
     record("failed_or_uncertain", String(error.message || error).slice(0, 500));

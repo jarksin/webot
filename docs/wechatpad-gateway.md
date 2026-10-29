@@ -49,11 +49,17 @@ persisted `friend_request_id`. Red packets require type-49 app subtype 2001
 and the original XML; the receive response supplies the context for opening.
 The fixed account-scoped v1 APIs are used through the shared per-source request
 queue, including its ten-second minimum interval. These actions do not start
-an assistant task or send a chat reply.
+an assistant task. After successful acceptance, `autoFriendReplyText` sends a
+private introduction to the applicant. After successful opening,
+`autoRedPacketReplyText` sends thanks in the original conversation, mentioning
+the sender in a group. The administration console exposes both switches and
+reply texts per account. The default replies are a Webot introduction and
+“感谢老板”; an empty text disables that reply.
 
 Attempts and outcomes are retained in private runtime state and the captured
 message decision. Replayed events cannot repeat an attempted operation,
-including after reload. Failures or uncertain outcomes require inspection of
+including replies and after reload. Reply delivery is recorded separately from
+the successful acceptance or receipt. Failures or uncertain outcomes require inspection of
 the gateway operation record before a manual retry. Enabling the policy does
 not process old pending friend requests or historical red packets.
 
