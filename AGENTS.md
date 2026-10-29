@@ -61,9 +61,9 @@ in the local Webot data directory and must never be committed.
 
 ### Simplicity And Scope
 
-1. Avoid over-defensive code: before handling extremely unlikely edge cases
-   or concurrency issues, explain their likelihood and obtain user approval.
-   Never expand code merely because it is "theoretically more robust".
+1. Avoid over-defensive code and overengineering: do not expand code for
+   extremely unlikely edge cases or concurrency issues merely because it is
+   "theoretically more robust".
 2. Validate external data once at the boundary, then rely on the type system
    internally. Do not repeat the same checks at every layer.
 3. Avoid premature abstractions: inline single-use logic near its caller;
