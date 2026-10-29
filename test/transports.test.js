@@ -177,9 +177,9 @@ test("Pad group text aliases produce native mentions of configured users beyond 
   });
   const sent = await transport.send({ chatType: "group", chatId: "room@chatroom",
     senderId: "wxid_member", senderName: "提问者" }, "这个需要 @大号 确认。@大号，麻烦看一下。");
-  assert.deepEqual(sent.mentionedUserIds, ["wxid_owner"]);
-  assert.equal(calls[0].at, "wxid_owner");
-  assert.equal(calls[0].content, "这个需要 @大号\u2005 确认。@大号\u2005，麻烦看一下。");
+  assert.deepEqual(sent.mentionedUserIds, ["wxid_member", "wxid_owner"]);
+  assert.equal(calls[0].at, "wxid_member,wxid_owner");
+  assert.equal(calls[0].content, "@提问者\u2005 这个需要 @大号\u2005 确认。@大号\u2005，麻烦看一下。");
   await transport.send({ chatType: "group", chatId: "room@chatroom",
     senderId: "wxid_owner", senderName: "大号" }, "@大号\u2005 已确认。");
   assert.equal(calls[1].at, "wxid_owner");
