@@ -166,6 +166,32 @@ test("Pad transport mention aliases override transient group nicknames", async (
   assert.equal(call.body.at, "huwatermelon");
 });
 
+test("Pad group text aliases produce native mentions of configured users beyond the triggering sender", async () => {
+  const calls = [];
+  const transport = new PadTransport({
+    apiUrl: "http://pad.local", selfId: "wxid_bot",
+    mentionDisplayNames: { wxid_owner: "大号", wxid_bot: "机器人" },
+  }, "live", console, async (_url, options) => {
+    calls.push(JSON.parse(options.body));
+    return Response.json({ Code: 0 });
+  });
+  await transport.send({ chatType: "group", chatId: "room@chatroom",
+    senderId: "wxid_member", senderName: "提问者" }, "这个需要 @大号 确认。@大号，麻烦看一下。");
+  assert.equal(calls[0].at, "wxid_member,wxid_owner");
+  assert.equal(calls[0].content, "@提问者\u2005 这个需要 @大号\u2005 确认。@大号\u2005，麻烦看一下。");
+  await transport.send({ chatType: "group", chatId: "room@chatroom",
+    senderId: "wxid_owner", senderName: "大号" }, "@大号\u2005 已确认。");
+  assert.equal(calls[1].at, "wxid_owner");
+  assert.equal(calls[1].content, "@大号\u2005 已确认。");
+  await transport.send({ chatType: "private", chatId: "wxid_member",
+    senderId: "wxid_member" }, "需要 @大号 确认。");
+  assert.equal(calls[2].at, "");
+  assert.equal(calls[2].content, "需要 @大号 确认。");
+  await transport.send({ chatType: "group", chatId: "room@chatroom",
+    senderId: "wxid_bot" }, "@大号2 @其他人 @机器人");
+  assert.equal(calls[3].at, "");
+});
+
 test("Pad source-account group replies carry an assistant marker without a self mention", async () => {
   const calls = [];
   const source = {

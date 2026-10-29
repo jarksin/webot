@@ -700,14 +700,27 @@ export class PadTransport {
     if (!displayName) {
       displayName = cleanPadMentionDisplayName(message.senderName, at);
     }
-    const content = at
+    let content = at
       ? formatPadMentionText(replyText, displayName, at)
       : replyText;
+    const mentionIds = new Set(at ? [at] : []);
+    if (message.chatType === "group") {
+      for (const [target, alias] of Object.entries(source.mentionDisplayNames || {})) {
+        const name = cleanPadMentionDisplayName(alias, target);
+        if (!name || target.toLowerCase() === String(source.selfId || "").toLowerCase()) continue;
+        const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const pattern = new RegExp(`@${escaped}(?=$|[\\s，。！？、；：,.!?;:()（）])\\u2005?`, "gu");
+        content = content.replace(pattern, () => {
+          mentionIds.add(target);
+          return `@${name}${WECHAT_MENTION_SEPARATOR}`;
+        });
+      }
+    }
     return this.request("/v1/messages/send-text", {
       to: message.replyTarget || message.chatId,
       content,
       type: 1,
-      at,
+      at: [...mentionIds].join(","),
     }, message);
   }
 

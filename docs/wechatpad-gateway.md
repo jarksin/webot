@@ -36,6 +36,11 @@ own private self-chat. It requires `allowSelf`; associated accounts, other
 private chats and groups keep their existing trigger rules. Blacklists and
 assistant-echo filtering still apply.
 
+`mentionDisplayNames` maps trusted member IDs to display aliases. In group
+replies, an explicit `@alias` in generated text also adds that member to the
+gateway's native mention list, alongside the triggering sender. Private replies
+and unknown aliases do not create mentions.
+
 ## Automatic Friend Acceptance and Red Packets
 
 Each Pad source can opt into `autoAcceptFriends` and `autoReceiveRedPackets`
