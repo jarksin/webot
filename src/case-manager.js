@@ -121,7 +121,6 @@ export class CaseManager {
     this.draining = false;
     this.idleDrain = null;
     this.batchTimers = new Map();
-    this.deferredGroups = new Map();
   }
 
   paused() {
@@ -142,13 +141,13 @@ export class CaseManager {
 
   idle() {
     return this.active === 0 && this.queue.length === 0 &&
-      this.rerun.size === 0 && this.batchTimers.size === 0 && this.deferredGroups.size === 0 && !this.draining;
+      this.rerun.size === 0 && this.batchTimers.size === 0 && !this.draining;
   }
 
   reserveIdle({ leaseMs = 60_000, schedule = setTimeout, cancel = clearTimeout } = {}) {
     if (this.idleDrain) {
       if (this.idleDrain.mode !== "idle") return null;
-      if (this.active > 0 || this.queue.length || this.rerun.size || this.deferredGroups.size) {
+      if (this.active > 0 || this.queue.length || this.rerun.size) {
         this.idleDrain.release();
         return null;
       }
@@ -288,52 +287,8 @@ export class CaseManager {
     return result;
   }
 
-  async flushDeferredGroup(key, pending) {
-    try {
-      const caseIds = new Set();
-      for (const message of pending.messages.values()) {
-        const policy = groupPolicyForMessage(this.config, message);
-        if (this.caseStore.hasHumanReplyAfter(message, policy?.humanReplySenderIds || [])) {
-          this.caseStore.markSyncedMessageResult(message, { accepted: false, reason: "human-replied" });
-          continue;
-        }
-        const result = await this.receive(message, { skipHumanReplyWait: true, deferRun: true });
-        this.caseStore.markSyncedMessageResult(message, result);
-        if (result.accepted && result.caseId) caseIds.add(result.caseId);
-      }
-      if (this.caseSettings().autoRun !== false) {
-        for (const caseId of caseIds) {
-          // The pre-ingest grace period already supplied the batching window.
-          this.caseStore.setRuntimeSetting(`group_batch_due:${caseId}`, String(Date.now()));
-          this.enqueue(caseId);
-        }
-      }
-    } catch (error) {
-      this.logger.error("deferred group ingress failed", { error: error.message });
-    } finally {
-      if (this.deferredGroups.get(key) === pending) this.deferredGroups.delete(key);
-    }
-  }
-
-  async receive(message, { skipHumanReplyWait = false, deferRun = false } = {}) {
+  async receive(message) {
     const decision = acceptedMessage(message, this.config);
-    const groupPolicy = groupPolicyForMessage(this.config, message);
-    const groupKey = JSON.stringify([message.sourceId, message.chatId]);
-    const humanReply = groupPolicy?.humanReplySenderIds?.some(
-      (id) => String(id).toLowerCase() === String(message.senderId).toLowerCase(),
-    );
-    if (!skipHumanReplyWait && humanReply && (
-      decision.accepted || decision.retainGroupContext || decision.reason === "group-acknowledgement"
-    )) {
-      const pending = this.deferredGroups.get(groupKey);
-      if (pending && !pending.promise) {
-        clearTimeout(pending.timer);
-        this.deferredGroups.delete(groupKey);
-        for (const queued of pending.messages.values()) {
-          this.caseStore.markSyncedMessageResult(queued, { accepted: false, reason: "human-replied" });
-        }
-      }
-    }
     if (decision.retainGroupContext || (
       decision.accepted && message.chatType === "group"
     )) {
@@ -351,21 +306,6 @@ export class CaseManager {
     if (!decision.accepted) return decision;
     const clean = { ...message, text: decision.text || message.text };
     const owner = this.requesterAccess(clean) === "owner";
-    if (!skipHumanReplyWait && !owner && !humanReply && groupPolicy?.humanReplyGraceMs > 0) {
-      let pending = this.deferredGroups.get(groupKey);
-      if (!pending || pending.promise) {
-        pending = { messages: new Map(), timer: null };
-        this.deferredGroups.set(groupKey, pending);
-      }
-      if (!pending.messages.has(clean.messageId)) {
-        pending.messages.set(clean.messageId, clean);
-        clearTimeout(pending.timer);
-        pending.timer = setTimeout(() => {
-          pending.promise = this.flushDeferredGroup(groupKey, pending);
-        }, groupPolicy.humanReplyGraceMs);
-      }
-      return { accepted: true, queued: true, deferred: true, reason: "waiting-for-human-reply" };
-    }
     const command = owner ? parseControlCommand(clean.text) : null;
     const ingested = this.caseStore.ingest(clean, clean.text, {
       useActiveSession: owner || Boolean(groupPolicyForMessage(this.config, clean)?.supportInstructions),
@@ -438,7 +378,6 @@ export class CaseManager {
       }
     }
     await this.sessionStore.append(ingested.caseId, "user", clean.text);
-    if (deferRun) return { accepted: true, caseId: ingested.caseId, queued: false };
     if (this.caseSettings().autoRun !== false &&
         groupPolicyForMessage(this.config, clean)?.batchWindowMs > 0) {
       this.enqueue(ingested.caseId);
@@ -1064,8 +1003,6 @@ export class CaseManager {
   }
 
   stopAll() {
-    for (const pending of this.deferredGroups.values()) clearTimeout(pending.timer);
-    this.deferredGroups.clear();
     for (const timer of this.batchTimers.values()) clearTimeout(timer);
     this.batchTimers.clear();
     // A discarded manager must not later resume from an old restart lease.
@@ -1081,7 +1018,7 @@ export class CaseManager {
       paused: this.paused(),
       draining: this.draining,
       active: this.active,
-      queued: new Set([...this.queue, ...this.rerun, ...this.batchTimers.keys()]).size + this.deferredGroups.size,
+      queued: new Set([...this.queue, ...this.rerun, ...this.batchTimers.keys()]).size,
       runningCaseIds: [...this.running.keys()],
       stopRunningSupported: true,
     };

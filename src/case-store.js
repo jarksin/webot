@@ -1040,18 +1040,6 @@ export class CaseStore {
     };
   }
 
-  hasHumanReplyAfter(message, senderIds) {
-    if (!senderIds.length) return false;
-    return Boolean(this.db.prepare(`
-      SELECT 1 FROM synced_messages
-      WHERE source_id=? AND chat_id=? AND timestamp>=?
-        AND sender_id COLLATE NOCASE IN (${senderIds.map(() => "?").join(",")})
-        AND id > (SELECT id FROM synced_messages WHERE source_id=? AND message_id=?)
-      LIMIT 1
-    `).get(message.sourceId, message.chatId, message.timestamp,
-      ...senderIds, message.sourceId, message.messageId));
-  }
-
   syncedMessageByMessageId(sourceId, messageId) {
     const row = this.db.prepare(`
       SELECT * FROM synced_messages
