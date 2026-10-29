@@ -59,6 +59,21 @@ in the local Webot data directory and must never be committed.
 
 ## Development
 
+### Simplicity And Scope
+
+1. Avoid over-defensive code: before handling extremely unlikely edge cases
+   or concurrency issues, explain their likelihood and obtain user approval.
+   Never expand code merely because it is "theoretically more robust".
+2. Validate external data once at the boundary, then rely on the type system
+   internally. Do not repeat the same checks at every layer.
+3. Avoid premature abstractions: inline single-use logic near its caller;
+   do not extract helpers without a concrete benefit.
+4. Control complexity: use `try/catch` only when necessary. Keep logic in one
+   clear function when splitting it would not improve clarity.
+5. Leave unrelated code untouched and skip tests unrelated to the change or
+   otherwise unnecessary. Documentation-only changes need content and
+   whitespace checks, not application test suites.
+
 - Named sessions, persistent Codex continuation, owner control commands,
   WeChat ingress/egress, attachment delivery, case scheduling, and guarded
   worker draining are generic framework capabilities. Privacy or
