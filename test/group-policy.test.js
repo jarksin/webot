@@ -196,6 +196,47 @@ test("other senders, stale answers, other groups and explicit bot requests do no
   assert.equal(store.runtimeSetting(`pending_discard_cursor:${first.caseId}`, ""), "");
 });
 
+test("historical human replies suppress old backlog on reload and are rechecked before automatic worker start", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-human-history-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const calls = [];
+  const c = config({ workerDelayMs: 120_000 });
+  const make = () => new CaseManager({ config: c, caseStore: store,
+    sessionStore: new SessionStore(path.join(directory, "sessions")),
+    provider: { async reply(request) { calls.push(request); return { text: "answer" }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  let manager = make();
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  manager.setPaused(true);
+  const { caseId } = await manager.receive(message("old-question", "旧队列的问题"));
+  t.mock.timers.tick(120_000);
+  await manager.receive(message("old-answer", "已经解答", { senderId: "owner" }));
+  assert.equal(store.caseRow(caseId).status, "new");
+  manager.stopAll();
+  c.pad.sources[0].groupPolicies.room.humanReplySenderIds = ["owner"];
+  manager = make();
+  assert.equal(manager.resumePending().queued, 0);
+  assert.equal(store.caseRow(caseId).status, "replied");
+  assert.deepEqual(store.pendingMessages(caseId), []);
+  manager.setPaused(false);
+  assert.equal(calls.length, 0);
+  manager.enqueue(caseId, true);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 1); // An explicit manual rerun remains available.
+
+  manager.setPaused(true);
+  await manager.receive(message("new-question", "新问题"));
+  t.mock.timers.tick(120_000);
+  store.ingestGroupContext(message("retained-answer", "这条也已经解答", { senderId: "owner" }));
+  manager.setPaused(false);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 1);
+  assert.equal(store.caseRow(caseId).status, "replied");
+  assert.equal(manager.queue.length, 0);
+});
+
 test("fixed ten second batches retain all pending messages and advance the cursor once", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-batch-"));
   const store = new CaseStore(path.join(directory, "case.sqlite"));

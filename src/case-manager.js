@@ -300,17 +300,7 @@ export class CaseManager {
         const policy = groupPolicyForMessage(this.config, message);
         if (context.inserted && decision.reason === "group-mention-required" &&
             policy?.humanReplySenderIds?.includes(message.senderId)) {
-          const caseId = this.caseStore.sessionCaseIdFor(message);
-          const latest = this.caseStore.latestMessage(caseId);
-          if (!this.running.has(caseId) && !this.forced.has(caseId) &&
-              Number(this.caseStore.runtimeSetting(`group_batch_due:${caseId}`, "0")) > 0 &&
-              latest && Number(message.timestamp) >= Number(latest.timestamp) &&
-              this.caseStore.pendingMessages(caseId,
-                this.caseStore.workerSession(caseId)?.last_processed_message_id || 0).length) {
-            this.stop(caseId);
-            this.caseStore.discardPending(caseId, latest.id, "replied");
-            this.caseStore.addProgress(caseId, 0, "大号已回复，跳过本批 Worker");
-          }
+          this.skipAnsweredGroup(this.caseStore.sessionCaseIdFor(message));
         }
         return {
           ...decision,
@@ -491,8 +481,30 @@ export class CaseManager {
     };
   }
 
+  skipAnsweredGroup(caseId) {
+    if (this.running.has(caseId) || this.forced.has(caseId)) return false;
+    const policy = groupPolicyForMessage(this.config, this.caseStore.latestMessage?.(caseId)?.message);
+    if (!policy?.humanReplySenderIds?.length) return false;
+    const pending = this.caseStore.pendingMessages(caseId,
+      this.caseStore.workerSession(caseId)?.last_processed_message_id || 0);
+    const latest = pending.at(-1);
+    if (!latest ||
+        pending.some((entry) => this.requesterAccess(entry.message) === "owner")) return false;
+    const answered = this.caseStore.groupContextBefore(latest.message, {
+      ...this.groupContextSettings(), limit: 200, caseId,
+      afterMessageId: latest.message.messageId, includeLaterObserved: true,
+    }).some((entry) => policy.humanReplySenderIds.includes(entry.sender_id) &&
+      acceptedMessage(entry.message, this.config).reason === "group-mention-required");
+    if (!answered) return false;
+    this.stop(caseId);
+    this.caseStore.discardPending(caseId, latest.id, "replied");
+    this.caseStore.addProgress(caseId, 0, "大号已回复，跳过本批 Worker");
+    return true;
+  }
+
   enqueue(caseId, force = false) {
     if (!this.caseStore.caseRow(caseId)) throw new Error("case not found");
+    if (!force && this.skipAnsweredGroup(caseId)) return { queued: false, reason: "human-replied" };
     const latest = this.caseStore.latestMessage?.(caseId);
     const policy = groupPolicyForMessage(this.config, latest?.message);
     const windowMs = policy?.batchWindowMs || 0;
@@ -610,6 +622,7 @@ export class CaseManager {
     if (this.running.has(caseId)) return;
     const previousSession = this.caseStore.workerSession(caseId);
     const force = this.forced.delete(caseId);
+    if (!force && this.skipAnsweredGroup(caseId)) return;
     let pending = this.caseStore.pendingMessages(
       caseId,
       previousSession?.last_processed_message_id || 0,
