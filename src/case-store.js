@@ -1545,7 +1545,9 @@ export class CaseStore {
       SELECT * FROM messages
       WHERE case_id=? AND id>? AND control_handled=0
       ORDER BY id ASC
-    `).all(caseId, Number(afterMessageId || 0))
+    `).all(caseId, Math.max(Number(afterMessageId || 0), Number(
+      this.runtimeSetting(`context_clear_cursor:${caseId}`, "0"),
+    )))
       .map((row) => ({ ...row, message: json(row.message_json, {}) }));
   }
 
