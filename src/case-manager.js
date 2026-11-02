@@ -751,7 +751,7 @@ export class CaseManager {
           afterMessageId: previousMessage?.message_id || "",
           excludeMessageIds: pending.map((item) => item.message_id),
           includeLaterObserved:
-            groupPolicyForMessage(this.config, trigger.message)?.batchWindowMs > 0,
+            boundary < 0 && groupPolicyForMessage(this.config, trigger.message)?.batchWindowMs > 0,
         },
       );
       this.caseStore.addProgress(caseId, session.run_count, "正在生成 draft");

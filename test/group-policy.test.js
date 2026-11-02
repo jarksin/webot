@@ -418,9 +418,9 @@ test("mixed owner and support requests run separately and do not reuse privilege
   });
   t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
   t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
-  await manager.receive(message("1", "support request"));
+  await manager.receive(message("1", "support request", { attachments: [{ kind: "image", name: "old.png" }] }));
   await manager.receive(message("2", "owner request", { senderId: "owner", mentions: ["bot"] }));
-  await manager.receive(message("3", "another support request"));
+  await manager.receive(message("3", "another support request", { attachments: [{ kind: "image", name: "new.png" }] }));
   for (let i = 0; i < 3; i++) {
     t.mock.timers.tick(10000);
     await Promise.all(manager.runPromises.values());
@@ -430,5 +430,9 @@ test("mixed owner and support requests run separately and do not reuse privilege
     ["user", 1, ""], ["owner", 1, ""], ["user", 1, ""],
   ]);
   assert.equal(calls[0].message.text.includes("owner request"), false);
+  assert.equal(calls[0].conversationContext.some((entry) => entry.text.includes("another support request")), false);
+  assert.equal(calls[1].conversationContext.some((entry) => entry.text.includes("another support request")), false);
+  assert.equal(calls[0].message.attachments[0].name, "old.png");
+  assert.equal(calls[2].message.attachments[0].name, "new.png");
   assert.equal(manager.idle(), true);
 });
