@@ -390,9 +390,9 @@ function renderCaseDetail(item) {
           ? `<span class="case-session-label">Session: ${escapeHtml(item.namedSession.name)}${item.namedSession.active ? " · active" : ""}</span>`
           : ""}
         <p class="mono">${escapeHtml(item.case_id)} <button class="button secondary icon-only compact-button" data-action="copy-case-id" data-case-id="${escapeHtml(item.case_id)}" title="复制 Case ID" aria-label="复制 Case ID"><i data-lucide="copy"></i></button></p>
-        ${item.scheduledRunAt && !running ? `<p>自动运行：${time(item.scheduledRunAt)}</p>` : ""}
+        <p class="case-run-schedule" ${item.scheduledRunAt && !running ? "" : "hidden"}>${item.scheduledRunAt && !running ? `自动运行：${time(item.scheduledRunAt)}` : ""}</p>
       </div>
-      <div class="inline-actions">
+      <div class="inline-actions" data-run-state="${running}:${item.scheduledRunAt || 0}">
         <button class="button secondary" data-action="clear-case" data-case-id="${escapeHtml(item.case_id)}" ${running ? 'disabled title="请先停止 Worker"' : ''}><i data-lucide="eraser"></i><span>Clear</span></button>
         ${running
           ? `<button class="button danger" data-action="stop-case" data-case-id="${escapeHtml(item.case_id)}">停止 Worker</button>`
@@ -499,10 +499,10 @@ function renderCaseDetail(item) {
     </div>`;
 }
 
-function renderCases() {
+function caseWorkspaceHtml() {
   const start = caseTotal ? casePage * casePageSize + 1 : 0;
   const end = caseTotal ? Math.min(start + cases.length - 1, caseTotal) : 0;
-  content.innerHTML = `
+  return `
     <div class="case-workspace">
       <section class="case-list-pane">
         <div class="case-toolbar">
@@ -562,6 +562,10 @@ function renderCases() {
           : `<div class="empty case-empty"><div><i data-lucide="inbox"></i><div>选择一个 Case</div></div></div>`}
       </section>
     </div>`;
+}
+
+function renderCases() {
+  content.innerHTML = caseWorkspaceHtml();
 }
 
 function storedCaseListWidth() {
@@ -1803,18 +1807,57 @@ function caseSessionSelectFocused() {
   return Boolean(document.activeElement?.matches("[data-case-session]"));
 }
 
-function caseInteractionActive() {
+function caseInteractionActive(selector = ".case-workspace") {
   if (casePointerSelecting || caseSessionSelectFocused()) return true;
   const selection = document.getSelection?.();
   return Boolean(selection && !selection.isCollapsed &&
     [selection.anchorNode, selection.focusNode].some((node) =>
-      (node?.nodeType === 1 ? node : node?.parentElement)?.closest(".case-workspace")));
+      (node?.nodeType === 1 ? node : node?.parentElement)?.closest(selector)));
 }
 
-async function refreshCases(includeDetail = false) {
-  if (caseInteractionActive()) return;
+function patchCasePanels(listChanged, detailChanged) {
+  const template = document.createElement("template");
+  template.innerHTML = caseWorkspaceHtml();
+  if (listChanged) {
+    const list = document.querySelector(".case-list-pane");
+    list.replaceChildren(...template.content.querySelector(".case-list-pane").childNodes);
+  }
+  if (detailChanged && selectedCase) {
+    const pane = document.querySelector(".case-detail-pane");
+    const next = template.content.querySelector(".case-detail-pane");
+    // Keep IDs and their DOM nodes stable; update values only when they change.
+    const stats = pane.querySelectorAll(".codex-session-stat span, .codex-session-stat strong, .codex-session-stat small");
+    const nextStats = next.querySelectorAll(".codex-session-stat span, .codex-session-stat strong, .codex-session-stat small");
+    stats.forEach((node, index) => {
+      if (node.textContent !== nextStats[index].textContent) node.textContent = nextStats[index].textContent;
+      if (node.title !== nextStats[index].title) node.title = nextStats[index].title;
+    });
+    const actions = pane.querySelector(".inline-actions");
+    const nextActions = next.querySelector(".inline-actions");
+    if (actions.dataset.runState !== nextActions.dataset.runState) {
+      actions.replaceChildren(...nextActions.childNodes);
+      actions.dataset.runState = nextActions.dataset.runState;
+    }
+    const schedule = pane.querySelector(".case-run-schedule");
+    const nextSchedule = next.querySelector(".case-run-schedule");
+    schedule.hidden = nextSchedule.hidden;
+    if (schedule.textContent !== nextSchedule.textContent) schedule.textContent = nextSchedule.textContent;
+    const scroll = pane.querySelector(".case-detail-scroll");
+    scroll.replaceChildren(...next.querySelector(".case-detail-scroll").childNodes);
+    restoreCaseViewState(selectedCase.case_id);
+  }
+  renderHeaderControls();
+  icons();
+}
+
+async function refreshCases(includeDetail = false, polling = false) {
+  const selectionArea = polling ? ".case-detail-scroll, .case-list-pane" : ".case-workspace";
+  if (caseInteractionActive(selectionArea)) return;
   const selectionRequest = caseSelectionRequest;
   const selectedCaseId = selectedCase?.case_id;
+  const oldList = JSON.stringify([cases, caseTotal, caseHasMore, workers]);
+  const oldItem = cases.find((item) => item.case_id === caseRootId(selectedCase));
+  const oldSummary = caseSessionSummary(oldItem || {}, selectedCaseId);
   if (includeDetail) captureCaseViewState();
   const body = await api(
     `/api/admin/cases?limit=${casePageSize}&offset=${casePage * casePageSize}`,
@@ -1822,13 +1865,20 @@ async function refreshCases(includeDetail = false) {
   if (selectionRequest !== caseSelectionRequest || caseSelectionLoading) return;
   if (!body.cases?.length && casePage > 0 && Number(body.total || 0) > 0) {
     casePage = Math.max(0, Math.ceil(Number(body.total) / casePageSize) - 1);
-    return refreshCases(includeDetail);
+    return refreshCases(includeDetail, polling);
   }
-  cases = body.cases || [];
-  caseTotal = Number(body.total || cases.length);
-  caseHasMore = Boolean(body.hasMore);
-  workers = body.workers || {};
-  if (includeDetail && selectedCaseId) {
+  const nextCases = body.cases || [];
+  const nextTotal = Number(body.total || nextCases.length);
+  const nextHasMore = Boolean(body.hasMore);
+  const nextWorkers = body.workers || {};
+  const newItem = nextCases.find((item) => item.case_id === caseRootId(selectedCase));
+  const newSummary = caseSessionSummary(newItem || {}, selectedCaseId);
+  const running = selectedCase?.workerSession?.status === "running" ||
+    newSummary?.workerStatus === "running" || newItem?.worker_status === "running";
+  const summaryChanged = JSON.stringify(oldSummary || oldItem) !== JSON.stringify(newSummary || newItem);
+  let detailChanged = false;
+  let nextDetail = selectedCase;
+  if (includeDetail && selectedCaseId && (!polling || running || summaryChanged)) {
     const history = caseHistoryExpanded.get(selectedCaseId) ? "1" : "0";
     const detail = (
       await api(
@@ -1836,9 +1886,19 @@ async function refreshCases(includeDetail = false) {
       )
     ).case;
     if (selectionRequest !== caseSelectionRequest || caseSelectionLoading) return;
-    selectedCase = detail;
+    detailChanged = JSON.stringify(selectedCase) !== JSON.stringify(detail);
+    nextDetail = detail;
   }
-  if (!caseListResizing && !caseInteractionActive()) render();
+  if (caseListResizing || caseInteractionActive(selectionArea)) return;
+  cases = nextCases;
+  caseTotal = nextTotal;
+  caseHasMore = nextHasMore;
+  workers = nextWorkers;
+  selectedCase = nextDetail;
+  if (polling) {
+    const listChanged = oldList !== JSON.stringify([cases, caseTotal, caseHasMore, workers]);
+    if (listChanged || detailChanged) patchCasePanels(listChanged, detailChanged);
+  } else render();
 }
 
 async function reloadForRuntimeRevisionChange() {
@@ -1875,8 +1935,8 @@ async function reloadForRuntimeRevisionChange() {
 }
 
 window.setInterval(() => {
-  if (activeView === "cases" && !dirty && !caseListResizing && !caseSelectionLoading && !caseInteractionActive()) {
-    refreshCases(Boolean(selectedCase)).catch(() => {});
+  if (activeView === "cases" && !dirty && !caseListResizing && !caseSelectionLoading && !caseInteractionActive(".case-detail-scroll, .case-list-pane")) {
+    refreshCases(Boolean(selectedCase), true).catch(() => {});
   }
 }, 3000);
 

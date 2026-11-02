@@ -70,11 +70,13 @@ function caseRefreshContext(api, focused = false) {
     api, caseSelectionRequest: 0, caseSelectionLoading: 0,
     selectedCase: { case_id: "old" }, cases: [], caseTotal: 0,
     caseHasMore: false, workers: {}, casePage: 0, casePageSize: 50,
-    caseHistoryExpanded: new Map(), caseListResizing: false, casePointerSelecting: false, renders: 0,
+    caseHistoryExpanded: new Map(), caseListResizing: false, casePointerSelecting: false, renders: 0, patches: 0,
+    caseRootId: (item) => item?.case_id,
+    caseSessionSummary: (item, id) => item.caseSessionOptions?.find((option) => option.targetCaseId === id) || null,
     captureCaseViewState() {},
     document: { activeElement: { matches: () => focused } },
   });
-  vm.runInContext(`${source}; function render() { renders++; }`, context);
+  vm.runInContext(`${source}; function render() { renders++; } function patchCasePanels() { patches++; }`, context);
   return context;
 }
 
@@ -110,6 +112,67 @@ test("a selection created during an in-flight poll prevents its redraw", async (
   resolveList({ cases: [] });
   await pending;
   assert.equal(context.renders, 0);
+});
+
+test("idle case polling skips detail retrieval and redraw, but running and completed turns patch data", async () => {
+  let state = "replied";
+  let detailRequests = 0;
+  const item = () => ({ case_id: "case", worker_status: state });
+  const detail = () => ({ case_id: "case", workerSession: { status: state } });
+  const context = caseRefreshContext(async (path) => {
+    if (path.startsWith("/api/admin/cases?")) return { cases: [item()], total: 1, workers: {} };
+    detailRequests++;
+    return { case: detail() };
+  });
+  context.cases = [item()];
+  context.caseTotal = 1;
+  context.selectedCase = detail();
+  await vm.runInContext("refreshCases(true, true)", context);
+  assert.equal(detailRequests, 0);
+  assert.equal(context.patches, 0);
+  state = "running";
+  context.document.getSelection = () => ({ isCollapsed: false,
+    anchorNode: { nodeType: 1, closest: (selector) => selector === ".case-workspace" } });
+  await vm.runInContext("refreshCases(true, true)", context);
+  assert.equal(detailRequests, 1);
+  assert.equal(context.patches, 1);
+  state = "replied";
+  await vm.runInContext("refreshCases(true, true)", context);
+  assert.equal(detailRequests, 2);
+  assert.equal(context.patches, 2);
+  await vm.runInContext("refreshCases(true, true)", context);
+  assert.equal(detailRequests, 2);
+  assert.equal(context.patches, 2);
+  assert.equal(context.renders, 0);
+});
+
+test("incremental case updates retain header and session ID nodes while replacing lower data", () => {
+  const source = javascript.slice(javascript.indexOf("function patchCasePanels("), javascript.indexOf("async function refreshCases("));
+  let replacements = 0;
+  let idWrites = 0;
+  const id = { get textContent() { return "session-id"; }, set textContent(value) { idWrites++; }, title: "session-id" };
+  const tokens = { textContent: "10", title: "" };
+  const actions = { dataset: { runState: "true:0" }, replaceChildren() { assert.fail("unchanged header actions must be retained"); } };
+  const schedule = { hidden: true, textContent: "" };
+  const scroll = { replaceChildren(...nodes) { replacements++; assert.deepEqual(nodes, ["updated progress"]); } };
+  const pane = {
+    querySelectorAll: () => [id, tokens],
+    querySelector: (selector) => ({ ".inline-actions": actions, ".case-run-schedule": schedule, ".case-detail-scroll": scroll })[selector],
+  };
+  const next = {
+    querySelectorAll: () => [{ textContent: "session-id", title: "session-id" }, { textContent: "20", title: "" }],
+    querySelector: (selector) => ({ ".inline-actions": { dataset: { runState: "true:0" } }, ".case-run-schedule": schedule,
+      ".case-detail-scroll": { childNodes: ["updated progress"] } })[selector],
+  };
+  const context = vm.createContext({
+    selectedCase: { case_id: "case" }, caseWorkspaceHtml: () => "html",
+    document: { createElement: () => ({ content: { querySelector: () => next } }), querySelector: () => pane },
+    restoreCaseViewState() {}, renderHeaderControls() {}, icons() {},
+  });
+  vm.runInContext(`${source}; patchCasePanels(false, true)`, context);
+  assert.equal(idWrites, 0);
+  assert.equal(tokens.textContent, "20");
+  assert.equal(replacements, 1);
 });
 
 test("an old polling detail response cannot overwrite a newer session selection", async () => {
