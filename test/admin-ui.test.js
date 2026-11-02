@@ -70,7 +70,7 @@ function caseRefreshContext(api, focused = false) {
     api, caseSelectionRequest: 0, caseSelectionLoading: 0,
     selectedCase: { case_id: "old" }, cases: [], caseTotal: 0,
     caseHasMore: false, workers: {}, casePage: 0, casePageSize: 50,
-    caseHistoryExpanded: new Map(), caseListResizing: false, renders: 0,
+    caseHistoryExpanded: new Map(), caseListResizing: false, casePointerSelecting: false, renders: 0,
     captureCaseViewState() {},
     document: { activeElement: { matches: () => focused } },
   });
@@ -81,6 +81,34 @@ function caseRefreshContext(api, focused = false) {
 test("polling does not replace an open session dropdown", async () => {
   const context = caseRefreshContext(async () => ({ cases: [] }), true);
   await vm.runInContext("refreshCases()", context);
+  assert.equal(context.renders, 0);
+});
+
+test("polling preserves dragging and selected case text, then resumes after the selection is cleared", async () => {
+  let calls = 0;
+  const context = caseRefreshContext(async () => { calls++; return { cases: [] }; });
+  context.casePointerSelecting = true;
+  await vm.runInContext("refreshCases()", context);
+  assert.equal(calls, 0);
+  context.casePointerSelecting = false;
+  const textNode = { parentElement: { closest: (selector) => selector === ".case-workspace" } };
+  context.document.getSelection = () => ({ isCollapsed: false, anchorNode: textNode, focusNode: textNode });
+  await vm.runInContext("refreshCases()", context);
+  assert.equal(calls, 0);
+  context.document.getSelection = () => ({ isCollapsed: true });
+  await vm.runInContext("refreshCases()", context);
+  assert.equal(calls, 1);
+  assert.equal(context.renders, 1);
+});
+
+test("a selection created during an in-flight poll prevents its redraw", async () => {
+  let resolveList;
+  const context = caseRefreshContext(() => new Promise((resolve) => { resolveList = resolve; }));
+  const pending = vm.runInContext("refreshCases()", context);
+  context.document.getSelection = () => ({ isCollapsed: false,
+    anchorNode: { nodeType: 1, closest: () => true } });
+  resolveList({ cases: [] });
+  await pending;
   assert.equal(context.renders, 0);
 });
 

@@ -89,6 +89,7 @@ const caseSessionSelections = new Map();
 let caseSelectionLoading = 0;
 let caseSelectionRequest = 0;
 let caseListResizing = false;
+let casePointerSelecting = false;
 let caseWorkspaceResizeObserver = null;
 let agentDocument = null;
 let agentDirty = false;
@@ -388,7 +389,7 @@ function renderCaseDetail(item) {
         ${item.namedSession
           ? `<span class="case-session-label">Session: ${escapeHtml(item.namedSession.name)}${item.namedSession.active ? " · active" : ""}</span>`
           : ""}
-        <p class="mono">${escapeHtml(item.case_id)}</p>
+        <p class="mono">${escapeHtml(item.case_id)} <button class="button secondary icon-only compact-button" data-action="copy-case-id" data-case-id="${escapeHtml(item.case_id)}" title="复制 Case ID" aria-label="复制 Case ID"><i data-lucide="copy"></i></button></p>
         ${item.scheduledRunAt && !running ? `<p>自动运行：${time(item.scheduledRunAt)}</p>` : ""}
       </div>
       <div class="inline-actions">
@@ -1324,6 +1325,13 @@ async function load() {
   if (!caseListResizing) render();
 }
 
+document.addEventListener("pointerdown", (event) => {
+  casePointerSelecting = Boolean(event.target.closest(".case-workspace"));
+});
+document.addEventListener("pointerup", () => { casePointerSelecting = false; });
+document.addEventListener("pointercancel", () => { casePointerSelecting = false; });
+window.addEventListener("blur", () => { casePointerSelecting = false; });
+
 document.addEventListener("input", (event) => {
   if (event.target.id === "agent-editor") {
     agentDirty = true;
@@ -1579,6 +1587,9 @@ document.addEventListener("click", async (event) => {
         directorySyncing = false;
         render();
       }
+    } else if (action === "copy-case-id") {
+      await navigator.clipboard.writeText(event.target.closest("[data-case-id]").dataset.caseId);
+      showNotice("Case ID 已复制");
     } else if (action === "copy-directory-id") {
       await navigator.clipboard.writeText(
         event.target.closest("[data-directory-id]").dataset.directoryId,
@@ -1792,7 +1803,16 @@ function caseSessionSelectFocused() {
   return Boolean(document.activeElement?.matches("[data-case-session]"));
 }
 
+function caseInteractionActive() {
+  if (casePointerSelecting || caseSessionSelectFocused()) return true;
+  const selection = document.getSelection?.();
+  return Boolean(selection && !selection.isCollapsed &&
+    [selection.anchorNode, selection.focusNode].some((node) =>
+      (node?.nodeType === 1 ? node : node?.parentElement)?.closest(".case-workspace")));
+}
+
 async function refreshCases(includeDetail = false) {
+  if (caseInteractionActive()) return;
   const selectionRequest = caseSelectionRequest;
   const selectedCaseId = selectedCase?.case_id;
   if (includeDetail) captureCaseViewState();
@@ -1818,7 +1838,7 @@ async function refreshCases(includeDetail = false) {
     if (selectionRequest !== caseSelectionRequest || caseSelectionLoading) return;
     selectedCase = detail;
   }
-  if (!caseListResizing && !caseSessionSelectFocused()) render();
+  if (!caseListResizing && !caseInteractionActive()) render();
 }
 
 async function reloadForRuntimeRevisionChange() {
@@ -1855,7 +1875,7 @@ async function reloadForRuntimeRevisionChange() {
 }
 
 window.setInterval(() => {
-  if (activeView === "cases" && !dirty && !caseListResizing && !caseSelectionLoading && !caseSessionSelectFocused()) {
+  if (activeView === "cases" && !dirty && !caseListResizing && !caseSelectionLoading && !caseInteractionActive()) {
     refreshCases(Boolean(selectedCase)).catch(() => {});
   }
 }, 3000);
