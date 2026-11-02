@@ -20,7 +20,7 @@ test("case detail distinguishes next model from past model and gates Clear while
   const source = javascript.slice(javascript.indexOf("function renderCaseDetail("), javascript.indexOf("function renderCases("));
   const render = vm.runInNewContext(`${source}; renderCaseDetail`, {
     escapeHtml: (value) => String(value || ""), countText: String,
-    costText: () => "0", panelOpen: () => false, badge: () => "",
+    costText: () => "0", panelOpen: () => false, badge: () => "", time: String,
   });
   const item = { case_id: "case", workerSession: { model: "company-gpt-6.1-sol" },
     nextRuntime: { model: "gpt-6.1-sol", modelSource: "session" } };
@@ -30,6 +30,12 @@ test("case detail distinguishes next model from past model and gates Clear while
   assert.match(idle, /data-action="clear-case"[^>]*><i/);
   const running = render({ ...item, workerSession: { ...item.workerSession, status: "running" } });
   assert.match(running, /data-action="clear-case"[^>]*disabled title="请先停止 Worker"/);
+  const waiting = render({ ...item, status: "waiting", scheduledRunAt: 120_000 });
+  assert.match(waiting, /自动运行：120000/);
+  assert.match(waiting, /data-action="run-case"[^>]*>[\s\S]*?立即运行/);
+  assert.match(waiting, /data-action="discard-case"/);
+  assert.doesNotMatch(idle, /data-action="discard-case"/);
+  assert.doesNotMatch(running, /data-action="discard-case"/);
 });
 
 test("Codex config file setting round-trips through the existing home setting", () => {

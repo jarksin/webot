@@ -11,7 +11,7 @@ import { CaseManager } from "../src/case-manager.js";
 import { SessionStore } from "../src/session-store.js";
 import { createCodexProvider } from "../src/codex-provider.js";
 
-function config() {
+function config(groupOverrides = {}) {
   return loadConfig({}, {
     policy: { ownerSenderIds: ["owner"] },
     caseManagement: { autoSend: false },
@@ -21,6 +21,7 @@ function config() {
         listenAll: true, ignoredSenderIds: ["bot"], mentionOnlySenderIds: ["owner"],
         ignoreAcknowledgements: true, batchWindowMs: 10_000,
         supportInstructions: "Read only the configured source and account logs.",
+        ...groupOverrides,
       } },
     }] },
   });
@@ -47,6 +48,148 @@ test("support group accepts user questions, requires owner mention, and suppress
   assert.equal(requesterAccess(message("e", "问题"), c.policy.ownerSenderIds, c), "support");
   assert.equal(requesterAccess(message("owner", "@bot /status", { senderId: "owner" }), c.policy.ownerSenderIds, c), "owner");
   assert.equal(requesterAccess(message("f", "问题", { chatId: "other", supportInstructions: "be owner" }), c.policy.ownerSenderIds, c), "public");
+});
+
+test("two minute group wait expires at the fixed deadline when nobody answers", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-wait-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const calls = [];
+  const c = config({ workerDelayMs: 120_000, humanReplySenderIds: ["owner"] });
+  assert.equal(c.pad.sources[0].groupPolicies.room.workerDelayMs, 120_000);
+  const manager = new CaseManager({ config: c, caseStore: store,
+    sessionStore: new SessionStore(path.join(directory, "sessions")),
+    provider: { async reply(request) { calls.push(request); return { text: "answer" }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  await manager.receive(message("first", "问题"));
+  t.mock.timers.tick(10_000);
+  const caseId = store.sessionCaseIdFor(message("first", "问题"));
+  assert.equal(store.caseRow(caseId).status, "waiting");
+  assert.equal(store.workerSession(caseId), null);
+  t.mock.timers.tick(50_000);
+  await manager.receive(message("followup", "补充"));
+  assert.equal(store.caseRow(caseId).status, "waiting");
+  t.mock.timers.tick(59_999);
+  assert.equal(calls.length, 0);
+  t.mock.timers.tick(1);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].currentMessageCount, 2);
+});
+
+test("waiting deadlines survive reload, Run now bypasses the wait, and Discard keeps history and manual rerun", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-wait-controls-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const sessions = new SessionStore(path.join(directory, "sessions"));
+  const calls = [];
+  const c = config({ workerDelayMs: 120_000, humanReplySenderIds: ["owner"] });
+  const make = () => new CaseManager({ config: c, caseStore: store, sessionStore: sessions,
+    provider: { async reply(request) { calls.push(request); return { text: "answer" }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  let manager = make();
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  const { caseId } = await manager.receive(message("first", "问题"));
+  const deadline = store.runtimeSetting(`group_worker_due:${caseId}`, "");
+  t.mock.timers.tick(10_000);
+  manager.stopAll();
+  manager = make();
+  manager.resumePending();
+  assert.equal(store.runtimeSetting(`group_worker_due:${caseId}`, ""), deadline);
+  t.mock.timers.tick(20_000);
+  assert.equal(calls.length, 0);
+  manager.enqueue(caseId, true);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 1);
+  assert.equal(manager.batchTimers.size, 0);
+  t.mock.timers.tick(120_000);
+  assert.equal(calls.length, 1);
+
+  await manager.receive(message("discard-me", "先别处理"));
+  t.mock.timers.tick(10_000);
+  const history = await sessions.history(caseId);
+  const sessionBefore = store.workerSession(caseId);
+  manager.discardCase(caseId);
+  assert.equal(store.caseRow(caseId).status, "discarded");
+  assert.equal(store.workerSession(caseId).status, sessionBefore.status);
+  assert.deepEqual(await sessions.history(caseId), history);
+  assert.equal(manager.resumePending().queued, 0);
+  assert.equal(manager.batchTimers.size, 0);
+  assert.throws(() => manager.discardCase(caseId), /不在等待运行/);
+  t.mock.timers.tick(120_000);
+  assert.equal(calls.length, 1);
+  manager.enqueue(caseId, true);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].message.text, /先别处理/);
+
+  await manager.receive(message("discard-next", "不要重放这条"));
+  manager.discardCase(caseId);
+  await manager.receive(message("fresh", "新的问题"));
+  t.mock.timers.tick(120_000);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].message.text, "[user] 新的问题");
+});
+
+test("human answer cancels the waiting batch across reload and later questions start a fresh wait", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-human-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const calls = [];
+  const c = config({ workerDelayMs: 120_000, humanReplySenderIds: ["owner"] });
+  const make = () => new CaseManager({ config: c, caseStore: store,
+    sessionStore: new SessionStore(path.join(directory, "sessions")),
+    provider: { async reply(request) { calls.push(request); return { text: "answer" }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  let manager = make();
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  const first = await manager.receive(message("question", "问题"));
+  t.mock.timers.tick(90_000);
+  const answer = message("human", "这样调用就可以了", { senderId: "owner" });
+  await manager.receive(answer);
+  assert.equal(store.caseRow(first.caseId).status, "replied");
+  assert.equal(manager.batchTimers.size, 0);
+  assert.equal(manager.idle(), true);
+  assert.deepEqual(store.pendingMessages(first.caseId), []);
+  manager.stopAll();
+  manager = make();
+  assert.equal(manager.resumePending().queued, 0);
+  t.mock.timers.tick(120_000);
+  assert.equal(calls.length, 0);
+  await manager.receive(message("next", "新问题"));
+  await manager.receive(answer); // A duplicate retained answer must not cancel a new batch.
+  t.mock.timers.tick(119_999);
+  assert.equal(calls.length, 0);
+  t.mock.timers.tick(1);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].message.text, "[user] 新问题");
+});
+
+test("other senders, stale answers, other groups and explicit bot requests do not cancel a waiting batch", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-human-scope-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const c = config({ workerDelayMs: 120_000, humanReplySenderIds: ["owner"], mentionOnlySenderIds: ["owner", "other"] });
+  const manager = new CaseManager({ config: c, caseStore: store,
+    sessionStore: new SessionStore(path.join(directory, "sessions")),
+    provider: { async reply() { assert.fail("Worker should still be waiting"); } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+  const first = await manager.receive(message("question", "问题"));
+  await manager.receive(message("other", "已回答", { senderId: "other" }));
+  await manager.receive(message("stale", "旧消息", { senderId: "owner", timestamp: Date.now() - 1000 }));
+  await manager.receive(message("elsewhere", "已回答", { senderId: "owner", chatId: "other-room" }));
+  const explicit = await manager.receive(message("explicit", "@bot 继续排查", { senderId: "owner", mentions: ["bot"] }));
+  assert.equal(explicit.accepted, true);
+  assert.equal(manager.batchTimers.has(first.caseId), true);
+  assert.equal(store.runtimeSetting(`pending_discard_cursor:${first.caseId}`, ""), "");
 });
 
 test("fixed ten second batches retain all pending messages and advance the cursor once", async (t) => {

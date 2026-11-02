@@ -281,6 +281,8 @@ function caseTone(value) {
 function caseStatusLabel(value) {
   return {
     new: "待处理",
+    waiting: "等待运行",
+    discarded: "已丢弃",
     running: "处理中",
     draft_ready: "待发送",
     replied: "已回复",
@@ -387,12 +389,14 @@ function renderCaseDetail(item) {
           ? `<span class="case-session-label">Session: ${escapeHtml(item.namedSession.name)}${item.namedSession.active ? " · active" : ""}</span>`
           : ""}
         <p class="mono">${escapeHtml(item.case_id)}</p>
+        ${item.scheduledRunAt && !running ? `<p>自动运行：${time(item.scheduledRunAt)}</p>` : ""}
       </div>
       <div class="inline-actions">
         <button class="button secondary" data-action="clear-case" data-case-id="${escapeHtml(item.case_id)}" ${running ? 'disabled title="请先停止 Worker"' : ''}><i data-lucide="eraser"></i><span>Clear</span></button>
         ${running
           ? `<button class="button danger" data-action="stop-case" data-case-id="${escapeHtml(item.case_id)}">停止 Worker</button>`
-          : `<button class="button secondary" data-action="run-case" data-case-id="${escapeHtml(item.case_id)}"><i data-lucide="play"></i><span>运行</span></button>`}
+          : `<button class="button secondary" data-action="run-case" data-case-id="${escapeHtml(item.case_id)}"><i data-lucide="play"></i><span>立即运行</span></button>`}
+        ${item.scheduledRunAt && !running ? `<button class="button danger" data-action="discard-case" data-case-id="${escapeHtml(item.case_id)}">丢弃</button>` : ""}
       </div>
     </div>
     <section class="codex-session-summary" aria-label="Codex Session 信息">
@@ -1682,6 +1686,14 @@ document.addEventListener("click", async (event) => {
         body: JSON.stringify({ caseId: target.dataset.caseId }),
       });
       await refreshCases(true);
+    } else if (action === "discard-case") {
+      const target = event.target.closest("[data-case-id]");
+      if (!confirm("丢弃本批待处理消息？历史上下文保留，之后仍可手动运行。")) return;
+      const result = await api("/api/admin/case/discard", {
+        method: "POST", body: JSON.stringify({ caseId: target.dataset.caseId }),
+      });
+      await refreshCases(true);
+      showNotice(result.text);
     } else if (action === "clear-case") {
       const target = event.target.closest("[data-case-id]");
       if (!confirm("清除当前上下文和模型/effort 覆盖，保留后端选择及历史记录，继续吗？")) return;

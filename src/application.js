@@ -607,6 +607,7 @@ export class WebotApplication {
   caseDetail(caseId, options) {
     const detail = this.caseStore.detail(caseId, options);
     if (!detail) return null;
+    detail.scheduledRunAt = Number(this.caseStore.runtimeSetting(`group_worker_due:${caseId}`, "0"));
     try {
       detail.nextRuntime = effectiveRuntime(this.caseStore, caseId,
         assistantConfigForMessage(this.config.assistant, this.caseStore.latestMessage(caseId)?.message || {}), this.env);
@@ -798,6 +799,10 @@ export class WebotApplication {
 
   clearCaseContext(caseId) {
     return this.caseManager.clearContext(caseId);
+  }
+
+  discardCase(caseId) {
+    return this.caseManager.discardCase(caseId);
   }
 
   resetCaseSession(caseId) {

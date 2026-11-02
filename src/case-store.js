@@ -1485,7 +1485,7 @@ export class CaseStore {
   pendingCaseIds(limit = 500) {
     return this.db.prepare(`
       SELECT case_id FROM cases
-      WHERE status='new'
+      WHERE status IN ('new', 'waiting')
       ORDER BY updated_at ASC
       LIMIT ?
     `).all(Math.min(Math.max(Number(limit) || 500, 1), 500))
@@ -1547,8 +1547,26 @@ export class CaseStore {
       ORDER BY id ASC
     `).all(caseId, Math.max(Number(afterMessageId || 0), Number(
       this.runtimeSetting(`context_clear_cursor:${caseId}`, "0"),
+    ), Number(
+      this.runtimeSetting(`pending_discard_cursor:${caseId}`, "0"),
     )))
       .map((row) => ({ ...row, message: json(row.message_json, {}) }));
+  }
+
+  markWaiting(caseId) {
+    this.db.prepare("UPDATE cases SET status='waiting' WHERE case_id=? AND status='new'").run(caseId);
+  }
+
+  discardPending(caseId, messageRowId, status = "discarded") {
+    this.setRuntimeSetting(`pending_discard_cursor:${caseId}`, String(messageRowId));
+    this.db.prepare(`
+      UPDATE cases SET status=?, last_error='', updated_at=? WHERE case_id=?
+    `).run(status, now(), caseId);
+    this.db.prepare(`
+      UPDATE worker_sessions
+      SET last_processed_message_id=MAX(last_processed_message_id, ?)
+      WHERE case_id=?
+    `).run(messageRowId, caseId);
   }
 
   drafts(caseId, limit = 50) {

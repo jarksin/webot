@@ -7,6 +7,8 @@ export function normalizeGroupPolicies(value = {}) {
       ignoredSenderIds: Array.isArray(policy.ignoredSenderIds) ? policy.ignoredSenderIds : [],
       mentionOnlySenderIds: Array.isArray(policy.mentionOnlySenderIds) ? policy.mentionOnlySenderIds : [],
       batchWindowMs: Math.min(60_000, Math.max(0, Number(policy.batchWindowMs) || 0)),
+      workerDelayMs: Math.min(120_000, Math.max(0, Number(policy.workerDelayMs) || 0)),
+      humanReplySenderIds: Array.isArray(policy.humanReplySenderIds) ? policy.humanReplySenderIds : [],
       ignoreAcknowledgements: policy.ignoreAcknowledgements === true,
       supportInstructions: String(policy.supportInstructions || "").trim(),
     },

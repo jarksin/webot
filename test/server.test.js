@@ -349,3 +349,22 @@ test("case Clear API delegates the exact case without sending a conversation com
   assert.deepEqual(calls, ["selected-case"]);
   assert.equal((await response.json()).text, "已清理当前会话");
 });
+
+test("waiting case Discard API delegates the selected case", async (t) => {
+  const calls = [];
+  const application = {
+    config: loadConfig({ WEBOT_HOST: "127.0.0.1", WEBOT_PORT: "0" }),
+    startConnectors() {}, stopConnectors() {},
+    discardCase(caseId) { calls.push(caseId); return { text: "已丢弃本批待处理消息" }; },
+  };
+  const server = createServer({ application, logger: { info() {}, warn() {}, error() {} } });
+  const address = await server.start();
+  t.after(() => server.stop());
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/admin/case/discard`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ caseId: "waiting-case" }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ["waiting-case"]);
+  assert.equal((await response.json()).text, "已丢弃本批待处理消息");
+});

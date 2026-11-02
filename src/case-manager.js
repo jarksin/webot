@@ -297,6 +297,21 @@ export class CaseManager {
         this.groupContextSettings(),
       );
       if (!decision.accepted) {
+        const policy = groupPolicyForMessage(this.config, message);
+        if (context.inserted && decision.reason === "group-mention-required" &&
+            policy?.humanReplySenderIds?.includes(message.senderId)) {
+          const caseId = this.caseStore.sessionCaseIdFor(message);
+          const latest = this.caseStore.latestMessage(caseId);
+          if (!this.running.has(caseId) && !this.forced.has(caseId) &&
+              Number(this.caseStore.runtimeSetting(`group_batch_due:${caseId}`, "0")) > 0 &&
+              latest && Number(message.timestamp) >= Number(latest.timestamp) &&
+              this.caseStore.pendingMessages(caseId,
+                this.caseStore.workerSession(caseId)?.last_processed_message_id || 0).length) {
+            this.stop(caseId);
+            this.caseStore.discardPending(caseId, latest.id, "replied");
+            this.caseStore.addProgress(caseId, 0, "大号已回复，跳过本批 Worker");
+          }
+        }
         return {
           ...decision,
           contextStored: context.inserted,
@@ -479,13 +494,20 @@ export class CaseManager {
   enqueue(caseId, force = false) {
     if (!this.caseStore.caseRow(caseId)) throw new Error("case not found");
     const latest = this.caseStore.latestMessage?.(caseId);
-    const windowMs = groupPolicyForMessage(this.config, latest?.message)?.batchWindowMs || 0;
+    const policy = groupPolicyForMessage(this.config, latest?.message);
+    const windowMs = policy?.batchWindowMs || 0;
     const key = `group_batch_due:${caseId}`;
     if (!force && windowMs > 0) {
       let due = Number(this.caseStore.runtimeSetting(key, "0"));
       if (!due) {
         due = Date.now() + windowMs;
         this.caseStore.setRuntimeSetting(key, String(due));
+      }
+      const workerKey = `group_worker_due:${caseId}`;
+      let workerDue = Number(this.caseStore.runtimeSetting(workerKey, "0"));
+      if (!workerDue && policy.workerDelayMs > 0) {
+        workerDue = due - windowMs + Math.max(windowMs, policy.workerDelayMs);
+        this.caseStore.setRuntimeSetting(workerKey, String(workerDue));
       }
       if (due > Date.now()) {
         if (!this.batchTimers.has(caseId)) {
@@ -496,6 +518,17 @@ export class CaseManager {
           this.caseStore.addProgress(caseId, 0, `等待 ${windowMs / 1000} 秒合并群消息`);
         }
         return { queued: true, batched: true };
+      }
+      if (workerDue > Date.now()) {
+        this.caseStore.markWaiting(caseId);
+        if (!this.batchTimers.has(caseId)) {
+          this.batchTimers.set(caseId, setTimeout(() => {
+            this.batchTimers.delete(caseId);
+            this.enqueue(caseId);
+          }, workerDue - Date.now()));
+          this.caseStore.addProgress(caseId, 0, "合并完成，等待自动启动 Worker；可立即运行或丢弃");
+        }
+        return { queued: true, waiting: true };
       }
     }
     if (this.batchTimers.has(caseId)) {
@@ -587,6 +620,7 @@ export class CaseManager {
     }
     if (!pending.length) return;
     this.caseStore.setRuntimeSetting?.(`group_batch_due:${caseId}`, "0");
+    this.caseStore.setRuntimeSetting?.(`group_worker_due:${caseId}`, "0");
     // Never mix an owner's instructions with support/public requests under the
     // last sender's authority. Process contiguous access scopes in arrival order.
     const access = this.requesterAccess(pending[0].message);
@@ -991,6 +1025,7 @@ export class CaseManager {
     clearTimeout(this.batchTimers.get(caseId));
     this.batchTimers.delete(caseId);
     this.caseStore.setRuntimeSetting?.(`group_batch_due:${caseId}`, "0");
+    this.caseStore.setRuntimeSetting?.(`group_worker_due:${caseId}`, "0");
     this.queue = this.queue.filter((queuedCaseId) => queuedCaseId !== caseId);
     this.rerun.delete(caseId);
     this.forced.delete(caseId);
@@ -1011,6 +1046,19 @@ export class CaseManager {
     });
     this.caseStore.addProgress(caseId, 0, "后台 Clear：上下文与模型/effort 覆盖已清除，保留后端选择");
     return result;
+  }
+
+  discardCase(caseId) {
+    if (!this.caseStore.caseRow(caseId)) throw new Error("case not found");
+    if (this.running.has(caseId)) throw new Error("Worker 已启动，请先刷新状态。");
+    const latest = this.caseStore.latestMessage(caseId);
+    if (!latest || !Number(this.caseStore.runtimeSetting(`group_worker_due:${caseId}`, "0"))) {
+      throw new Error("当前 case 不在等待运行，请刷新状态。");
+    }
+    this.stop(caseId);
+    this.caseStore.discardPending(caseId, latest.id);
+    this.caseStore.addProgress(caseId, 0, "已丢弃本批待处理消息；历史上下文保留，可手动重新运行");
+    return { text: "已丢弃本批待处理消息" };
   }
 
   resetSession(caseId) {

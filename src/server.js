@@ -395,6 +395,11 @@ export function createServer({
           });
           return;
         }
+        if (request.method === "POST" && url.pathname === "/api/admin/case/discard") {
+          const body = JSON.parse((await readBody(request)).toString("utf8"));
+          respond(response, 200, { ok: true, ...application.discardCase(String(body.caseId || "")) });
+          return;
+        }
         if (
           request.method === "POST" &&
           url.pathname === "/api/admin/case/clear"
