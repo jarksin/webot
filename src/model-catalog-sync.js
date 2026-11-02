@@ -214,7 +214,9 @@ export async function addModelCatalogEntries(
   const available = new Set(visibleTextModelIds(body));
   const missing = requested.filter((model) => !available.has(model));
   if (missing.length) {
-    throw new Error(`custom provider did not expose model: ${missing.join(", ")}`);
+    const error = new Error(`custom provider did not expose model: ${missing.join(", ")}`);
+    error.code = "MODEL_NOT_EXPOSED";
+    throw error;
   }
   const current = readJson(runtime.catalogFile);
   const currentIds = (Array.isArray(current?.models) ? current.models : [])

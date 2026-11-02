@@ -95,6 +95,23 @@ export async function probeAndAddModel(
   env = process.env,
   options = {},
 ) {
+  if (!validModel(model)) throw new Error(`invalid model: ${clean(model)}`);
+  // The active provider is authoritative for models it already exposes.
+  // Do not mutate another CPA installation just to refresh a stale catalog.
+  try {
+    const catalog = await (options.addCatalog || addModelCatalogEntries)(
+      [clean(model)], config, env, options,
+    );
+    return {
+      ok: true, requested: clean(model), selected_model: clean(model),
+      exposed_models: [clean(model)],
+      added_models: catalog.addedModels,
+      catalog_file: catalog.catalogFile,
+      catalog_model_count: catalog.modelCount,
+    };
+  } catch (error) {
+    if (error.code !== "MODEL_NOT_EXPOSED") throw error;
+  }
   const registration = await (options.runRemote || runRemoteRegistration)(
     model,
     env,
