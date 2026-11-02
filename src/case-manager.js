@@ -561,7 +561,9 @@ export class CaseManager {
 
   latestTaskMessage(caseId) {
     let entry = this.caseStore.latestMessage(caseId);
+    const clearedThrough = Number(this.caseStore.runtimeSetting(`context_clear_cursor:${caseId}`, "0"));
     while (entry) {
+      if (entry.id <= clearedThrough) return null;
       const command = this.controlCommandForMessage(entry);
       if (!command) return entry;
       // A manual rerun must not restore a task from a cleared context.
@@ -678,6 +680,9 @@ export class CaseManager {
         this.caseStore.mediaContextBefore(trigger.message, {
           caseId,
           excludeMessageIds: pending.map((item) => item.message_id),
+          afterMessageId: this.caseStore.messageByRowId(caseId, Number(
+            this.caseStore.runtimeSetting(`context_clear_cursor:${caseId}`, "0"),
+          ))?.message_id,
         }),
       );
       const hydratedPending = await this.hydrateTelegramMediaContext(pending);
@@ -993,6 +998,22 @@ export class CaseManager {
     if (!controller) return false;
     controller.controller.abort();
     return true;
+  }
+
+  async clearContext(caseId) {
+    if (!this.caseStore.caseRow(caseId)) throw new Error("case not found");
+    if (this.running.has(caseId)) throw new Error("请先停止 Worker，再清除上下文。");
+    this.stop(caseId);
+    const result = await applyControlCommand({
+      command: { type: "clear", action: "reset" },
+      caseId, caseStore: this.caseStore, sessionStore: this.sessionStore,
+      config: this.config.assistant,
+    });
+    const latest = this.caseStore.latestMessage(caseId);
+    if (latest) this.caseStore.markControlHandled(caseId, latest.id, { discardPending: true });
+    this.caseStore.finishRun(caseId, "stopped", "", latest?.id || 0);
+    this.caseStore.addProgress(caseId, 0, "后台 Clear：上下文与模型/effort 覆盖已清除，保留后端选择");
+    return result;
   }
 
   resetSession(caseId) {

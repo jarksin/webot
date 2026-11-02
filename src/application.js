@@ -1,6 +1,8 @@
 import path from "node:path";
 import { MAX_MODEL_IMAGES } from "./inbound-images.js";
 import { markHydratedFile, MAX_MODEL_FILES } from "./inbound-files.js";
+import { effectiveRuntime } from "./control-commands.js";
+import { assistantConfigForMessage } from "./assistant-routing.js";
 import { CaseManager } from "./case-manager.js";
 import { CaseStore } from "./case-store.js";
 import {
@@ -603,7 +605,15 @@ export class WebotApplication {
   }
 
   caseDetail(caseId, options) {
-    return this.caseStore.detail(caseId, options);
+    const detail = this.caseStore.detail(caseId, options);
+    if (!detail) return null;
+    try {
+      detail.nextRuntime = effectiveRuntime(this.caseStore, caseId,
+        assistantConfigForMessage(this.config.assistant, this.caseStore.latestMessage(caseId)?.message || {}), this.env);
+    } catch (error) {
+      detail.runtimeError = error.message;
+    }
+    return detail;
   }
 
   capturedMessages(options) {
@@ -784,6 +794,10 @@ export class WebotApplication {
 
   stopCase(caseId) {
     return this.caseManager.stop(caseId);
+  }
+
+  clearCaseContext(caseId) {
+    return this.caseManager.clearContext(caseId);
   }
 
   resetCaseSession(caseId) {

@@ -397,6 +397,17 @@ export function createServer({
         }
         if (
           request.method === "POST" &&
+          url.pathname === "/api/admin/case/clear"
+        ) {
+          const body = JSON.parse((await readBody(request)).toString("utf8"));
+          respond(response, 200, {
+            ok: true,
+            ...await application.clearCaseContext(String(body.caseId || "")),
+          });
+          return;
+        }
+        if (
+          request.method === "POST" &&
           url.pathname === "/api/admin/case/session/reset"
         ) {
           const body = JSON.parse((await readBody(request)).toString("utf8"));

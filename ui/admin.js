@@ -5,6 +5,7 @@ import {
   ContactRound,
   Copy,
   Eye,
+  Eraser,
   FileText,
   Inbox,
   MessageSquare,
@@ -30,6 +31,7 @@ const iconSet = {
   ContactRound,
   Copy,
   Eye,
+  Eraser,
   FileText,
   Inbox,
   MessageSquare,
@@ -387,6 +389,7 @@ function renderCaseDetail(item) {
         <p class="mono">${escapeHtml(item.case_id)}</p>
       </div>
       <div class="inline-actions">
+        <button class="button secondary" data-action="clear-case" data-case-id="${escapeHtml(item.case_id)}" ${running ? 'disabled title="请先停止 Worker"' : ''}><i data-lucide="eraser"></i><span>Clear</span></button>
         ${running
           ? `<button class="button danger" data-action="stop-case" data-case-id="${escapeHtml(item.case_id)}">停止 Worker</button>`
           : `<button class="button secondary" data-action="run-case" data-case-id="${escapeHtml(item.case_id)}"><i data-lucide="play"></i><span>运行</span></button>`}
@@ -399,7 +402,11 @@ function renderCaseDetail(item) {
           <strong class="mono" title="${escapeHtml(session.codex_session_id || "")}">${escapeHtml(session.codex_session_id || "尚未创建")}</strong>
         </div>
         <div class="codex-session-stat">
-          <span>模型</span>
+          <span>下次使用模型${item.nextRuntime?.modelSource === "session" ? " · 会话覆盖" : ""}</span>
+          <strong>${escapeHtml(item.nextRuntime?.model || item.runtimeError || "未配置")}</strong>
+        </div>
+        <div class="codex-session-stat">
+          <span>上次运行模型</span>
           <strong>${escapeHtml(session.model || "未记录")}</strong>
         </div>
         <div class="codex-session-stat">
@@ -1675,6 +1682,15 @@ document.addEventListener("click", async (event) => {
         body: JSON.stringify({ caseId: target.dataset.caseId }),
       });
       await refreshCases(true);
+    } else if (action === "clear-case") {
+      const target = event.target.closest("[data-case-id]");
+      if (!confirm("清除当前上下文和模型/effort 覆盖，保留后端选择及历史记录，继续吗？")) return;
+      const result = await api("/api/admin/case/clear", {
+        method: "POST",
+        body: JSON.stringify({ caseId: target.dataset.caseId }),
+      });
+      await refreshCases(true);
+      showNotice(result.text);
     } else if (action === "reset-session") {
       const target = event.target.closest("[data-case-id]");
       if (!confirm("重置后下一次将创建新的 Codex Session，继续吗？")) return;

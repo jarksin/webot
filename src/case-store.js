@@ -1062,8 +1062,14 @@ export class CaseStore {
       (options.excludeMessageIds || []).map((item) => String(item || "")),
     );
     const contextCaseId = options.caseId || this.sessionCaseIdFor(message);
+    const lower = options.afterMessageId
+      ? this.syncedMessageByMessageId(message.sourceId, options.afterMessageId)
+        || this.db.prepare("SELECT timestamp, 0 AS id FROM messages WHERE message_id=? AND case_id=?")
+          .get(options.afterMessageId, contextCaseId)
+      : null;
     return rows
       .filter((row) =>
+        (!lower || row.timestamp > lower.timestamp || (row.timestamp === lower.timestamp && row.id > lower.id)) &&
         Number(row.timestamp || 0) <= Number(message.timestamp || now()) &&
         (!pad || (
           row.direction === "incoming" &&

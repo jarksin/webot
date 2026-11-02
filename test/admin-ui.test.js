@@ -16,6 +16,22 @@ const css = fs.readFileSync(
   "utf8",
 );
 
+test("case detail distinguishes next model from past model and gates Clear while running", () => {
+  const source = javascript.slice(javascript.indexOf("function renderCaseDetail("), javascript.indexOf("function renderCases("));
+  const render = vm.runInNewContext(`${source}; renderCaseDetail`, {
+    escapeHtml: (value) => String(value || ""), countText: String,
+    costText: () => "0", panelOpen: () => false, badge: () => "",
+  });
+  const item = { case_id: "case", workerSession: { model: "company-gpt-6.1-sol" },
+    nextRuntime: { model: "gpt-6.1-sol", modelSource: "session" } };
+  const idle = render(item);
+  assert.match(idle, /下次使用模型 · 会话覆盖<\/span>\s*<strong>gpt-6\.1-sol<\/strong>/);
+  assert.match(idle, /上次运行模型<\/span>\s*<strong>company-gpt-6\.1-sol<\/strong>/);
+  assert.match(idle, /data-action="clear-case"[^>]*><i/);
+  const running = render({ ...item, workerSession: { ...item.workerSession, status: "running" } });
+  assert.match(running, /data-action="clear-case"[^>]*disabled title="请先停止 Worker"/);
+});
+
 test("Codex config file setting round-trips through the existing home setting", () => {
   const source = javascript.slice(javascript.indexOf("function codexConfigFile("), javascript.indexOf("function readAssistantForm("));
   const helpers = vm.runInNewContext(`${source}; ({codexConfigFile, codexHomeFromConfigFile})`);

@@ -138,7 +138,7 @@ export function runtimeOverrides(caseStore, caseId) {
   };
 }
 
-function effectiveRuntime(caseStore, caseId, config, env) {
+export function effectiveRuntime(caseStore, caseId, config, env = process.env) {
   const overrides = runtimeOverrides(caseStore, caseId);
   const base = codexRuntimeStatus(backendConfig(config, overrides.backend), env).effective;
   return {
@@ -374,6 +374,8 @@ export async function applyControlCommand({
   }
 
   if (command.type === "clear") {
+    const latest = caseStore.latestMessage(caseId);
+    caseStore.setRuntimeSetting(`context_clear_cursor:${caseId}`, String(latest?.id || 0));
     caseStore.resetCodexSession(caseId);
     caseStore.deleteRuntimeSetting(modelRuntimeKey(caseId));
     caseStore.deleteRuntimeSetting(effortRuntimeKey(caseId));

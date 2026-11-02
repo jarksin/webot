@@ -330,3 +330,22 @@ test("returns an unhealthy status when message ingress is degraded", async () =>
   assert.deepEqual(health.ingress.degradedSourceIds, ["small-opt"]);
   await app.stop();
 });
+
+test("case Clear API delegates the exact case without sending a conversation command", async (t) => {
+  const calls = [];
+  const application = {
+    config: loadConfig({ WEBOT_HOST: "127.0.0.1", WEBOT_PORT: "0" }),
+    startConnectors() {}, stopConnectors() {},
+    async clearCaseContext(caseId) { calls.push(caseId); return { text: "已清理当前会话" }; },
+  };
+  const server = createServer({ application, logger: { info() {}, warn() {}, error() {} } });
+  const address = await server.start();
+  t.after(() => server.stop());
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/admin/case/clear`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ caseId: "selected-case" }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(calls, ["selected-case"]);
+  assert.equal((await response.json()).text, "已清理当前会话");
+});
