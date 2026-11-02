@@ -95,12 +95,16 @@ test("waiting deadlines survive reload, Run now bypasses the wait, and Discard k
   const { caseId } = await manager.receive(message("first", "问题"));
   const deadline = store.runtimeSetting(`group_worker_due:${caseId}`, "");
   t.mock.timers.tick(10_000);
+  manager.setPaused(true);
   manager.stopAll();
   manager = make();
-  manager.resumePending();
+  assert.equal(manager.resumePending().queued, 1);
+  assert.equal(manager.paused(), true);
+  assert.equal(manager.batchTimers.size, 1);
   assert.equal(store.runtimeSetting(`group_worker_due:${caseId}`, ""), deadline);
   t.mock.timers.tick(20_000);
   assert.equal(calls.length, 0);
+  manager.setPaused(false);
   manager.enqueue(caseId, true);
   await Promise.all(manager.runPromises.values());
   assert.equal(calls.length, 1);

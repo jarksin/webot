@@ -550,7 +550,7 @@ export class CaseManager {
   }
 
   resumePending() {
-    if (this.caseSettings().autoRun === false || this.paused()) {
+    if (this.caseSettings().autoRun === false) {
       return { queued: 0 };
     }
     let queued = 0;
