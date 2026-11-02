@@ -281,6 +281,7 @@ function caseTone(value) {
 function caseStatusLabel(value) {
   return {
     new: "待处理",
+    idle: "待命",
     running: "处理中",
     draft_ready: "待发送",
     replied: "已回复",

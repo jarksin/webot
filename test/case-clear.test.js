@@ -44,6 +44,8 @@ test("admin Clear discards pending context and overrides, retains records/backen
   assert.match(result.text, /已清理当前会话/);
   assert.deepEqual(await sessionStore.history(caseId), []);
   assert.equal(caseStore.workerSession(caseId).codex_session_id, "");
+  assert.equal(caseStore.workerSession(caseId).status, "idle");
+  assert.equal(caseStore.caseRow(caseId).status, "idle");
   assert.equal(caseStore.runtimeSetting(`assistant_model:${caseId}`, ""), "");
   assert.equal(caseStore.runtimeSetting(`assistant_effort:${caseId}`, ""), "");
   assert.equal(caseStore.runtimeSetting(`assistant_backend:${caseId}`, ""), "default");

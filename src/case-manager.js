@@ -1011,7 +1011,7 @@ export class CaseManager {
     });
     const latest = this.caseStore.latestMessage(caseId);
     if (latest) this.caseStore.markControlHandled(caseId, latest.id, { discardPending: true });
-    this.caseStore.finishRun(caseId, "stopped", "", latest?.id || 0);
+    this.caseStore.finishRun(caseId, "idle", "", latest?.id || 0);
     this.caseStore.addProgress(caseId, 0, "后台 Clear：上下文与模型/effort 覆盖已清除，保留后端选择");
     return result;
   }
