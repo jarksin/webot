@@ -268,6 +268,7 @@ export function acceptedMessage(message, config) {
     } else if (message.chatType === "group") {
       if (
         !source.ignoreAllowlist &&
+        !(source.groupMentionAnywhere && mentioned) &&
         !hasCaseInsensitive(source.allowedChatIds, message.chatId)
       ) {
         return { accepted: false, reason: "chat-not-allowed" };

@@ -101,6 +101,27 @@ test("native Pad self-mentions strip group aliases without guessing other mentio
   assert.equal(acceptedMessage(message, sourceConfig).reason, "group-not-triggered");
 });
 
+test("Pad group mentions can trigger outside the allowlist without widening private or unmentioned access", () => {
+  const c = loadConfig({}, { pad: { sources: [{
+    id: "small", selfId: "bot", allowedChatIds: ["known"],
+    groupMentionAnywhere: true, botNames: ["Webot"],
+    blockedChatIds: ["blocked"], blockedSenderIds: ["blocked-user"],
+  }, { id: "other", selfId: "other-bot", allowedChatIds: [] }] } });
+  const message = { transport: "pad", sourceId: "small", selfId: "bot",
+    senderId: "user", chatType: "group", chatId: "new-room", mentions: ["bot"],
+    text: "@群昵称\u2005帮忙看下", direction: "incoming" };
+  assert.equal(acceptedMessage(message, c).accepted, true);
+  assert.equal(acceptedMessage({ ...message, mentions: [], text: "@Webot 帮忙看下" }, c).accepted, true);
+  assert.equal(acceptedMessage({ ...message, mentions: [], text: "普通消息" }, c).reason, "chat-not-allowed");
+  assert.equal(acceptedMessage({ ...message, mentions: ["someone-else"] }, c).reason, "chat-not-allowed");
+  assert.equal(acceptedMessage({ ...message, chatId: "blocked" }, c).reason, "chat-blocked");
+  assert.equal(acceptedMessage({ ...message, senderId: "blocked-user" }, c).reason, "sender-blocked");
+  assert.equal(acceptedMessage({ ...message, chatType: "private", chatId: "user", mentions: [], text: "普通消息" }, c).reason, "sender-not-allowed");
+  assert.equal(acceptedMessage({ ...message, sourceId: "other", selfId: "other-bot", mentions: ["other-bot"] }, c).reason, "chat-not-allowed");
+  c.pad.sources[0].keywordOnly = true;
+  assert.equal(acceptedMessage(message, c).reason, "group-not-triggered");
+});
+
 test("keyword-only Pad sources require both the allowlist and an explicit summon", () => {
   const sourceConfig = loadConfig({}, {
     pad: { sources: [{

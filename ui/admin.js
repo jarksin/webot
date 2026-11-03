@@ -736,6 +736,7 @@ function accountEditor(source) {
       ${toggle("自动通过好友申请", "source-auto-accept-friends", source.autoAcceptFriends === true, "处理新好友申请，成功后自然自我介绍；屏蔽用户除外")}
       ${toggle("自动领取红包", "source-auto-receive-red-packets", source.autoReceiveRedPackets === true, "领取私聊与群聊红包，成功后自然致谢；屏蔽用户和群聊除外")}
       ${toggle("忽略白名单", "source-ignore-allowlist", source.ignoreAllowlist === true, "允许所有个人私聊；所有群聊均可通过 @ 或触发词触发，系统账号、公众号和黑名单仍过滤")}
+      ${toggle("任意群 @ 触发", "source-group-mention-anywhere", source.groupMentionAnywhere === true, "在任意未屏蔽群里 @ 此账号即可触发，无需加入群白名单")}
       ${toggle("仅召唤词触发", "source-keyword-only", source.keywordOnly === true, "私聊与群聊均需召唤词，不以 @ 或机器人名称绕过白名单")}
       ${toggle("严格私聊白名单", "source-allowlist-only", source.allowlistOnly === true, "非白名单私聊不通过召唤词触发")}
       <div class="form-grid">
@@ -1181,6 +1182,7 @@ function readAccountForm() {
     autoAcceptFriends: document.querySelector("#source-auto-accept-friends").checked,
     autoReceiveRedPackets: document.querySelector("#source-auto-receive-red-packets").checked,
     ignoreAllowlist: document.querySelector("#source-ignore-allowlist").checked,
+    groupMentionAnywhere: document.querySelector("#source-group-mention-anywhere").checked,
     keywordOnly: document.querySelector("#source-keyword-only").checked,
     allowlistOnly: document.querySelector("#source-allowlist-only").checked,
     allowedSenderIds: parseList(document.querySelector("#source-senders").value),

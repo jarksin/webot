@@ -31,6 +31,10 @@ private and group messages; a mention alone does not trigger a reply.
 Both settings are optional and leave existing account behavior unchanged when
 disabled. Group allowlists, blacklists and self-chat controls still apply.
 
+`groupMentionAnywhere` allows a mention of the account in any unblocked group
+to pass the group allowlist. It does not bypass private-chat rules or the
+optional `keywordOnly` requirement. Unmentioned messages keep the ordinary rules.
+
 `selfChatWithoutPrefix` is an opt-in exception to `keywordOnly` for an account's
 own private self-chat. It requires `allowSelf`; associated accounts, other
 private chats and groups keep their existing trigger rules. Blacklists and

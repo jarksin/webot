@@ -148,6 +148,7 @@ export function serializeConfig(config) {
         mentionDisplayNames: { ...source.mentionDisplayNames },
         acceptSelfChatPeerMessages: source.acceptSelfChatPeerMessages,
         ignoreAllowlist: source.ignoreAllowlist,
+        groupMentionAnywhere: source.groupMentionAnywhere,
         keywordOnly: source.keywordOnly,
         allowlistOnly: source.allowlistOnly,
         allowedChatIds: [...source.allowedChatIds],

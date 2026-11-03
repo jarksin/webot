@@ -101,6 +101,7 @@ export function normalizeSource(value, env, defaults) {
       value.ignore_allowlist ?? value.ignoreAllowlist,
       false,
     ),
+    groupMentionAnywhere: boolean(value.groupMentionAnywhere, false),
     keywordOnly: boolean(value.keyword_only ?? value.keywordOnly, false),
     allowlistOnly: boolean(value.allowlist_only ?? value.allowlistOnly, false),
     allowedChatIds: new Set(

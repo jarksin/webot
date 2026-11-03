@@ -144,6 +144,7 @@ test("serialized opt settings omit callback compatibility fields", () => {
         apiUrl: "http://127.0.0.1:18102/api",
         accessToken: "secret",
         ignoreAllowlist: true,
+        groupMentionAnywhere: true,
         keywordOnly: true,
         selfChatWithoutPrefix: true,
         allowlistOnly: true,
@@ -166,6 +167,8 @@ test("serialized opt settings omit callback compatibility fields", () => {
   );
   assert.equal(source.wsUrl, "ws://127.0.0.1:18102/ws/wxid_small");
   assert.equal(source.ignoreAllowlist, true);
+  assert.equal(source.groupMentionAnywhere, true);
+  assert.equal(loadConfig({}, serializeConfig(config)).pad.sources[0].groupMentionAnywhere, true);
   assert.equal(source.keywordOnly, true);
   assert.equal(source.selfChatWithoutPrefix, true);
   assert.equal(source.allowlistOnly, true);
