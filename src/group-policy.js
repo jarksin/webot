@@ -9,6 +9,7 @@ export function normalizeGroupPolicies(value = {}) {
       batchWindowMs: Math.min(60_000, Math.max(0, Number(policy.batchWindowMs) || 0)),
       workerDelayMs: Math.min(120_000, Math.max(0, Number(policy.workerDelayMs) || 0)),
       humanReplySenderIds: Array.isArray(policy.humanReplySenderIds) ? policy.humanReplySenderIds : [],
+      intermediateRecipientId: String(policy.intermediateRecipientId || "").trim(),
       ignoreAcknowledgements: policy.ignoreAcknowledgements === true,
       supportInstructions: String(policy.supportInstructions || "").trim(),
     },

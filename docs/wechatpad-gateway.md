@@ -115,6 +115,10 @@ ID. The ordinary source allowlist and blocklist still apply. Each policy support
 - `batchWindowMs`: collect messages for a fixed window after the first trigger,
   then process all pending messages after the case cursor in one run. Messages
   arriving during a run form the next batch. The deadline survives reloads.
+- `intermediateRecipientId`: privately send intermediate agent messages to this
+  configured owner sender ID through the same source. Final replies still go to
+  the group. This group route is independent of private-chat intermediate output;
+  recipients outside `policy.ownerSenderIds` receive nothing.
 - `supportInstructions`: an owner-authored, limited support delegation. In that
   group Codex receives `support` access, without owner commands, private knowledge
   or local artifact delivery. State exact source/log/account boundaries in the

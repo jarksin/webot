@@ -685,15 +685,32 @@ export class CaseManager {
         text,
         "live",
       );
-      if (this.caseSettings().ownerIntermediateItems !== true) return;
-      if (this.requesterAccess(trigger.message) !== "owner") return;
-      if (!acceptsOwnerIntermediateItems(trigger.message)) return;
+      const recipient = groupPolicyForMessage(this.config, trigger.message)?.intermediateRecipientId;
+      let target = trigger.message;
+      let output = this.sessionOutputText(caseId, text);
+      if (recipient) {
+        if (!this.config.policy.ownerSenderIds.has(recipient)) return;
+        target = {
+          transport: trigger.message.transport,
+          sourceId: trigger.message.sourceId,
+          protocol: trigger.message.protocol,
+          selfId: trigger.message.selfId,
+          chatType: "private",
+          chatId: recipient,
+          replyTarget: recipient,
+        };
+        output = `【群处理进度：${trigger.message.chatName || trigger.message.chatId}】\n${output}`;
+      } else {
+        if (this.caseSettings().ownerIntermediateItems !== true) return;
+        if (this.requesterAccess(trigger.message) !== "owner") return;
+        if (!acceptsOwnerIntermediateItems(trigger.message)) return;
+      }
       const transport = this.transports[trigger.message.transport];
       if (!transport) return;
       try {
         const outbound = await transport.send(
-          trigger.message,
-          this.sessionOutputText(caseId, text),
+          target,
+          output,
         );
         this.caseStore.addProgress(
           caseId,

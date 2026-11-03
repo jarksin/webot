@@ -33,6 +33,59 @@ function message(id, text, extra = {}) {
     timestamp: Date.now(), ...extra };
 }
 
+test("group intermediate items go privately to the configured owner while final replies stay in the group", async (t) => {
+  for (const scenario of [
+    { recipient: "owner", sender: "user", expectedItems: 1 },
+    { recipient: "owner", sender: "owner", expectedItems: 1 },
+    { recipient: "other", sender: "user", expectedItems: 0 },
+    { recipient: "", sender: "user", expectedItems: 0 },
+    { recipient: "owner", sender: "user", sendFails: true, expectedItems: 1 },
+  ]) {
+    await t.test(JSON.stringify(scenario), async (t) => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-items-"));
+      const store = new CaseStore(path.join(directory, "case.sqlite"));
+      const c = config({ intermediateRecipientId: ` ${scenario.recipient} `, batchWindowMs: 0 });
+      c.caseManagement.autoSend = true;
+      c.caseManagement.ownerIntermediateItems = false;
+      assert.equal(c.pad.sources[0].groupPolicies.room.intermediateRecipientId, scenario.recipient);
+      const sent = [];
+      const manager = new CaseManager({ config: c, caseStore: store,
+        sessionStore: new SessionStore(path.join(directory, "sessions")),
+        requesterAccess: msg => requesterAccess(msg, c.policy.ownerSenderIds, c),
+        provider: { async reply({ onItem }) {
+          await onItem({ type: "command_execution", text: "internal command" });
+          await onItem({ type: "agent_message", text: "正在检查接口" });
+          await onItem({ type: "agent_message", text: "正在检查接口" });
+          return { text: "修复完成" };
+        } },
+        transports: { pad: { async send(target, text) {
+          sent.push({ target, text });
+          if (scenario.sendFails && target.chatType === "private") throw new Error("private send failed");
+          return { ok: true };
+        } } },
+        logger: { info() {}, warn() {}, error() {} },
+      });
+      t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+      const { caseId } = await manager.receive(message("question", "@bot 帮忙检查", {
+        senderId: scenario.sender, mentions: ["bot"], chatName: "接口支持群",
+      }));
+      await Promise.all(manager.runPromises.values());
+      const progress = sent.filter(item => item.target.chatType === "private");
+      assert.equal(progress.length, scenario.expectedItems);
+      if (progress.length) {
+        assert.equal(progress[0].target.sourceId, "small");
+        assert.equal(progress[0].target.chatId, "owner");
+        assert.equal(progress[0].target.replyTarget, "owner");
+        assert.equal(progress[0].target.senderId, undefined);
+        assert.equal(progress[0].target.mentions, undefined);
+        assert.equal(progress[0].text, "【群处理进度：接口支持群】\n正在检查接口");
+      }
+      assert.deepEqual(sent.filter(item => item.target.chatType === "group").map(item => [item.target.replyTarget, item.text]), [["room", "修复完成"]]);
+      assert.equal(store.caseRow(caseId).status, "replied");
+    });
+  }
+});
+
 test("support group accepts user questions, requires owner mention, and suppresses self and acknowledgements", () => {
   const c = config();
   for (const text of ["接口怎么调用", "好的，但是返回502", "谢谢，参数从哪取？", "好的？"]) {
