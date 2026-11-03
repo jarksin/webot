@@ -78,7 +78,7 @@ test("group intermediate items go privately to the configured owner while final 
         assert.equal(progress[0].target.replyTarget, "owner");
         assert.equal(progress[0].target.senderId, undefined);
         assert.equal(progress[0].target.mentions, undefined);
-        assert.equal(progress[0].text, "【群处理进度：接口支持群】\n正在检查接口");
+        assert.equal(progress[0].text, "正在检查接口");
       }
       assert.deepEqual(sent.filter(item => item.target.chatType === "group").map(item => [item.target.replyTarget, item.text]), [["room", "修复完成"]]);
       assert.equal(store.caseRow(caseId).status, "replied");

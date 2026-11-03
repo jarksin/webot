@@ -687,7 +687,7 @@ export class CaseManager {
       );
       const recipient = groupPolicyForMessage(this.config, trigger.message)?.intermediateRecipientId;
       let target = trigger.message;
-      let output = this.sessionOutputText(caseId, text);
+      const output = this.sessionOutputText(caseId, text);
       if (recipient) {
         if (!this.config.policy.ownerSenderIds.has(recipient)) return;
         target = {
@@ -699,7 +699,6 @@ export class CaseManager {
           chatId: recipient,
           replyTarget: recipient,
         };
-        output = `【群处理进度：${trigger.message.chatName || trigger.message.chatId}】\n${output}`;
       } else {
         if (this.caseSettings().ownerIntermediateItems !== true) return;
         if (this.requesterAccess(trigger.message) !== "owner") return;
