@@ -363,6 +363,7 @@ function renderCaseDetail(item) {
   const session = item.workerSession || {};
   const window = item.displayWindow || {};
   const running = session.status === "running";
+  const discardable = !running && (item.scheduledRunAt || ["new", "waiting"].includes(item.status));
   const liveProgress = (item.progress || []).filter(
     (entry) => entry.level === "live",
   );
@@ -392,12 +393,12 @@ function renderCaseDetail(item) {
         <p class="mono">${escapeHtml(item.case_id)} <button class="button secondary icon-only compact-button" data-action="copy-case-id" data-case-id="${escapeHtml(item.case_id)}" title="复制 Case ID" aria-label="复制 Case ID"><i data-lucide="copy"></i></button></p>
         <p class="case-run-schedule" ${item.scheduledRunAt && !running ? "" : "hidden"}>${item.scheduledRunAt && !running ? `自动运行：${time(item.scheduledRunAt)}` : ""}</p>
       </div>
-      <div class="inline-actions" data-run-state="${running}:${item.scheduledRunAt || 0}">
+      <div class="inline-actions" data-run-state="${running}:${item.scheduledRunAt || 0}:${Boolean(discardable)}">
         <button class="button secondary" data-action="clear-case" data-case-id="${escapeHtml(item.case_id)}" ${running ? 'disabled title="请先停止 Worker"' : ''}><i data-lucide="eraser"></i><span>Clear</span></button>
         ${running
           ? `<button class="button danger" data-action="stop-case" data-case-id="${escapeHtml(item.case_id)}">停止 Worker</button>`
           : `<button class="button secondary" data-action="run-case" data-case-id="${escapeHtml(item.case_id)}"><i data-lucide="play"></i><span>立即运行</span></button>`}
-        ${item.scheduledRunAt && !running ? `<button class="button danger" data-action="discard-case" data-case-id="${escapeHtml(item.case_id)}">丢弃</button>` : ""}
+        ${discardable ? `<button class="button danger" data-action="discard-case" data-case-id="${escapeHtml(item.case_id)}">丢弃</button>` : ""}
       </div>
     </div>
     <section class="codex-session-summary" aria-label="Codex Session 信息">

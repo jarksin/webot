@@ -1078,10 +1078,12 @@ export class CaseManager {
   }
 
   discardCase(caseId) {
-    if (!this.caseStore.caseRow(caseId)) throw new Error("case not found");
+    const row = this.caseStore.caseRow(caseId);
+    if (!row) throw new Error("case not found");
     if (this.running.has(caseId)) throw new Error("Worker 已启动，请先刷新状态。");
     const latest = this.caseStore.latestMessage(caseId);
-    if (!latest || !Number(this.caseStore.runtimeSetting(`group_worker_due:${caseId}`, "0"))) {
+    if (!latest || (!["new", "waiting"].includes(row.status) &&
+        !Number(this.caseStore.runtimeSetting(`group_worker_due:${caseId}`, "0")))) {
       throw new Error("当前 case 不在等待运行，请刷新状态。");
     }
     this.stop(caseId);

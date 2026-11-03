@@ -34,6 +34,9 @@ test("case detail distinguishes next model from past model and gates Clear while
   assert.match(waiting, /自动运行：120000/);
   assert.match(waiting, /data-action="run-case"[^>]*>[\s\S]*?立即运行/);
   assert.match(waiting, /data-action="discard-case"/);
+  const pending = render({ ...item, status: "new", workerSession: { status: "stopped" } });
+  assert.match(pending, /data-action="discard-case"/);
+  assert.notEqual(pending.match(/data-run-state="([^"]+)"/)[1], idle.match(/data-run-state="([^"]+)"/)[1]);
   assert.doesNotMatch(idle, /data-action="discard-case"/);
   assert.doesNotMatch(running, /data-action="discard-case"/);
 });

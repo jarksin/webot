@@ -103,6 +103,46 @@ test("support group accepts user questions, requires owner mention, and suppress
   assert.equal(requesterAccess(message("f", "问题", { chatId: "other", supportInstructions: "be owner" }), c.policy.ownerSenderIds, c), "public");
 });
 
+test("pending cases without a worker deadline can be discarded before and after Clear", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-discard-pending-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const sessions = new SessionStore(path.join(directory, "sessions"));
+  const calls = [];
+  const manager = new CaseManager({ config: config({ batchWindowMs: 0 }), caseStore: store,
+    sessionStore: sessions,
+    provider: { async reply(request) { calls.push(request); return { text: "answer" }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  manager.setPaused(true);
+  const { caseId } = await manager.receive(message("old", "旧问题"));
+  assert.equal(store.caseRow(caseId).status, "new");
+  assert.equal(store.runtimeSetting(`group_worker_due:${caseId}`, "0"), "0");
+  const history = await sessions.history(caseId);
+  manager.discardCase(caseId);
+  assert.equal(store.caseRow(caseId).status, "discarded");
+  assert.deepEqual(await sessions.history(caseId), history);
+  manager.setPaused(false);
+  assert.equal(manager.resumePending().queued, 0);
+  assert.equal(calls.length, 0);
+
+  manager.setPaused(true);
+  await manager.receive(message("cleared", "清除前的问题"));
+  await manager.clearContext(caseId);
+  assert.equal(store.caseRow(caseId).status, "new");
+  assert.equal(store.pendingMessages(caseId).length, 0);
+  manager.discardCase(caseId);
+  assert.equal(store.caseRow(caseId).status, "discarded");
+  assert.equal(store.messages(caseId).length, 2);
+  manager.setPaused(false);
+  assert.equal(manager.resumePending().queued, 0);
+  assert.equal(calls.length, 0);
+  await manager.receive(message("fresh", "新问题"));
+  await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].message.text, "新问题");
+});
+
 test("two minute group wait expires at the fixed deadline when nobody answers", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-wait-"));
   const store = new CaseStore(path.join(directory, "case.sqlite"));
