@@ -18,6 +18,7 @@ function fixture() {
     caseStore: {
       runtimeSetting: () => "0",
       caseRow: () => ({}),
+      pendingCaseIds: () => [],
       addProgress() {},
     },
     logger: { info() {}, warn() {}, error() {} },

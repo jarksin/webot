@@ -4,6 +4,25 @@ import crypto from "node:crypto";
 import { loadConfig } from "../src/config.js";
 import { createServer } from "../src/server.js";
 
+test("global worker Discard API delegates queue cleanup without changing pause state", async (context) => {
+  let calls = 0;
+  const application = {
+    config: loadConfig({ WEBOT_HOST: "127.0.0.1", WEBOT_PORT: "0" }),
+    startConnectors() {}, stopConnectors() {},
+    discardWorkerQueue() {
+      calls++;
+      return { discardedCaseIds: ["queued-case"], workers: { paused: true, queued: 0 } };
+    },
+  };
+  const server = createServer({ application, logger: { info() {}, warn() {}, error() {} } });
+  const address = await server.start();
+  context.after(() => server.stop());
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/admin/workers/discard`, { method: "POST" });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true, discardedCaseIds: ["queued-case"], workers: { paused: true, queued: 0 } });
+  assert.equal(calls, 1);
+});
+
 test("local channel activation API passes a source-scoped enable command", async (context) => {
   const commands = [];
   const application = {

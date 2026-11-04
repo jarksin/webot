@@ -1092,6 +1092,23 @@ export class CaseManager {
     return { text: "已丢弃本批待处理消息" };
   }
 
+  queuedCaseIds() {
+    return [...new Set([...this.queue, ...this.rerun, ...this.batchTimers.keys(),
+      ...this.caseStore.pendingCaseIds()])].filter((caseId) => !this.running.has(caseId));
+  }
+
+  discardQueue() {
+    if (!this.paused()) throw new Error("请先关闭 Workers，再丢弃排队任务。");
+    const discardedCaseIds = this.queuedCaseIds();
+    for (const caseId of discardedCaseIds) {
+      const latest = this.caseStore.latestMessage(caseId);
+      this.stop(caseId);
+      if (latest) this.caseStore.discardPending(caseId, latest.id);
+      this.caseStore.addProgress(caseId, 0, "后台 Discard：已丢弃排队任务；历史上下文保留，可手动重新运行");
+    }
+    return { discardedCaseIds, workers: this.status() };
+  }
+
   resetSession(caseId) {
     if (this.running.has(caseId)) {
       throw new Error("cannot reset a running case");
@@ -1116,6 +1133,7 @@ export class CaseManager {
       draining: this.draining,
       active: this.active,
       queued: new Set([...this.queue, ...this.rerun, ...this.batchTimers.keys()]).size,
+      discardable: this.queuedCaseIds().length,
       runningCaseIds: [...this.running.keys()],
       stopRunningSupported: true,
     };

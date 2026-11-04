@@ -25,6 +25,13 @@ until both running tasks and the task queue are empty. New tasks retain priority
 while a reload is waiting. Only the final switch briefly reserves scheduling;
 an abandoned switch releases that reservation automatically.
 
+When Workers are OFF and no task is running, saved connector settings can apply
+without draining the paused queue. The queue and paused state are retained.
+Connection detection uses saved settings and does not overwrite form edits.
+The header's `Discard` button is available while Workers are OFF; it abandons
+queued and waiting tasks while keeping history and running tasks. Discarded
+cases can still be run manually.
+
 `allowlistOnly` prevents private bot-name commands from bypassing the private
 allowlist. `keywordOnly` additionally requires a configured summon word in
 private and group messages; a mention alone does not trigger a reply.

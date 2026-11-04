@@ -449,6 +449,13 @@ export function createServer({
         }
         if (
           request.method === "POST" &&
+          url.pathname === "/api/admin/workers/discard"
+        ) {
+          respond(response, 200, { ok: true, ...application.discardWorkerQueue() });
+          return;
+        }
+        if (
+          request.method === "POST" &&
           url.pathname === "/api/admin/workers/drain"
         ) {
           const body = JSON.parse((await readBody(request)).toString("utf8") || "{}");

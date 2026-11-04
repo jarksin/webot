@@ -250,6 +250,9 @@ export class WebotApplication {
   }
 
   async applySettings(settings) {
+    const queued = this.caseManager?.paused()
+      ? this.caseManager.queue.map((caseId) => ({ caseId, force: this.caseManager.forced.has(caseId) }))
+      : [];
     await this.stopConnectors();
     this.config = loadConfig(this.env, settings);
     if (!this.caseStore) {
@@ -386,6 +389,10 @@ export class WebotApplication {
       : [];
     telegramTransport.setClients(this.telegramClients);
     if (this.connectorsStarted) await this.startConnectors();
+    for (const { caseId, force } of queued) {
+      if (force) this.caseManager.forced.add(caseId);
+      this.caseManager.enqueue(caseId, force);
+    }
   }
 
   async receive(message) {
@@ -817,6 +824,10 @@ export class WebotApplication {
     return this.caseManager.setPaused(paused);
   }
 
+  discardWorkerQueue() {
+    return this.caseManager.discardQueue();
+  }
+
   beginWorkerDrain({ draining = true, stopRunning = false } = {}) {
     if (draining === false) {
       this.caseManager.idleDrain?.release();
@@ -868,9 +879,7 @@ export class WebotApplication {
         apply: { mode: "dynamic", reasons: [] },
       };
     }
-    const reservation = !this.padAutomaticReplies && this.caseManager?.idle()
-      ? this.caseManager.reserveIdle()
-      : null;
+    const reservation = this.reserveSettingsApply();
     if (this.caseManager && !reservation) {
       this.pendingSettings = saved;
       this.schedulePendingSettingsApply();
@@ -886,6 +895,9 @@ export class WebotApplication {
         },
       };
     }
+    clearTimeout(this.settingsApplyTimer);
+    this.settingsApplyTimer = null;
+    this.pendingSettings = null;
     this.settingsApplying = true;
     try {
       await this.applySettings(saved);
@@ -933,12 +945,7 @@ export class WebotApplication {
     const applyWhenIdle = async () => {
       this.settingsApplyTimer = null;
       if (!this.pendingSettings) return;
-      if (this.padAutomaticReplies || !this.caseManager?.idle()) {
-        this.settingsApplyTimer = setTimeout(applyWhenIdle, 100);
-        this.settingsApplyTimer.unref?.();
-        return;
-      }
-      const reservation = this.caseManager.reserveIdle();
+      const reservation = this.reserveSettingsApply();
       if (!reservation) {
         this.settingsApplyTimer = setTimeout(applyWhenIdle, 100);
         this.settingsApplyTimer.unref?.();
@@ -964,14 +971,23 @@ export class WebotApplication {
     this.settingsApplyTimer.unref?.();
   }
 
+  reserveSettingsApply() {
+    if (this.padAutomaticReplies || !this.caseManager) return null;
+    if (this.caseManager.paused() && this.caseManager.active === 0 && !this.caseManager.draining) {
+      return this.caseManager.reserveDrain({ mode: "settings" });
+    }
+    return this.caseManager.idle() ? this.caseManager.reserveIdle() : null;
+  }
+
   settings() {
+    const config = this.pendingSettings ? loadConfig(this.env, this.pendingSettings) : this.config;
     const settings = this.settingsStore.publicSettings(
-      serializeConfig(this.config),
+      serializeConfig(config),
       { preferFallback: true },
     );
     settings.assistant ||= {};
     settings.assistant.workingDirectory =
-      this.config.assistant.workingDirectory;
+      config.assistant.workingDirectory;
     return settings;
   }
 
@@ -1004,7 +1020,8 @@ export class WebotApplication {
   }
 
   async testOpt(sourceId) {
-    const source = this.config.pad.sources.find(
+    const config = this.pendingSettings ? loadConfig(this.env, this.pendingSettings) : this.config;
+    const source = config.pad.sources.find(
       (candidate) => candidate.id === sourceId,
     );
     if (!source) throw new Error(`gateway source not found: ${sourceId}`);

@@ -1124,6 +1124,10 @@ function renderHeaderControls() {
   workerControl.classList.toggle("worker-off", !workerEnabled);
   document.querySelector("#worker-label").textContent =
     workerEnabled ? "Workers ON" : "Workers OFF";
+  const discard = document.querySelector("#discard-worker-queue");
+  const discardable = Number(workers.discardable || 0);
+  discard.textContent = `Discard (${discardable})`;
+  discard.disabled = workerEnabled || discardable === 0;
 
   const autoReplyEnabled = settings.caseManagement?.autoSend !== false;
   document.querySelector("#auto-reply-toggle").checked = autoReplyEnabled;
@@ -1550,7 +1554,7 @@ document.addEventListener("click", async (event) => {
         body: JSON.stringify({ sourceId: settings.pad.sources[selectedSource].id }),
       });
       showNotice(result.source.ready ? "连接检测通过" : `连接未就绪：${result.source.lastError || result.source.state}`);
-      await load();
+      status = await api("/api/admin/status");
     } else if (action === "directory-search") {
       directorySource = document.querySelector("#directory-source").value;
       directoryType = document.querySelector("#directory-type").value;
@@ -1756,6 +1760,11 @@ document.addEventListener("click", async (event) => {
       casePage += 1;
       selectedCase = null;
       await refreshCases(false);
+    } else if (action === "discard-queue") {
+      if (!confirm("丢弃全部排队任务？正在运行的任务继续执行，历史上下文保留，之后可手动运行。")) return;
+      const result = await api("/api/admin/workers/discard", { method: "POST" });
+      await refreshCases(true);
+      showNotice(`已丢弃 ${result.discardedCaseIds.length} 个排队任务`);
     } else if (action === "workers-toggle") {
       readCurrentForm();
       await api("/api/admin/workers/pause", {

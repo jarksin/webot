@@ -54,6 +54,45 @@ test("Codex config file setting round-trips through the existing home setting", 
   assert.match(javascript, /escapeHtml\(codex\.configFile/);
 });
 
+test("connection detection preserves settings edits made while the request is in flight", async () => {
+  const source = javascript.slice(javascript.indexOf('} else if (action === "test-source") {') + '} else if (action === "test-source") {'.length,
+    javascript.indexOf('} else if (action === "directory-search") {'));
+  let release;
+  const settings = { pad: { sources: [{ id: "fixture", wsUrl: "wss://saved.invalid/ws/bot" }] } };
+  const context = vm.createContext({ settings, selectedSource: 0, dirty: false,
+    readAccountForm() {}, showNotice() {}, status: {},
+    load() { assert.fail("probe must not reload saved settings over local edits"); },
+    api: async route => route.endsWith("/test") ? new Promise(resolve => { release = resolve; }) : { ok: true },
+  });
+  const operation = vm.runInContext(`(async () => {${source}})()`, context);
+  settings.pad.sources[0].wsUrl = "wss://edited.invalid/ws/bot";
+  context.dirty = true;
+  release({ source: { ready: true } });
+  await operation;
+  assert.equal(settings.pad.sources[0].wsUrl, "wss://edited.invalid/ws/bot");
+  assert.equal(context.dirty, true);
+});
+
+test("global Discard shows pending count and requires paused workers", () => {
+  assert.match(html, /id="discard-worker-queue" data-action="discard-queue"/);
+  const source = javascript.slice(javascript.indexOf("function renderHeaderControls("), javascript.indexOf("function render()"));
+  const elements = new Map();
+  const get = selector => {
+    if (!elements.has(selector)) elements.set(selector, { classList: { toggle() {} } });
+    return elements.get(selector);
+  };
+  const context = vm.createContext({ settings: {}, workers: { paused: false, discardable: 2 }, document: { querySelector: get } });
+  vm.runInContext(`${source}; renderHeaderControls()`, context);
+  assert.equal(get("#discard-worker-queue").textContent, "Discard (2)");
+  assert.equal(get("#discard-worker-queue").disabled, true);
+  context.workers.paused = true;
+  vm.runInContext("renderHeaderControls()", context);
+  assert.equal(get("#discard-worker-queue").disabled, false);
+  context.workers.discardable = 0;
+  vm.runInContext("renderHeaderControls()", context);
+  assert.equal(get("#discard-worker-queue").disabled, true);
+});
+
 function adminRequest(status, body) {
   const source = javascript.slice(
     javascript.indexOf("async function api("),

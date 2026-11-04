@@ -143,6 +143,58 @@ test("pending cases without a worker deadline can be discarded before and after 
   assert.equal(calls[0].message.text, "新问题");
 });
 
+test("global Discard clears paused backlog and deadlines while leaving running work and history intact", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-discard-queue-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const sessions = new SessionStore(path.join(directory, "sessions"));
+  const c = config({ workerDelayMs: 120_000 });
+  const manager = new CaseManager({ config: c, caseStore: store, sessionStore: sessions,
+    provider: { async reply() { return { text: "answer" }; } },
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  t.after(async () => { manager.stopAll(); store.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  assert.throws(() => manager.discardQueue(), /关闭 Workers/);
+  manager.setPaused(true);
+  const waiting = await manager.receive(message("wait", "等待中的问题"));
+  const queued = store.ingest(message("queued", "已排队的问题", {
+    conversationId: "private:queued", chatType: "private", chatId: "queued",
+  }), "已排队的问题").caseId;
+  manager.enqueue(queued, true);
+  const running = store.ingest(message("active", "正在处理的问题", {
+    conversationId: "private:active", chatType: "private", chatId: "active",
+  }), "正在处理的问题").caseId;
+  const controller = new AbortController();
+  manager.running.set(running, { controller });
+  manager.rerun.add(running);
+  const history = await sessions.history(waiting.caseId);
+  assert.equal(manager.status().discardable, 2);
+  const result = manager.discardQueue();
+  assert.deepEqual(new Set(result.discardedCaseIds), new Set([waiting.caseId, queued]));
+  assert.equal(result.workers.discardable, 0);
+  assert.equal(manager.queue.length, 0);
+  assert.equal(manager.batchTimers.size, 0);
+  assert.equal(manager.forced.size, 0);
+  assert.equal(manager.rerun.has(running), true);
+  assert.equal(controller.signal.aborted, false);
+  assert.equal(manager.running.has(running), true);
+  for (const id of result.discardedCaseIds) {
+    assert.equal(store.caseRow(id).status, "discarded");
+    assert.equal(store.pendingMessages(id).length, 0);
+    assert.equal(store.runtimeSetting(`group_worker_due:${id}`, "0"), "0");
+  }
+  assert.deepEqual(await sessions.history(waiting.caseId), history);
+  assert.equal(store.messages(queued).length, 1);
+  manager.running.delete(running);
+  manager.rerun.delete(running);
+  store.discardPending(running, store.latestMessage(running).id);
+  assert.equal(manager.resumePending().queued, 0);
+  manager.setPaused(false);
+  assert.equal(manager.status().active, 0);
+  manager.enqueue(queued, true);
+  await Promise.all(manager.runPromises.values());
+  assert.equal(store.workerSession(queued).run_count, 1);
+});
+
 test("two minute group wait expires at the fixed deadline when nobody answers", async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-wait-"));
   const store = new CaseStore(path.join(directory, "case.sqlite"));
