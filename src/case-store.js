@@ -1207,6 +1207,21 @@ export class CaseStore {
     );
   }
 
+  groupHandoffAfter(message, senderIds) {
+    const sourceId = String(message.sourceId || "default");
+    const trigger = this.db.prepare(`
+      SELECT id, timestamp FROM group_context_messages
+      WHERE source_id=? AND message_id=?
+    `).get(sourceId, String(message.messageId));
+    if (!trigger) return false;
+    const senders = new Set([...senderIds].map((id) => String(id).toLowerCase()));
+    return this.db.prepare(`
+      SELECT message_json FROM group_context_messages
+      WHERE source_id=? AND conversation_id=? AND (timestamp, id)>(?, ?)
+    `).all(sourceId, conversationIdFor(message), trigger.timestamp, trigger.id)
+      .some((row) => senders.has(String(json(row.message_json, {}).senderId).toLowerCase()));
+  }
+
   groupContextBefore(message, options = {}) {
     if (message?.chatType !== "group") return [];
     const limit = Math.min(
@@ -2024,6 +2039,18 @@ export class CaseStore {
       timestamp,
       caseId,
     );
+  }
+
+  supersedeDraft(caseId, draftId) {
+    this.db.prepare(`
+      UPDATE drafts SET status='superseded', error=''
+      WHERE id=? AND case_id=? AND status!='sent'
+    `).run(Number(draftId), caseId);
+    this.db.prepare(`
+      UPDATE cases SET status='replied', unread_count=0, updated_at=?
+      WHERE case_id=? AND status!='running' AND last_message_id<=COALESCE(
+        (SELECT input_cutoff_message_id FROM drafts WHERE id=?), 0)
+    `).run(now(), caseId, Number(draftId));
   }
 
   markDraftError(caseId, draftId, error) {

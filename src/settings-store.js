@@ -149,6 +149,8 @@ export function serializeConfig(config) {
         keywordOnly: source.keywordOnly,
         allowlistOnly: source.allowlistOnly,
         allowedChatIds: [...source.allowedChatIds],
+        groupReplySenderIds: [...(source.groupReplySenderIds || [])],
+        groupHandoffSenderIds: [...(source.groupHandoffSenderIds || [])],
         blockedChatIds: [...source.blockedChatIds],
         allowedSenderIds: [...source.allowedSenderIds],
         blockedSenderIds: [...source.blockedSenderIds],

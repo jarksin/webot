@@ -900,3 +900,24 @@ test("allows private bot-name prefixes without opening all private messages", ()
     "检查状态",
   );
 });
+
+test("proactive group replies require both explicit room and sender opt-in", () => {
+  const cfg = loadConfig({}, { pad: { sources: [{
+    id: "support", selfId: "bot", allowedChatIds: ["support@chatroom"],
+    groupReplySenderIds: ["customer"], groupHandoffSenderIds: ["bot"],
+  }] } });
+  const msg = { transport: "pad", sourceId: "support", selfId: "bot",
+    chatType: "group", chatId: "support@chatroom", senderId: "customer",
+    text: "How do I download this file?", direction: "incoming", mentions: [] };
+  assert.equal(acceptedMessage(msg, cfg).accepted, true);
+  assert.equal(acceptedMessage({ ...msg, senderId: "other" }, cfg).accepted, false);
+  assert.equal(acceptedMessage({ ...msg, chatId: "other@chatroom" }, cfg).accepted, false);
+  cfg.pad.sources[0].ignoreAllowlist = true;
+  assert.equal(acceptedMessage({ ...msg, chatId: "other@chatroom" }, cfg).accepted, false);
+  assert.equal(acceptedMessage({ ...msg, chatType: "private", chatId: "customer" },
+    loadConfig({}, { pad: { sources: [{ id: "support", selfId: "bot",
+      groupReplySenderIds: ["customer"], allowlistOnly: true }] } })).accepted, false);
+  const own = acceptedMessage({ ...msg, senderId: "bot", direction: "outgoing" }, cfg);
+  assert.equal(own.accepted, false);
+  assert.equal(own.retainGroupContext, true);
+});

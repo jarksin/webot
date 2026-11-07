@@ -1,6 +1,7 @@
 import path from "node:path";
 import { markHydratedImage } from "./inbound-images.js";
 import { acceptedMessage } from "./runtime.js";
+import { sourceForMessage } from "./ingress-sources.js";
 import {
   applyControlCommand,
   parseControlCommand,
@@ -842,10 +843,21 @@ export class CaseManager {
     const draft = this.caseStore.draft(caseId, draftId);
     if (!draft) throw new Error("draft not found");
     if (draft.status === "sent") return { alreadySent: true };
+    if (draft.status === "superseded") return { superseded: true };
     const target = draft.trigger_message_id
       ? this.caseStore.messageByRowId(caseId, draft.trigger_message_id)
       : this.caseStore.latestMessage(caseId);
     if (!target) throw new Error("case has no reply target");
+    const handoffSenders = target.message.transport === "pad" &&
+      target.message.chatType === "group" && this.config.pad
+      ? sourceForMessage(this.config, target.message)?.groupHandoffSenderIds
+      : null;
+    if (target.message.chatType === "group" && handoffSenders?.size &&
+        this.caseStore.groupHandoffAfter(target.message, handoffSenders)) {
+      this.caseStore.supersedeDraft(caseId, draftId);
+      this.caseStore.addProgress(caseId, 0, `draft #${draftId} 已取消：群内已接话`);
+      return { superseded: true };
+    }
     const transport = this.transports[target.message.transport];
     if (!transport) throw new Error("reply transport is unavailable");
     const artifactOutbounds = [];
