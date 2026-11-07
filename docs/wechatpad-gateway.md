@@ -47,6 +47,17 @@ own private self-chat. It requires `allowSelf`; associated accounts, other
 private chats and groups keep their existing trigger rules. Blacklists and
 assistant-echo filtering still apply.
 
+`groupReplySenderIds` opts selected senders into replies without a summon in
+explicitly allowlisted groups. It does not enable private chats or bypass
+`keywordOnly`, blacklists, or group allowlists. Other untriggered group messages
+remain conversation context. The default empty list preserves summon-only behavior.
+
+`groupHandoffSenderIds` identifies accounts whose later group messages cancel a
+pending draft before delivery. This conservative handoff avoids replying over a
+human answer; a subsequent customer question can start a new turn. Canceled
+drafts remain recorded as `superseded` and cannot be sent again. These account
+IDs affect reply scheduling only and never grant owner access.
+
 `mentionDisplayNames` maps trusted member IDs to display aliases. In group
 replies, an explicit `@alias` in generated text also adds that member to the
 gateway's native mention list, alongside the triggering sender. Private replies

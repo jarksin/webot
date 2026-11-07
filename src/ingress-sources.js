@@ -107,6 +107,12 @@ export function normalizeSource(value, env, defaults) {
     allowedChatIds: new Set(
       stringList(value.group_chat_ids ?? value.allowedChatIds),
     ),
+    groupReplySenderIds: new Set(
+      stringList(value.group_reply_sender_ids ?? value.groupReplySenderIds),
+    ),
+    groupHandoffSenderIds: new Set(
+      stringList(value.group_handoff_sender_ids ?? value.groupHandoffSenderIds),
+    ),
     blockedChatIds: new Set(
       stringList(value.blocked_chat_ids ?? value.blockedChatIds),
     ),

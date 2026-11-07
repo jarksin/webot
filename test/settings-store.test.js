@@ -249,3 +249,11 @@ test("worker timeout and owner intermediate items are configurable", () => {
   assert.equal(config.caseManagement.groupContextRetentionHours, 1);
   assert.equal(config.caseManagement.groupContextMaxMessages, 100);
 });
+
+test("round-trips proactive group reply and handoff policy", () => {
+  const config = loadConfig({}, { pad: { sources: [{ id: "support", selfId: "bot",
+    group_reply_sender_ids: ["customer"], group_handoff_sender_ids: ["human"] }] } });
+  const reloaded = loadConfig({}, serializeConfig(config));
+  assert.deepEqual([...reloaded.pad.sources[0].groupReplySenderIds], ["customer"]);
+  assert.deepEqual([...reloaded.pad.sources[0].groupHandoffSenderIds], ["human"]);
+});

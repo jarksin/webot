@@ -2026,3 +2026,35 @@ test("routes named sessions to independent worker and history state", async () =
   );
   caseStore.close();
 });
+
+test("cancels a group draft when a configured account replies during generation", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-handoff-"));
+  const caseStore = new CaseStore(path.join(directory, "webot.sqlite"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const config = loadConfig({}, { caseManagement: { autoRun: false, autoSend: true },
+    pad: { sources: [{ id: "small", selfId: "wxid_small",
+      allowedChatIds: ["room@chatroom"], groupReplySenderIds: ["group-member"],
+      groupHandoffSenderIds: ["human", "wxid_small"] }] } });
+  let sends = 0;
+  const manager = new CaseManager({ config, caseStore,
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 4),
+    provider: { async reply() { return { text: "answer" }; } },
+    requesterAccess: () => "public", transports: { pad: { async send() { sends++; } } },
+    logger: { info() {}, warn() {}, error() {} } });
+  const question = groupMessage("handoff-question", "How to download?", Date.now() - 1000);
+  const received = await manager.receive(question);
+  const target = caseStore.latestMessage(received.caseId);
+  const draft = caseStore.addDraft(received.caseId, "automatic answer", "test", {
+    triggerMessageId: target.id, inputCutoffMessageId: target.id });
+  await manager.receive({ ...groupMessage("unrelated", "hello"), chatId: "other@chatroom",
+    conversationId: "group:small:other@chatroom", senderId: "human" });
+  assert.equal(caseStore.groupHandoffAfter(question, new Set(["human"])), false);
+  await manager.receive({ ...groupMessage("human-answer", "Use the complete callback"), senderId: "human" });
+  assert.deepEqual(await manager.sendDraft(received.caseId, draft), { superseded: true });
+  assert.deepEqual(await manager.sendDraft(received.caseId, draft), { superseded: true });
+  assert.equal(caseStore.draft(received.caseId, draft).status, "superseded");
+  assert.equal(sends, 0);
+  const followup = groupMessage("new-question", "And next?", Date.now() + 1000);
+  await manager.receive(followup);
+  assert.equal(caseStore.groupHandoffAfter(followup, new Set(["human"])), false);
+});

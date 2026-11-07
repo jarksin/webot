@@ -230,7 +230,13 @@ export function acceptedMessage(message, config) {
     !outgoingPrivateBotCommand &&
     !outgoingPadGroupCommand
   ) {
-    return { accepted: false, reason: "pad-outgoing" };
+    return {
+      accepted: false, reason: "pad-outgoing",
+      ...(message.chatType === "group" &&
+        hasCaseInsensitive(source?.allowedChatIds, message.chatId) &&
+        hasCaseInsensitive(source?.groupHandoffSenderIds, message.senderId)
+        ? { retainGroupContext: true } : {}),
+    };
   }
   if (
     !source?.strictPolicy &&
@@ -347,7 +353,10 @@ export function acceptedMessage(message, config) {
     const triggered = [...groupTriggers].some((trigger) =>
       lowerText.startsWith(trigger.toLowerCase()),
     );
-    if (!mentioned && !triggered) {
+    const proactive =
+      hasCaseInsensitive(source?.allowedChatIds, message.chatId) &&
+      hasCaseInsensitive(source?.groupReplySenderIds, message.senderId);
+    if (!mentioned && !triggered && !proactive) {
       return {
         accepted: false,
         reason: "group-not-triggered",
