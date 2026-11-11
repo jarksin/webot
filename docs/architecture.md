@@ -99,6 +99,9 @@ the Codex session and account for the extra model requests.
 - A Case never runs two workers concurrently. New inbound during a Codex run is
   steered into the active turn when direct input is available; otherwise Webot
   schedules one follow-up pass over the latest persisted context.
+- Group batching does not delay active-turn steering. Compatible group member
+  messages try the running turn first; idle input and rejected follow-ups use
+  the configured batch window. Access scope checks still apply to each message.
 - Active-turn follow-ups carry the initiating request as context and explicitly
   preserve unfinished objectives, while allowing cancellation or replacement.
   The worker policy requires checking all active outcomes before a final reply.

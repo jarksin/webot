@@ -384,11 +384,6 @@ export class CaseManager {
       }
     }
     await this.sessionStore.append(ingested.caseId, "user", clean.text);
-    if (this.caseSettings().autoRun !== false &&
-        groupPolicyForMessage(this.config, clean)?.batchWindowMs > 0) {
-      this.enqueue(ingested.caseId);
-      return { accepted: true, caseId: ingested.caseId, queued: true, batched: true };
-    }
     if (this.caseSettings().autoRun !== false) {
       const activeRun = this.running.get(ingested.caseId);
       let steered = false;
@@ -451,6 +446,11 @@ export class CaseManager {
             "warn",
           );
         }
+      }
+      // Batch idle or unaccepted group input only after trying the active turn.
+      if (!steered && groupPolicyForMessage(this.config, clean)?.batchWindowMs > 0) {
+        this.enqueue(ingested.caseId);
+        return { accepted: true, caseId: ingested.caseId, queued: true, batched: true };
       }
       if (activeRun && !steered) {
         if (this.running.get(ingested.caseId) === activeRun) {

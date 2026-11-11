@@ -414,6 +414,94 @@ test("fixed ten second batches retain all pending messages and advance the curso
   assert.equal(store.workerSession(first.caseId).last_processed_message_id, 3);
 });
 
+for (const scenario of ["accepted", "rejected", "scope-changed"]) {
+  test(`batched support group tries active steering before queuing: ${scenario}`, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-steer-"));
+    const store = new CaseStore(path.join(directory, "case.sqlite"));
+    const c = config();
+    const started = Promise.withResolvers();
+    const completion = Promise.withResolvers();
+    const calls = [];
+    const steered = [];
+    const access = (msg) => requesterAccess(msg, c.policy.ownerSenderIds, c);
+    const provider = createCodexProvider({ ...c.assistant, codexBin: process.execPath }, {
+      requesterAccess: access,
+      supportInstructionsForMessage: () => c.pad.sources[0].groupPolicies.room.supportInstructions,
+      async runCodex(_config, request) {
+        calls.push(request);
+        request.onActiveTurn({ async steer(text, messageId) {
+          steered.push({ text, messageId });
+          return { accepted: scenario === "accepted" };
+        } });
+        if (calls.length === 1) {
+          started.resolve();
+          await completion.promise;
+        }
+        return { text: "answer", sessionId: `thread-${calls.length}` };
+      },
+    });
+    const manager = new CaseManager({
+      config: c, caseStore: store, provider, requesterAccess: access,
+      sessionStore: new SessionStore(path.join(directory, "sessions"), 12),
+      transports: {}, logger: { info() {}, warn() {}, error() {} },
+    });
+    t.after(async () => {
+      completion.resolve();
+      manager.stopAll();
+      await Promise.allSettled([...manager.runPromises.values()]);
+      store.close();
+      await fs.rm(directory, { recursive: true, force: true });
+    });
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"] });
+    const first = await manager.receive(message("first", "original question", { senderId: "alice" }));
+    assert.equal(calls.length, 0);
+    t.mock.timers.tick(10_000);
+    await started.promise;
+    const followup = await manager.receive(message("followup", "additional requirement", {
+      senderId: scenario === "scope-changed" ? "owner" : "bob", mentions: ["bot"],
+    }));
+    if (scenario === "accepted") {
+      assert.equal(followup.steered, true);
+      assert.equal((await manager.receive(message("third", "another supplement", {
+        senderId: "carol",
+      }))).steered, true);
+      assert.equal(steered.length, 2);
+      assert.match(steered[0].text, /additional requirement/);
+      assert.match(steered[0].text, /Sender ID: bob/);
+      assert.equal(manager.batchTimers.has(first.caseId), false);
+      assert.equal(store.runtimeSetting(`group_batch_due:${first.caseId}`, "0"), "0");
+    } else {
+      assert.equal(followup.batched, true);
+      assert.equal(steered.length, scenario === "scope-changed" ? 0 : 1);
+      if (scenario === "rejected") {
+        await manager.receive(message("third", "later supplement", { senderId: "carol" }));
+        assert.equal(steered.length, 1); // Cannot bypass an earlier rejected input.
+      }
+      t.mock.timers.tick(10_000);
+      assert.equal(calls.length, 1); // The queued pass cannot overlap the active turn.
+    }
+    completion.resolve();
+    await Promise.all(manager.runPromises.values());
+    await Promise.all(manager.runPromises.values());
+    assert.equal(calls.length, scenario === "accepted" ? 1 : 2);
+    if (scenario === "rejected") {
+      assert.match(calls[1].prompt, /\[bob\] additional requirement/);
+      assert.match(calls[1].prompt, /\[carol\] later supplement/);
+    }
+    if (scenario === "scope-changed") {
+      assert.equal(calls[1].sessionId, "");
+      assert.match(calls[1].prompt, /Access level: owner/);
+    }
+    const cursor = scenario === "scope-changed" ? 2 : 3;
+    assert.equal(store.workerSession(first.caseId).last_processed_message_id, cursor);
+    assert.equal(store.drafts(first.caseId)[0].trigger_message_id, cursor);
+    assert.equal(store.pendingMessages(first.caseId, cursor).length, 0);
+    t.mock.timers.tick(20_000);
+    assert.equal(calls.length, scenario === "accepted" ? 1 : 2);
+    assert.equal(manager.idle(), true);
+  });
+}
+
 test("mention-only contributors are retained only in allowed groups", () => {
   const c = config();
   const retained = acceptedMessage(message("note", "参数补充", { senderId: "owner" }), c);

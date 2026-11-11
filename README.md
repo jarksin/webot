@@ -49,6 +49,9 @@ reasoning settings within the same chat.
 
 Workers run serially within a Case; different Cases can run concurrently.
 Follow-up messages can steer an active Codex turn or queue a continuation.
+Group batching waits apply to idle conversations and queued continuations;
+compatible follow-ups try the active turn immediately, including messages
+from other group members with the same access scope.
 Worker execution, stored drafts, and confirmed sending are separate stages:
 **receiving a message is not proof of a reply, and a draft is not proof of
 delivery**.
