@@ -83,6 +83,96 @@ test("attachment read envelopes are internal and reject mixed or malformed repli
   }
 });
 
+test("knowledge search envelopes accept only a bounded query, never requester access", () => {
+  assert.deepEqual(parseAssistantResult('{"search_knowledge":" storage lease "}'), {
+    text: "", artifacts: [], knowledgeSearchRequest: "storage lease",
+  });
+  for (const value of [
+    { search_knowledge: "" },
+    { search_knowledge: [] },
+    { search_knowledge: "x".repeat(501) },
+    { search_knowledge: "storage", access: "owner" },
+    { search_knowledge: "storage", reply_text: "mixed reply" },
+  ]) {
+    assert.throws(() => parseAssistantResult(JSON.stringify(value)), /invalid knowledge search response/);
+  }
+});
+
+test("on-demand knowledge search retains trusted access, hides internal requests, and accounts for continuations", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-provider-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  for (const access of ["public", "support", "owner"]) {
+    let runs = 0;
+    const searches = [];
+    const progress = [];
+    const message = { text: "Check this again", senderId: "test-sender" };
+    const provider = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+      requesterAccess: () => access,
+      supportInstructionsForMessage: () => access === "support" ? "Read approved public knowledge only." : "",
+      searchKnowledge: async (query, context) => {
+        searches.push({ query, access: context.access });
+        assert.equal(context.message, message);
+        return query === message.text ? [] : [{
+          title: "Lease", path: "lease.md", content: `${context.access} approved lease procedure`,
+        }];
+      },
+      runCodex: async (_config, request) => {
+        runs += 1;
+        if (runs === 1) {
+          assert.match(request.instancePolicy, /search_knowledge/);
+          const text = '{"search_knowledge":"lease renewal"}';
+          await request.onItem?.({ text });
+          return { text, sessionId: "kb-session", requestCount: 1,
+            usage: { inputTokens: 5 }, estimatedCostUsd: 0.1 };
+        }
+        assert.equal(request.sessionId, "kb-session");
+        assert.match(request.prompt, new RegExp(`Access level: ${access}`));
+        assert.match(request.prompt, new RegExp(`${access} approved lease procedure`));
+        assert.match(request.prompt, /Continue the original task/);
+        if (access === "support") assert.match(request.prompt, /Read approved public knowledge only/);
+        await request.onItem?.({ text: "Checked the matching note." });
+        return { text: '{"reply_text":"Done","attachments":[]}', sessionId: "kb-session",
+          requestCount: 1, usage: { inputTokens: 7 }, estimatedCostUsd: 0.2 };
+      },
+    });
+    const result = await provider.reply({ caseId: `case-${access}`, message, history: [],
+      onItem: (item) => progress.push(item.text) });
+    assert.equal(result.text, "Done");
+    assert.equal(result.requestCount, 2);
+    assert.equal(result.usage.inputTokens, 12);
+    assert.ok(Math.abs(result.estimatedCostUsd - 0.3) < 0.00001);
+    assert.deepEqual(searches, [
+      { query: message.text, access }, { query: "lease renewal", access },
+    ]);
+    assert.deepEqual(progress, ["Checked the matching note."]);
+  }
+});
+
+test("knowledge retries remain bounded and preserve earlier results without a Codex session", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-retry-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const binary = path.join(directory, "codex");
+  await fs.writeFile(binary, "", { mode: 0o700 });
+  let runs = 0;
+  const provider = createCodexProvider({ codexBin: binary, codexHome: directory }, {
+    searchKnowledge: async (query) => query === "first" ? [{
+      title: "Earlier result", path: "first.md", content: "Saved first search result.",
+    }] : [],
+    runCodex: async (_config, request) => {
+      runs += 1;
+      if (runs > 1) assert.match(request.prompt, /Saved first search result/);
+      if (runs > 2) assert.match(request.prompt, /No matching approved knowledge/);
+      return JSON.stringify({ search_knowledge: ["first", "second", "third", "fourth"][runs - 1] });
+    },
+  });
+  await assert.rejects(provider.reply({
+    caseId: "case-budget", message: { text: "Original task" }, history: [],
+  }), /knowledge search request exceeds this turn's budget/);
+  assert.equal(runs, 4);
+});
+
 test("builds new and resume commands with editable Codex settings", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-codex-"));
   const binary = path.join(directory, "codex");

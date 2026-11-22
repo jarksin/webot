@@ -30,6 +30,105 @@ test("specific API knowledge outranks general deployment mentions without leakin
   assert.deepEqual(result.map((note) => note.path), ["b-api.md"]);
 });
 
+test("Chinese fragments retrieve procedures without numeric or frontmatter noise", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-chinese-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const header = "---\napproved: true\naudience: public\n---\n";
+  await fs.writeFile(path.join(directory, "capacity.md"),
+    header + "# 存储管理\n更改配额上限，延长租约。");
+  await fs.writeFile(path.join(directory, "unrelated.md"),
+    header + "# 排障\n错误码30，重试间隔5秒。");
+  const kb = new KnowledgeBaseCloud({
+    enabled: true, localDir: directory, maxNotes: 4,
+    maxCharsPerNote: 4000, requireApproved: true,
+  });
+  await kb.refreshLocalState();
+  for (const query of ["加配额", "把配额调到5", "延长30天"]) {
+    const result = await kb.search(query);
+    assert.deepEqual(result.map((note) => note.path), ["capacity.md"], query);
+  }
+  assert.deepEqual(await kb.search("30 5"), []);
+  assert.deepEqual(await kb.search("approved public"), []);
+});
+
+test("metadata phrases rank first while approval and audience remain enforced", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-metadata-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const note = [
+    "---", "approved: true", "audience: owner",
+    'triggers: ["创建key", "延期"]',
+    "aliases:", '  - "storage allocation"',
+    'tags: "容量管理"', "---", "# Operations", "Follow the approved procedure.",
+  ].join("\n");
+  await fs.writeFile(path.join(directory, "operations.md"), note);
+  await fs.writeFile(path.join(directory, "draft.md"), note.replace("approved: true", "approved: false"));
+  await fs.writeFile(path.join(directory, "undeclared.md"), note.replace("audience: owner\n", ""));
+  await fs.writeFile(path.join(directory, "general.md"),
+    "---\napproved: true\naudience: public\n---\n# General\n创建 Key、延期、storage allocation、容量管理。");
+  const kb = new KnowledgeBaseCloud({
+    enabled: true, localDir: directory, maxNotes: 4,
+    maxCharsPerNote: 4000, requireApproved: true,
+  });
+  await kb.refreshLocalState();
+  for (const query of ["帮忙创建 Key", "延期30天", "STORAGE allocation", "容量管理"]) {
+    const owner = await kb.search(query, { access: "owner" });
+    assert.equal(owner[0].path, "operations.md", query);
+    assert.ok(!owner.some((item) => item.path === "draft.md"));
+    for (const access of ["public", "support", undefined]) {
+      const visible = await kb.search(query, { access });
+      assert.deepEqual(visible.map((item) => item.path), ["general.md"]);
+    }
+  }
+  const document = await kb.readDocument("operations.md");
+  await kb.writeDocument(document.file, document.content.replace("创建key", "archive storage"), {
+    baseHash: document.hash,
+  });
+  assert.equal((await kb.search("archive storage", { access: "owner" }))[0].path, "operations.md");
+});
+
+test("long notes return relevant sections and deep matches within the character budget", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-excerpts-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const header = "---\napproved: true\naudience: owner\n---\n";
+  const content = "# Operations\nOnly act with authorization.\n\n" +
+    "## Installation\n" + "Installation background.\n".repeat(100) +
+    "\n## Storage\n" + "Storage background.\n".repeat(100) +
+    "\nCapacity adjustment: verify the saved target before applying.\n";
+  await fs.writeFile(path.join(directory, "operations.md"), header + content);
+  await fs.writeFile(path.join(directory, "unsectioned.md"),
+    header + "Background.\n".repeat(200) + "Capacity adjustment: unsectioned procedure.");
+  const kb = new KnowledgeBaseCloud({
+    enabled: true, localDir: directory, maxNotes: 2,
+    maxCharsPerNote: 400, requireApproved: true,
+  });
+  await kb.refreshLocalState();
+  const result = await kb.search("capacity adjustment", { access: "owner" });
+  assert.equal(result.length, 2);
+  for (const item of result) {
+    assert.ok(item.content.length <= 400);
+    assert.match(item.content, /Capacity adjustment:/);
+    assert.match(item.content, /\[\.\.\.\]/);
+  }
+  assert.match(result.find((item) => item.path === "operations.md").content,
+    /Only act with authorization/);
+});
+
+test("excerpt headings prefer a complete mixed-language phrase over scattered words", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-heading-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(path.join(directory, "operations.md"),
+    "---\napproved: true\naudience: owner\n---\n# Operations\nAuthorized use only.\n\n" +
+    "## 创建子 Key\nChild procedure.\n" + "Background.\n".repeat(100) +
+    "\n## 创建 Key\nRoot procedure.\n");
+  const kb = new KnowledgeBaseCloud({
+    enabled: true, localDir: directory, maxNotes: 1,
+    maxCharsPerNote: 300, requireApproved: true,
+  });
+  await kb.refreshLocalState();
+  assert.match((await kb.search("创建key", { access: "owner" }))[0].content, /Root procedure/);
+  assert.match((await kb.search("创建子key", { access: "owner" }))[0].content, /Child procedure/);
+});
+
 test("indexes approved markdown and returns bounded relevant notes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-kb-"));
   await fs.writeFile(

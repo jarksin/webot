@@ -151,6 +151,37 @@ Use the Knowledge view to edit Markdown documents. Approved knowledge must
 declare `approved: true` and an audience of `public` or `owner`. Undeclared,
 invalid, or unapproved material must not be treated as public.
 
+Search supports mixed Chinese/English queries, Chinese two-character fragments,
+and optional `triggers`, `aliases`, and `tags` in frontmatter. Use a quoted scalar,
+a JSON string array, or an indented YAML list for these fields:
+
+```yaml
+---
+approved: true
+audience: owner
+triggers: ["renew subscription", "adjust capacity"]
+aliases:
+  - "subscription operations"
+tags: ["billing"]
+---
+```
+
+Exact metadata phrases rank above ordinary body mentions; headings also receive
+extra weight. Numbers alone do not retrieve documents. Long notes return a
+bounded relevant excerpt with introductory context instead of only the beginning;
+`[...]` marks omitted content. Keep essential prerequisites in the introduction
+or the relevant procedure. Search filters approval and audience before ranking,
+does not grant operational permission, and reads current Markdown on each query.
+Private runbooks and their metadata belong in the instance knowledge directory,
+not this repository.
+
+The Codex provider can request an internal `{"search_knowledge":"focused query"}`
+continuation when the initial excerpts are insufficient or new evidence changes
+the useful keywords. Up to three distinct follow-up searches use the same trusted
+requester access as the current turn. Search requests are not delivered to chat;
+the final reply continues the original task. This is approved-knowledge retrieval,
+not permission to read arbitrary files or execute operations.
+
 Configure the trusted owner using stable sender IDs, not nicknames or group
 cards. Public users can receive permitted public answers; access to private
 files, credentials, development tools, and operational actions requires the

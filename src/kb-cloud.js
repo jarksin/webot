@@ -34,13 +34,33 @@ function run(command, args, options = {}) {
 function frontmatter(content) {
   const frontmatter = content.match(/^---\s*\n([\s\S]*?)\n---/);
   if (!frontmatter) return {};
-  return Object.fromEntries(
-    frontmatter[1]
-      .split(/\r?\n/)
-      .map((line) => line.match(/^\s*([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/))
-      .filter(Boolean)
-      .map((match) => [match[1].toLowerCase(), match[2].replace(/^['"]|['"]$/g, "")]),
-  );
+  const metadata = {};
+  let listKey = "";
+  for (const line of frontmatter[1].split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z0-9_-]+)\s*:\s*(.*?)\s*$/);
+    if (match) {
+      const key = match[1].toLowerCase();
+      const value = match[2];
+      listKey = ["triggers", "aliases", "tags"].includes(key) ? key : "";
+      if (listKey && value.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(value);
+          metadata[key] = Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : [];
+        } catch {
+          metadata[key] = [];
+        }
+      } else {
+        metadata[key] = value.replace(/^['"]|['"]$/g, "");
+      }
+      continue;
+    }
+    const item = listKey && line.match(/^\s+-\s+(.+?)\s*$/);
+    if (item) {
+      if (!Array.isArray(metadata[listKey])) metadata[listKey] = [];
+      metadata[listKey].push(item[1].replace(/^['"]|['"]$/g, ""));
+    }
+  }
+  return metadata;
 }
 
 function approved(metadata) {
@@ -67,13 +87,78 @@ function title(content, file) {
 }
 
 function terms(text) {
-  return [
-    ...new Set(
-      String(text || "")
-        .toLowerCase()
-        .match(/[\p{Script=Han}]{2,}|[a-z0-9_.-]{2,}/gu) || [],
-    ),
-  ];
+  const tokens = String(text || "")
+    .toLowerCase()
+    .match(/[\p{Script=Han}]{2,}|[a-z0-9_.-]{2,}/gu) || [];
+  const output = new Set();
+  for (const token of tokens) {
+    if (!/[\p{L}]/u.test(token)) continue;
+    output.add(token);
+    if (/^\p{Script=Han}+$/u.test(token)) {
+      const characters = [...token];
+      for (let index = 0; index < characters.length - 1; index += 1) {
+        output.add(characters.slice(index, index + 2).join(""));
+      }
+    }
+  }
+  return [...output];
+}
+
+function compact(text) {
+  return String(text || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+function metadataScore(metadata, query) {
+  let score = 0;
+  for (const [field, weight] of [["triggers", 80], ["aliases", 40], ["tags", 15]]) {
+    const values = Array.isArray(metadata[field]) ? metadata[field] : [metadata[field]];
+    for (const value of new Set(values.map(compact))) {
+      if (value.length >= 2 && /\p{L}/u.test(value) && query.includes(value)) score += weight;
+    }
+  }
+  return score;
+}
+
+function textScore(text, queryTerms) {
+  const haystack = text.toLowerCase();
+  return queryTerms.reduce((score, term) => score + (haystack.includes(term) ? 1 : 0), 0);
+}
+
+function relevantExcerpt(content, queryTerms, queryKey, maxChars) {
+  if (content.length <= maxChars) return content;
+  // Keep the introduction, then spend the remaining budget near matching text.
+  const sections = content.split(/(?=^##\s+)/m);
+  const introduction = sections[0].slice(0, Math.min(600, Math.floor(maxChars / 4)));
+  const candidates = sections.slice(1).map((section, index) => {
+    const heading = section.split("\n", 1)[0];
+    return {
+      section,
+      index,
+      score: textScore(section, queryTerms) +
+        2 * textScore(heading, queryTerms) +
+        (compact(heading).includes(queryKey) ? 4 : 0),
+    };
+  });
+  candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+  const best = candidates[0]?.score ? candidates[0].section : content;
+  const separator = "\n\n[...]\n\n";
+  const budget = Math.max(0, maxChars - introduction.length - separator.length);
+  let start = 0;
+  if (best.length > budget) {
+    const haystack = best.toLowerCase();
+    let bestScore = -1;
+    for (const term of queryTerms) {
+      const position = haystack.indexOf(term);
+      if (position < 0) continue;
+      const offset = Math.max(0, position - Math.floor(budget / 4));
+      const score = textScore(best.slice(offset, offset + budget), queryTerms);
+      if (score > bestScore) {
+        start = offset;
+        bestScore = score;
+      }
+    }
+  }
+  return `${introduction}${separator}${best.slice(start, start + budget)}`.slice(0, maxChars);
 }
 
 async function markdownFiles(root, limit = 2000) {
@@ -372,6 +457,7 @@ export class KnowledgeBaseCloud {
     const access = context.access === "owner" ? "owner" : "public";
     const queryTerms = terms(query);
     if (!queryTerms.length) return [];
+    const queryKey = compact(query);
     const files = await markdownFiles(this.config.localDir);
     const matches = [];
     for (const file of files) {
@@ -381,24 +467,22 @@ export class KnowledgeBaseCloud {
       const documentAudience = audience(metadata);
       if (access !== "owner" && documentAudience !== "public") continue;
       const content = this.renderKnowledge(source);
-      const haystack = `${path.basename(file)}\n${content}`.toLowerCase();
-      const score = queryTerms.reduce(
-        (total, term) => total +
-          (haystack.includes(term) ? 1 : 0) +
-          (title(content, file).toLowerCase().includes(term) ? 2 : 0),
-        0,
-      );
+      const body = content.replace(/^---\s*\n[\s\S]*?\n---\s*\n?/, "");
+      const score = metadataScore(metadata, queryKey) +
+        Math.min(24, textScore(body, queryTerms)) +
+        4 * textScore(title(body, file), queryTerms) +
+        textScore(path.basename(file), queryTerms);
       if (!score) continue;
       matches.push({
         title: path.basename(file, path.extname(file)),
         path: path.relative(this.config.localDir, file),
-        content: content.slice(0, this.config.maxCharsPerNote),
+        content: relevantExcerpt(body, queryTerms, queryKey, this.config.maxCharsPerNote),
         audience: documentAudience,
         score,
       });
     }
     return matches
-      .sort((left, right) => right.score - left.score)
+      .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
       .slice(0, this.config.maxNotes);
   }
 }
