@@ -383,7 +383,7 @@ export class CaseManager {
         };
       }
     }
-    await this.sessionStore.append(ingested.caseId, "user", clean.text);
+    await this.sessionStore.append(ingested.caseId, "user", clean.text, ingested.messageRow);
     if (this.caseSettings().autoRun !== false) {
       const activeRun = this.running.get(ingested.caseId);
       let steered = false;
@@ -781,6 +781,7 @@ export class CaseManager {
         conversationContext,
         mediaContext,
         currentMessageCount: pending.length,
+        currentMessageRowIds: pending.map((item) => item.id),
         signal: controller.signal,
         onItem,
         runtimeOverrides: runtimeOverrides(this.caseStore, caseId),

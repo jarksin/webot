@@ -502,6 +502,60 @@ for (const scenario of ["accepted", "rejected", "scope-changed"]) {
   });
 }
 
+test("queued scope changes retain the completed answer in the fresh Codex session", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "webot-group-history-"));
+  const store = new CaseStore(path.join(directory, "case.sqlite"));
+  const c = config({ batchWindowMs: 0 });
+  const access = (msg) => requesterAccess(msg, c.policy.ownerSenderIds, c);
+  const started = Promise.withResolvers();
+  const completion = Promise.withResolvers();
+  const calls = [];
+  let steers = 0;
+  const answer = "初始化返回 502，已恢复原实例绑定；尚未请求二维码。";
+  const provider = createCodexProvider({ ...c.assistant, codexBin: process.execPath }, {
+    requesterAccess: access,
+    supportInstructionsForMessage: () => c.pad.sources[0].groupPolicies.room.supportInstructions,
+    async runCodex(_config, request) {
+      calls.push(request);
+      request.onActiveTurn({ async steer() { steers++; return { accepted: true }; } });
+      if (calls.length === 1) {
+        started.resolve();
+        await completion.promise;
+      }
+      return { text: answer, sessionId: `thread-${calls.length}` };
+    },
+  });
+  const manager = new CaseManager({
+    config: c, caseStore: store, provider, requesterAccess: access,
+    sessionStore: new SessionStore(path.join(directory, "sessions"), 12),
+    transports: {}, logger: { info() {}, warn() {}, error() {} },
+  });
+  t.after(async () => {
+    completion.resolve();
+    manager.stopAll();
+    await Promise.allSettled([...manager.runPromises.values()]);
+    store.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  const first = await manager.receive(message("owner", "排查取码失败", {
+    senderId: "owner", mentions: ["bot"],
+  }));
+  await started.promise;
+  await manager.receive(message("followup-1", "@bot", { mentions: ["bot"] }));
+  await manager.receive(message("followup-2", "@bot", { mentions: ["bot"] }));
+  completion.resolve();
+  while (manager.runPromises.size) await Promise.all(manager.runPromises.values());
+  assert.equal(calls.length, 2);
+  assert.equal(steers, 0); // Public/support input cannot enter a privileged turn.
+  assert.equal(calls[1].sessionId, "");
+  assert.match(calls[1].prompt, /Access level: support/);
+  assert.ok(calls[1].prompt.includes(`Assistant: ${answer}`));
+  const history = calls[1].prompt.split("Bounded conversation history:\n")[1]
+    .split("\n\n")[0].trim();
+  assert.equal(history, `User: 排查取码失败\nAssistant: ${answer}`);
+  assert.equal(store.workerSession(first.caseId).last_processed_message_id, 3);
+});
+
 test("mention-only contributors are retained only in allowed groups", () => {
   const c = config();
   const retained = acceptedMessage(message("note", "参数补充", { senderId: "owner" }), c);

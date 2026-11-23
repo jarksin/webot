@@ -15,6 +15,31 @@ import {
   parseCodexSessionProgressLine,
 } from "../src/codex-session-progress.js";
 
+test("fresh sessions retain interleaved answers with legacy and identified queued history", async () => {
+  for (const identified of [false, true]) {
+    const history = [
+      { role: "user", content: "original investigation" },
+      { role: "user", content: "follow-up" },
+      { role: "user", content: "follow-up" },
+    ].map((entry, index) => ({ ...entry, ...(identified ? { messageRowId: index + 1 } : {}) }));
+    if (identified) history.push({ role: "user", content: "later owner request", messageRowId: 4 });
+    history.push({ role: "assistant", content: "completed investigation" });
+    let request;
+    const provider = createCodexProvider({ codexBin: process.execPath }, {
+      async runCodex(_config, input) { request = input; return "answer"; },
+    });
+    await provider.reply({
+      caseId: "history", message: { text: "follow-up\nfollow-up" }, history,
+      currentMessageCount: 2,
+      ...(identified ? { currentMessageRowIds: [2, 3] } : {}),
+    });
+    const previous = request.prompt.split("Bounded conversation history:\n")[1]
+      .split("\n\n")[0].trim();
+    assert.equal(previous, "User: original investigation\nAssistant: completed investigation");
+    assert.equal(request.sessionId, "");
+  }
+});
+
 test("parses a Codex session and usage from JSONL", () => {
   const parsed = parseCodexEvents([
     '{"type":"thread.started","thread_id":"session-1"}',

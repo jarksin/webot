@@ -27,9 +27,11 @@ export class SessionStore {
     return [...this.cache.get(chatKey)];
   }
 
-  async append(chatKey, role, content) {
+  async append(chatKey, role, content, messageRowId) {
     const history = await this.history(chatKey);
-    history.push({ role, content: String(content), at: Date.now() });
+    history.push({ role, content: String(content), at: Date.now(),
+      ...(messageRowId ? { messageRowId } : {}),
+    });
     const bounded = history.slice(-this.maxEntries);
     this.cache.set(chatKey, bounded);
     await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });

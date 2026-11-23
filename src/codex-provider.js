@@ -554,6 +554,7 @@ function promptFor({
   conversationContext = [],
   mediaContext = [],
   currentMessageCount = 1,
+  currentMessageRowIds = [],
   sessionId,
   knowledge,
   access,
@@ -578,8 +579,23 @@ function promptFor({
     );
   }
   if (!sessionId) {
-    const count = Math.max(1, Number(currentMessageCount || 1));
-    const previous = (history || []).slice(0, -count);
+    let currentUsers = Math.max(1, Number(currentMessageCount || 1));
+    const currentIds = new Set(currentMessageRowIds);
+    const firstCurrentId = currentMessageRowIds.length ? Math.min(...currentMessageRowIds) : Infinity;
+    for (const entry of history || []) {
+      if (entry.role === "user" && currentIds.has(entry.messageRowId)) currentUsers -= 1;
+    }
+    // Queued user messages can precede the previous turn's completed answer.
+    // Exclude current/later queued inputs by ID, retaining interleaved replies.
+    // Legacy history has no IDs; remove its remaining current user entries only.
+    const previous = (history || []).toReversed().filter((entry) => {
+      if (entry.role === "user" && entry.messageRowId) return entry.messageRowId < firstCurrentId;
+      if (entry.role === "user" && currentUsers > 0) {
+        currentUsers -= 1;
+        return false;
+      }
+      return true;
+    }).reverse();
     if (previous.length) {
       blocks.push(
         "Bounded conversation history:",
@@ -889,6 +905,7 @@ export function createCodexProvider(config, options = {}) {
       conversationContext,
       mediaContext,
       currentMessageCount,
+      currentMessageRowIds,
       signal,
       onItem,
       runtimeOverrides = {},
@@ -945,7 +962,7 @@ export function createCodexProvider(config, options = {}) {
       let continuation = "";
       const initialPrompt = promptFor({
         caseId, message, history, conversationContext, mediaContext,
-        currentMessageCount, sessionId, knowledge, access, supportInstructions, images, files,
+        currentMessageCount, currentMessageRowIds, sessionId, knowledge, access, supportInstructions, images, files,
       });
       try {
         for (;;) {
